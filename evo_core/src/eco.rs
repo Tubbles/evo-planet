@@ -803,12 +803,15 @@ impl EcoWorld {
             let mut space = (gut_cap - (self.animals[ai].gut_plant + self.animals[ai].gut_meat)).max(0.0);
 
             // --- foraging options, each as a Holling type II intake rate ---------
-            // Bite rate (kg/day) scales with M^0.75; handling time is its inverse.
-            let bite_rate = (0.3 * m34 * q).max(1e-6);
+            // Maximum intake (kg/day) scales with M^0.75: roughly a tenth of body
+            // mass per day for a kilogram animal; handling time is its inverse.
+            let bite_rate = (0.1 * m34 * q).max(1e-6);
             let handling = 1.0 / bite_rate;
             // Browsing reach: about half a metre for a 1 kg body, scaling with length.
             let reach_h = 0.5 * mass.powf(1.0 / 3.0);
-            let search = ((if in_water { 0.3 } else { 0.1 }) + speed_here) * 0.3; // fraction of patch found per day
+            // Fraction of the patch's accessible food encountered per day: a
+            // 10 m patch is covered in a day by anything that moves at all.
+            let search = (if in_water { 0.5 } else { 0.2 }) + 2.0 * speed_here;
 
             // Plants here (accessible leaf mass), plus shore plants reachable from the water.
             let mut plant_targets: Vec<(usize, f32)> = Vec::new();
@@ -819,8 +822,11 @@ impl EcoWorld {
                     continue;
                 }
                 let lf = p.body().leaf_mass / p.body().target_mass;
-                let browse = (reach_h / p.height.max(0.02)).clamp(0.1, 1.0);
-                let acc = (p.biomass - 0.004) * lf * 0.15 * browse;
+                // Browsing height matters on land; floating algae are all within reach.
+                let browse = if in_water { 1.0 } else { (reach_h / p.height.max(0.02)).clamp(0.1, 1.0) };
+                // Half the leaf tissue is takeable in a day; the plant lives on
+                // through regrowth and seeding. (A defence gene belongs here.)
+                let acc = (p.biomass - 0.004) * lf * 0.5 * browse;
                 if acc > 0.0 {
                     plant_targets.push((pi, acc));
                     plant_b += acc;
@@ -839,7 +845,7 @@ impl EcoWorld {
                             continue;
                         }
                         let lf = p.body().leaf_mass / p.body().target_mass;
-                        let acc = (p.biomass - 0.004) * lf * 0.15 * amph;
+                        let acc = (p.biomass - 0.004) * lf * 0.5 * amph;
                         if acc > 0.0 {
                             plant_targets.push((pi, acc));
                             plant_b += acc;
