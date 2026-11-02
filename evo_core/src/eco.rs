@@ -129,7 +129,8 @@ pub struct Traits {
     pub climb_water: f32,
     pub turn_air: f32,
     pub climb_air: f32,
-    /// Shore test: metres up a dry beach under its own power (0 = never got out).
+    /// Beach climb probe (not a gate any more): metres up a dry beach under
+    /// its own power. Only measured by audits.
     pub shore: f32,
     pub measured_shore: bool,
     /// Geometry-derived function (see decode::body_metrics).
@@ -1037,7 +1038,6 @@ impl EcoWorld {
         for (i, a) in self.animals.iter().enumerate() {
             animals_in[a.patch].push(i);
         }
-        let mut shore_requests: Vec<usize> = Vec::new();
         for p in self.patches.iter_mut() {
             p.canopy = 0.0;
         }
@@ -1089,10 +1089,10 @@ impl EcoWorld {
                     a.intake_rate,
                 )
             };
-            let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air, glide_ratio, measured_shore, shore_progress) = {
+            let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air, glide_ratio) = {
                 let t = &self.animals[ai].traits;
                 let sb = self.patches[patch].submersion;
-                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, sb + (1.0 - sb) * t.upright, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT, t.measured_shore, t.shore)
+                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, sb + (1.0 - sb) * t.upright, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT)
             };
             // Launch height here: the canopy plus the drop to the lowest neighbour.
             let launch_h = {
@@ -1383,7 +1383,6 @@ impl EcoWorld {
                     self.neighbours[patch].clone()
                 };
                 for cand in candidates {
-                    let cand_water = self.patches[cand].water;
                     let cand_sub = self.patches[cand].submersion;
                     // Entry needs demonstrated ability in that habitat; unmeasured
                     // young stay where they are until their body has been tested.
@@ -1394,14 +1393,9 @@ impl EcoWorld {
                     } else if cand_sub > 0.0 {
                         // The intertidal shore: reached by swimming in with the tide or crawling.
                         swims || crawls || flier
-                    } else if sub > 0.0 {
-                        // Dry land from the water or the shore: only by climbing a beach
-                        // in the physics, or by flying.
-                        if !measured_shore && (swims || crawls) {
-                            shore_requests.push(ai);
-                        }
-                        (measured_shore && shore_progress * lin_f > 0.5) || flier
                     } else {
+                        // Dry land, from the shore or from land: a crawl, a flight or a
+                        // glide. Whether it survives there is breathing and food.
                         crawls || flier || can_glide_over
                     };
                     if !can {
@@ -1474,11 +1468,6 @@ impl EcoWorld {
             } else if a.age > a.lifespan() {
                 self.stats.deaths_old += 1;
                 deaths.push(ai);
-            }
-        }
-        for ai in shore_requests {
-            if ai < self.animals.len() && !self.pending.iter().any(|(i, e)| *i == ai && *e == Environment::Shore) {
-                self.pending.push((ai, Environment::Shore));
             }
         }
         // Resolve deaths and kills.

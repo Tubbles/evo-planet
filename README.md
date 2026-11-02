@@ -191,8 +191,8 @@ count as locomotion. Nimbleness is measured too: turn rate from
 asymmetric drive and climb speed from a posture shift, used in chases.
 The shore is an intertidal band, under water half the day, where gills
 still work, algae mats grow and slow grazers can live; dry land beyond it
-is reached only by climbing a sloping beach in the body's own shore test, and then survives there only if its breathing gene has moved
-from gills toward lungs. As of this writing no walkers or fish-like
+is a crawl away, and a lineage survives there only if its breathing gene
+has moved from gills toward lungs and it finds food. As of this writing no walkers or fish-like
 swimmers have evolved in the ecology; `docs/MODEL.md` records what the
 replays actually show and what higher fidelity would cost.
 

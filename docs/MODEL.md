@@ -251,11 +251,12 @@ off the genome:
 - **Water, Land:** sustained speed over the second half of a 4 s episode
   minus the same body with motors off; turn rate from asymmetric drive;
   climb speed (water) from a posture shift.
-- **Shore:** a beach rising 12 cm per metre. The body starts submerged
-  where the water is 1.2 body heights deep and must climb out; the score
-  is metres up the dry beach with the whole body out of the water, minus
-  the motors-off control. A sea animal may enter a land patch only if it
-  scored over half a metre (scaled for juveniles), or can fly.
+- **Beach (probe only):** a bed rising 12 cm per metre through the
+  waterline; the body starts submerged and must climb out. It was briefly
+  the gate from sea to land, which made it a crutch standing in for the old
+  water-or-land switch. With the intertidal band the move inland is a
+  crawl, which the land test measures, and survival inland is breathing
+  and food. The scene stays for audits and replays.
 - **Air:** launched at 3 m/s from 10 m; glide beyond a stone, sustained
   flight if still aloft; turn and climb for fliers.
 - **Posture:** mean centre-of-mass height on land (uprightness) and the
@@ -270,8 +271,8 @@ short of water for the submerged half, and needs land tolerance only for
 the dry half, so algae mats cover the shoreline without any new gene. An
 animal there breathes with gills half the day and lungs the other half,
 swims half the day and crawls the other half, and is reached by swimming
-in with the tide or crawling. Dry land beyond the band still needs the
-beach climb. Larvae drift through water and shore alike, never onto dry
+in with the tide or crawling. Dry land beyond the band is a crawl away,
+and living there is a matter of breathing and food, not a permit. Larvae drift through water and shore alike, never onto dry
 land. Speed is also reported in body lengths per second (length taken as
 twice the reach), so a centimetre-long grazer at 2 cm/s reads as the
 mover it is; the ecology keeps absolute speed for area swept, which is
@@ -281,7 +282,7 @@ physical.
 A breathing gene runs from gills (0) to lungs (1). Gas exchange efficiency
 is 1 − 0.9·b under water and 0.1 + 0.9·b in air, blended on the patch's
 submersion, so a gill-breather on the intertidal shore gets about 0.55 and
-lives, and lungs pay off gradually as a lineage moves up the beach. Efficiency scales the day's activity and
+lives, and lungs pay off gradually as a lineage moves inland. Efficiency scales the day's activity and
 the bite rate; below 0.2 the animal suffocates with probability one half
 per day. A sea lineage that climbs the beach still dies on land unless its
 breathing has moved toward lungs, and a lung-breather drowns. Deaths by
@@ -292,7 +293,7 @@ Newborns drift one or two patches from the parent, but only through
 patches of the birth medium. Before this, sea larvae landed on beaches and
 died: 6,000 suffocations in a 3,000-day run, all of them newborns, and
 every "land animal" in the count was one of them. With it, the land count
-is zero until a lineage passes the shore test, which none has.
+was zero until the intertidal band replaced the shore gate.
 
 ### Numerical honesty
 Explicit fluid drag is capped at the force that would stop a sample's
