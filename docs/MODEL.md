@@ -319,6 +319,18 @@ Each is roughly a tenfold cost on its own axis; the browser now runs about
 ten days a second at 800 patches. Closed-loop control is the one that
 changes what evolves rather than how precisely it is measured.
 
+### Replay audit of the first "fliers" and the biggest lineage
+Forty "fliers" at day 3000 were 10 cm plates with a stick that tumble as
+they fall and drift two metres further than a stone, the same with motors
+off. That is parachuting, not gliding. The label now follows the standard
+definition: gliding is a glide angle under 45°, so a body must get ten
+metres beyond the stone from ten metres up (ratio ≥ 1) or stay aloft. The
+continuous glide ratio still feeds the ecology (a parachuter at 0.25 gets
+a quarter of the launch-height benefits), only the count and filter changed.
+The most numerous lineage (804 members) is three flat plates jammed
+together, tumbling through the water at 0.35 m/s net of a 0.33 m/s passive
+drift. The sham control handles the drift; it is still not a fish.
+
 ### Audit tooling
 `cargo run --example shore_probe -- <genome.json>...` runs bodies on the beach
 with motors on and off. `cargo run --example gait_audit -- <days> <out_dir>` re-runs the fastest

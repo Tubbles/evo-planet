@@ -1623,8 +1623,11 @@ impl EcoWorld {
                 s.aquatic += 1;
             }
             s.best_land_speed = s.best_land_speed.max(a.traits.land_speed);
-            if a.traits.air_speed > 0.0 || a.traits.glide_distance > 0.5 {
-                s.fliers += 1; // gliders (beat a thrown stone) and fliers
+            // Gliding means a glide angle under 45 degrees (ratio >= 1: ten metres
+            // beyond the stone from ten metres up). Below that it is parachuting:
+            // a tumbling plate drifts a metre or two and is not a glider.
+            if a.traits.air_speed > 0.0 || a.traits.glide_distance >= crate::sim::AIR_DROP_HEIGHT {
+                s.fliers += 1;
             }
             {
                 let mut v = [h, c, d];
@@ -1714,7 +1717,7 @@ impl EcoWorld {
             "land" => l.aquatic_share < 0.5 && l.shore_share < 0.5,
             "shore" => l.shore_share >= 0.5,
             "water" => l.aquatic_share >= 0.5,
-            "air" => l.air_speed > 0.0 || l.glide > 0.5,
+            "air" => l.air_speed > 0.0 || l.glide >= crate::sim::AIR_DROP_HEIGHT,
             _ => true,
         };
         out.retain(|l| keep(l));
@@ -1825,12 +1828,12 @@ impl EcoWorld {
             "land" => !self.patches[a.patch].water && !self.patches[a.patch].shore,
             "shore" => self.patches[a.patch].shore,
             "water" => self.patches[a.patch].water,
-            "air" => a.traits.air_speed > 0.0 || a.traits.glide_distance > 0.5,
+            "air" => a.traits.air_speed > 0.0 || a.traits.glide_distance >= crate::sim::AIR_DROP_HEIGHT,
             _ => true,
         };
         let pool: Vec<&Animal> = if members.iter().any(fits) { members.iter().copied().filter(fits).collect() } else { members };
         pool.into_iter().max_by_key(|a| (a.offspring, (a.reserve * 100.0) as i64)).map(|a| {
-            let env = if habitat == "air" && (a.traits.air_speed > 0.0 || a.traits.glide_distance > 0.5) {
+            let env = if habitat == "air" && (a.traits.air_speed > 0.0 || a.traits.glide_distance >= crate::sim::AIR_DROP_HEIGHT) {
                 Environment::Air
             } else if self.patches[a.patch].water {
                 Environment::Water
