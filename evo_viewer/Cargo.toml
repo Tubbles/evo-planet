@@ -1,0 +1,18 @@
+[package]
+name = "evo_viewer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bevy viewer for evo_core: planet dials, live evolution, champion replay."
+
+[dependencies]
+evo_core = { path = "../evo_core" }
+bevy = { version = "0.16", default-features = false, features = [
+    "bevy_asset", "bevy_color", "bevy_core_pipeline", "bevy_pbr", "bevy_render",
+    "bevy_winit", "bevy_window", "bevy_state", "bevy_log", "bevy_gizmos",
+    "bevy_ui", "bevy_text", "default_font", "x11",
+    "multi_threaded", "std", "tonemapping_luts",
+] }
+# Add "wayland" to the feature list above if you run a Wayland session and
+# have libwayland-dev installed. Audio and gamepad features are left out.
+bevy_egui = { version = "0.34", default-features = false, features = ["render", "default_fonts"] }

@@ -1,0 +1,19 @@
+[package]
+name = "evo_wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "wasm-bindgen bindings for evo_core: evolution worker and replay simulation for the browser demo."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+evo_core = { path = "../evo_core" }
+wasm-bindgen = "0.2.130"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+console_error_panic_hook = "0.1"
+
+[profile.release.package.evo_wasm]
+opt-level = "s"

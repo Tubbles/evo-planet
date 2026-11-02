@@ -1,0 +1,6 @@
+target/
+web_test/
+dist/
+build.log
+*.json
+!web/pkg/*.json

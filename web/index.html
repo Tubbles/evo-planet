@@ -1,0 +1,904 @@
+<title>Evo Planet</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a one-screen lab bench. The 3D view sits on top (or left on wide
+   screens); below it, instrument panels in a single scrolling column. */
+:root {
+  --bg: #edf0ec;
+  --panel: #f7f8f5;
+  --panel-2: #e3e8e1;
+  --line: #c9d1c6;
+  --fg: #182420;
+  --fg-muted: #5a6b63;
+  --accent: #c47a1c;      /* membrane amber */
+  --accent-ink: #ffffff;
+  --teal: #2b7f7a;        /* torso teal */
+  --good: #3f8a4f;
+  --warn: #b5541c;
+  --grid-empty: #d7ddd4;
+  --display: 'Syne', 'Avenir Next', 'Segoe UI', sans-serif;
+  --body: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1613; --panel: #151e1a; --panel-2: #1d2823; --line: #2c3a33;
+    --fg: #e4ebe6; --fg-muted: #94a59c; --accent: #e3a040; --accent-ink: #1a1206;
+    --teal: #4fb3ac; --good: #6cc37c; --warn: #e08a5a; --grid-empty: #1a241f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1613; --panel: #151e1a; --panel-2: #1d2823; --line: #2c3a33;
+  --fg: #e4ebe6; --fg-muted: #94a59c; --accent: #e3a040; --accent-ink: #1a1206;
+  --teal: #4fb3ac; --good: #6cc37c; --warn: #e08a5a; --grid-empty: #1a241f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--body); font-size: 14px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 32px;
+}
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-muted); }
+.app { display: grid; gap: 14px; max-width: 1280px; margin: 0 auto; }
+@media (min-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
+  .stage { position: sticky; top: env(safe-area-inset-top, 0px); }
+}
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; grid-column: 1 / -1; }
+header p { margin: 0; color: var(--fg-muted); max-width: 60ch; }
+.stage { display: grid; gap: 10px; min-width: 0; }
+.view { position: relative; width: 100%; aspect-ratio: 16 / 10; max-width: 100%; border-radius: 10px; overflow: hidden; background: #6f8fb0; border: 1px solid var(--line); }
+.view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.hud { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 3px 8px; border-radius: 999px; background: rgba(10, 16, 14, 0.62); color: #f2f5f1; backdrop-filter: blur(4px); }
+.chip.warn { background: rgba(181, 84, 28, 0.85); }
+.statusbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.statusbar .stat { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.statusbar .stat b { color: var(--fg); font-weight: 500; }
+.controls { display: grid; gap: 14px; min-width: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 10px; min-width: 0; }
+.panel header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--panel-2); color: var(--fg); padding: 7px 12px; font: 500 13px var(--body); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { border: 0; border-radius: 8px; background: var(--fg); color: var(--bg); padding: 8px 14px; font: 600 13px var(--body); cursor: pointer; }
+button.ghost { border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--fg); padding: 7px 12px; font: 500 13px var(--body); cursor: pointer; }
+select { font: 500 13px var(--body); padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--fg); max-width: 100%; }
+.dials { display: grid; gap: 8px; }
+.dial { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; }
+.dial label { font-size: 13px; }
+.dial output { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--fg-muted); text-align: right; }
+.dial input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
+.kv dt { color: var(--fg-muted); white-space: nowrap; }
+.kv dd { margin: 0; font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.kv dd.good { color: var(--good); }
+.kv dd.warn { color: var(--warn); }
+.note { color: var(--fg-muted); font-size: 12.5px; margin: 0; }
+.grid-wrap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+.grid-wrap canvas { width: 100%; max-width: 240px; aspect-ratio: 1; display: block; border-radius: 6px; }
+.axis { font-size: 11px; color: var(--fg-muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.axis.y { writing-mode: vertical-rl; transform: rotate(180deg); }
+.spark { width: 100%; height: 44px; display: block; }
+details summary { cursor: pointer; font-weight: 500; }
+.pending { color: var(--warn); font-size: 12.5px; }
+.hidden { display: none; }
+[hidden] { display: none !important; }
+.map-wrap { display: grid; gap: 6px; }
+.map-wrap canvas { width: 100%; aspect-ratio: 1; display: block; border-radius: 8px; image-rendering: pixelated; background: #0b1a2a; }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--fg-muted); }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; background: var(--sw); vertical-align: -1px; }
+.pop { width: 100%; height: 90px; display: block; }
+table.lin { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+table.lin th { text-align: left; font-weight: 500; color: var(--fg-muted); padding: 4px 6px 4px 0; border-bottom: 1px solid var(--line); }
+table.lin td { padding: 4px 6px 4px 0; border-bottom: 1px solid var(--line); font-family: var(--mono); white-space: nowrap; }
+table.lin tr.sel td { background: var(--panel-2); }
+table.lin tr.animal { cursor: pointer; }
+table.lin td.name { font-family: var(--body); }
+.tbl-scroll { overflow-x: auto; }
+.gp-focus { outline: 3px solid var(--accent) !important; outline-offset: 3px; }
+/* TV mode: engaged when a gamepad is connected. Bigger everything. */
+body.tv { font-size: 17px; }
+body.tv h1 { font-size: 30px; }
+body.tv .seg button, body.tv button.ghost, body.tv button.primary, body.tv select { font-size: 16px; padding: 10px 16px; }
+body.tv .kv { font-size: 16px; } body.tv .kv dd { font-size: 15px; }
+body.tv .dial label { font-size: 16px; } body.tv .dial input[type=range] { height: 28px; }
+body.tv table.lin { font-size: 15px; }
+body.tv .chip { font-size: 15px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header>
+    <div>
+      <h1>Evo Planet</h1>
+      <p>Creatures evolve inside rigid-body physics under the planet you set. Wings, legs and fins earn their abilities from lift, friction and oxygen, not from stat tags.</p>
+    </div>
+    <div class="statusbar" id="status">
+      <span class="stat">Loading simulation…</span>
+    </div>
+  </header>
+
+  <section class="stage">
+    <div class="view" id="view">
+      <canvas id="gl"></canvas>
+      <div class="hud" id="hud"><span class="chip">waiting for first champion</span></div>
+    </div>
+    <div class="row">
+      <span class="seg" role="group" aria-label="View" id="viewSeg" hidden>
+        <button type="button" data-view="globe" aria-pressed="true">Globe</button>
+        <button type="button" data-view="creature" aria-pressed="false">Creature</button>
+      </span>
+      <span class="seg" role="group" aria-label="Replay speed">
+        <button type="button" data-speed="0.5">½×</button>
+        <button type="button" data-speed="1" aria-pressed="true">1×</button>
+        <button type="button" data-speed="2">2×</button>
+      </span>
+      <button type="button" class="ghost" id="replayBtn">Replay champion</button>
+      <label class="row" style="gap:6px"><input type="checkbox" id="followNew" checked> switch to new champions</label>
+      <button type="button" class="ghost" id="copyBtn">Copy genome JSON</button>
+    </div>
+    <div class="panel map-wrap" id="mapPanel" hidden>
+      <header><h2>Planet map</h2><span class="note" id="mapNote"></span></header>
+      <canvas id="map" width="24" height="24" aria-label="Planet patch map"></canvas>
+      <div class="legend">
+        <span style="--sw:#3f8a4f">vegetation</span><span style="--sw:#1f5f9a">water (algae)</span><span style="--sw:#6b4a2a">dead matter</span>
+        <span style="--sw:#e8d44d">herbivore</span><span style="--sw:#e04e3a">carnivore</span><span style="--sw:#b47aff">detritivore</span>
+      </div>
+    </div>
+    <div class="panel">
+      <header><h2 id="champTitle">Champion</h2><span class="note" id="champBorn"></span></header>
+      <dl class="kv" id="champ">
+        <dt>Status</dt><dd>no champion yet</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="controls">
+    <div class="panel">
+      <header><h2>Mode</h2>
+        <span class="seg" role="group" aria-label="Mode" id="modeSeg">
+          <button type="button" data-mode="archive" aria-pressed="true">Archive evolution</button>
+          <button type="button" data-mode="ecology" aria-pressed="false">Planet ecology</button>
+        </span>
+      </header>
+      <p class="note" id="modeNote">Archive evolution scores creatures on one task and keeps the best per body type. Planet ecology has no score: plants and animals eat, pay energy, reproduce and die on the whole planet at full speed.</p>
+    </div>
+
+    <div class="panel" id="ecoPanel" hidden>
+      <header><h2>Planet ecology</h2><span class="note" id="ecoNote"></span></header>
+      <canvas class="pop" id="popChart" aria-label="Populations over time"></canvas>
+      <div class="legend">
+        <span style="--sw:#3f8a4f">plant biomass</span><span style="--sw:#e8d44d">herbivores</span><span style="--sw:#e04e3a">carnivores</span><span style="--sw:#b47aff">detritivores</span><span style="--sw:#9aa">animal lineages</span>
+      </div>
+      <dl class="kv" id="ecoStats"></dl>
+      <div class="row">
+        <button type="button" class="ghost" id="seedBtn">Seed from archive elites</button>
+        <button type="button" class="ghost" id="immBtn">Add 10 random immigrants</button>
+        <label class="row" style="gap:6px">Grid
+          <select id="gridSel" aria-label="Grid size"><option value="16">16²</option><option value="24" selected>24²</option><option value="32">32²</option></select>
+        </label>
+      </div>
+      <div class="tbl-scroll">
+        <table class="lin" id="lineages"><thead><tr><th>Lineage</th><th>n</th><th>mass</th><th>diet / form</th><th>speed</th><th>habitat</th></tr></thead><tbody></tbody></table>
+      </div>
+      <p class="note">Tap an animal lineage to replay its most prolific member in the 3D view. Species are lineages: a child with a changed body plan starts a new lineage with some probability, and random immigrants arrive when the world empties.</p>
+    </div>
+
+    <div class="panel">
+      <header><h2>Planet</h2>
+        <select id="preset" aria-label="Planet preset"></select>
+      </header>
+      <div class="dials" id="dials"></div>
+      <div class="row">
+        <span class="seg" role="group" aria-label="Environment" id="envSeg">
+          <button type="button" data-env="land" aria-pressed="true">Land</button>
+          <button type="button" data-env="water">Water</button>
+          <button type="button" data-env="air">Air drop</button>
+        </span>
+        <button type="button" class="primary" id="applyBtn">Apply &amp; restart evolution</button>
+        <button type="button" class="ghost" id="pauseBtn" aria-pressed="false">Pause</button>
+      </div>
+      <p class="pending hidden" id="pendingNote">Dials changed. Restart evolution to apply them to the physics.</p>
+    </div>
+
+    <div class="panel">
+      <header><h2>Derived physics</h2></header>
+      <dl class="kv" id="phys"></dl>
+    </div>
+
+    <div class="panel">
+      <header><h2>Derived ecology</h2></header>
+      <dl class="kv" id="eco"></dl>
+      <p class="note">Illustrative Earth-normalised model: productivity from light, CO₂, temperature and water; animal cost from gravity and buoyancy; oxygen caps metabolic rate.</p>
+    </div>
+
+    <div class="panel" id="evoPanel">
+      <header><h2>Evolution</h2><span class="note" id="evoNote"></span></header>
+      <canvas class="spark" id="spark" aria-label="Best fitness over generations"></canvas>
+      <dl class="kv" id="evo"></dl>
+      <div class="grid-wrap">
+        <span class="axis y">Part count →</span>
+        <canvas id="grid" width="240" height="240" aria-label="Archive heat map"></canvas>
+        <span></span>
+        <span class="axis">Membrane area per kg →</span>
+      </div>
+      <p class="note">One elite per cell. Bright cells scored higher. Young bodies that lost their cell wait in a nursery for six generations so their controllers can catch up.</p>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>How the physics ties to the dials</summary>
+        <ul class="note" style="padding-left:18px; display:grid; gap:6px; margin:8px 0 0">
+          <li><b>Gravity</b>: weight grows with volume × g; muscle torque with limb cross-section. Heavy worlds favour short, thick limbs.</li>
+          <li><b>Pressure, O₂, CO₂, temperature</b> set air density by the ideal gas law. Every membrane sub-panel gets a flat-plate normal force F = ½ρA|v|²·2.61·sin α plus parasitic drag; limbs get anisotropic quadratic drag.</li>
+          <li><b>O₂ partial pressure</b> feeds an oxygen budget: lung fraction × torso volume × pO₂ against muscle section × frequency. The ratio scales motor strength (fatigue factor).</li>
+          <li><b>Humidity and temperature</b> set aridity. Land fitness is multiplied by hydration unless the water-store gene covers the need; stored water adds mass.</li>
+          <li><b>Water</b> environment adds Archimedes buoyancy from displaced volume and submersion damping; the same lift code runs at water density, so fins and wings share physics.</li>
+          <li><b>Scoring</b>: Land = distance walked in 8 s after a 1 s settle. Water = distance swum. Air = dropped from 10 m, distance at landing + 0.25 × seconds aloft.</li>
+          <li>Everything runs at a fixed 120 Hz step. Runs that go non-finite or exceed 60 m/s score zero, because evolution exploits any energy leak.</li>
+        </ul>
+      </details>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script type="module">
+import init, { presets_json, derive_json, grid_size, ReplaySim } from './pkg/evo_wasm.js';
+
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 2) => Number.isFinite(v) ? v.toFixed(d) : '–';
+
+// ---------------------------------------------------------------- state
+let presets = [];
+let planet = null;
+let env = 'land';
+let episode = 8;
+let runId = 0;
+let paused = false;
+let dirty = false;
+let GRID = 6;
+let history = [];
+let worker = null;
+let activeRun = { planet: null, env: 'land' };
+let pendingChampion = null;
+let champion = null;          // { genome, result, generation_born, planet, env }
+let replay = null;            // ReplaySim
+let replayMeta = null;
+let speed = 1;
+let accumulator = 0;
+let lastFrame = performance.now();
+let mode = 'archive';
+let viewMode = 'globe';     // ecology mode: 'globe' | 'creature'
+let archiveElites = [];
+let ecoSnap = null;
+let ecoHistory = [];
+let selectedLineage = null;
+let archiveRunning = false;
+
+// ---------------------------------------------------------------- dials
+const DIALS = [
+  ['gravity', 'Gravity', 1, 30, 0.1, ' m/s²'],
+  ['pressure_atm', 'Surface pressure', 0.01, 6, 0.01, ' atm', true],
+  ['o2_frac', 'O₂ fraction', 0, 0.6, 0.005, ''],
+  ['co2_frac', 'CO₂ fraction', 0.00001, 0.2, 0.00001, '', true],
+  ['temp_c', 'Mean temperature', -80, 90, 1, ' °C'],
+  ['water_coverage', 'Water coverage', 0, 1, 0.01, ''],
+  ['humidity', 'Humidity', 0, 1, 0.01, ''],
+  ['insolation', 'Insolation', 0.1, 3, 0.05, ' × Earth'],
+];
+const logToSlider = (v, lo, hi) => (Math.log(v) - Math.log(lo)) / (Math.log(hi) - Math.log(lo));
+const sliderToLog = (t, lo, hi) => Math.exp(Math.log(lo) + t * (Math.log(hi) - Math.log(lo)));
+
+function buildDials() {
+  const host = $('dials');
+  host.innerHTML = '';
+  for (const [key, label, lo, hi, step, unit, log] of DIALS) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dial';
+    const id = 'dial_' + key;
+    wrap.innerHTML = `<label for="${id}">${label}</label><output id="${id}_out"></output>
+      <input type="range" id="${id}" min="${log ? 0 : lo}" max="${log ? 1 : hi}" step="${log ? 0.001 : step}">`;
+    host.appendChild(wrap);
+    const input = wrap.querySelector('input');
+    input.addEventListener('input', () => {
+      const t = parseFloat(input.value);
+      planet[key] = log ? sliderToLog(t, lo, hi) : t;
+      planet.name = 'Custom';
+      $('preset').value = 'custom';
+      dirty = true;
+      $('pendingNote').classList.remove('hidden');
+      refreshDials();
+      refreshDerived();
+    });
+  }
+  refreshDials();
+}
+function refreshDials() {
+  for (const [key, , lo, hi, , unit, log] of DIALS) {
+    const v = planet[key];
+    const input = $('dial_' + key);
+    input.value = log ? logToSlider(v, lo, hi) : v;
+    const digits = key === 'co2_frac' ? 5 : key === 'o2_frac' || key === 'pressure_atm' ? 3 : key === 'temp_c' ? 0 : 2;
+    $('dial_' + key + '_out').textContent = (key === 'co2_frac' ? (v * 1e6).toFixed(0) + ' ppm' : fmt(v, digits) + unit);
+  }
+}
+
+function kv(host, rows) {
+  host.innerHTML = rows.map(([k, v, cls]) => `<dt>${k}</dt><dd class="${cls || ''}">${v}</dd>`).join('');
+}
+
+function refreshDerived() {
+  const d = JSON.parse(derive_json(JSON.stringify(planet)));
+  if (d.error) return;
+  lastDerived = d;
+  kv($('phys'), [
+    ['Air density', `${fmt(d.air_density, 3)} kg/m³ (Earth 1.225)`],
+    ['O₂ partial pressure', `${fmt(d.po2_kpa, 1)} kPa (${fmt(d.o2_rel, 2)}× Earth)`, d.o2_rel < 0.6 ? 'warn' : ''],
+    ['Flight index', `${fmt(d.flight_index, 2)} (ρ/g, Earth = 1)`, d.flight_index > 1.5 ? 'good' : d.flight_index < 0.5 ? 'warn' : ''],
+    ['Stall speed @ 50 N/m²', `${fmt(d.stall_speed_ref, 1)} m/s`],
+    ['Wing loading at 8 m/s', `${fmt(d.wing_loading_at_8ms, 0)} N/m²`],
+  ]);
+  kv($('eco'), [
+    ['Plant productivity', `${fmt(d.npp_rel, 2)} × Earth`, d.npp_rel < 0.4 ? 'warn' : ''],
+    ['Plant : animal biomass', `${fmt(d.plant_animal_ratio, 0)} : 1`],
+    ['Animal biomass', `${fmt(d.animal_biomass_rel, 2)} × Earth`],
+    ['Aquatic niche share', `${fmt(d.aquatic_share * 100, 0)} %`],
+    ['Expected lung fraction', `${fmt(d.lung_frac * 100, 0)} % of torso (gills ${fmt(d.gill_frac * 100, 0)} %)`, d.lung_frac > 0.2 ? 'warn' : ''],
+    ['Water storage needed', `${fmt(d.water_storage_frac * 100, 0)} % of mass (aridity ${fmt(d.aridity, 2)})`, d.water_storage_frac > 0.15 ? 'warn' : ''],
+  ]);
+  updateSceneLook(d);
+}
+
+// ---------------------------------------------------------------- worker
+function startWorker() {
+  worker = new Worker('./worker.js', { type: 'module' });
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === 'ready') { restartEvolution(); return; }
+    if (m.type === 'elites') { archiveElites = m.elites || []; if (m.runId === runId && mode === 'ecology') restartEcology(); return; }
+    if (m.runId !== runId) return;
+    if (m.type === 'eco_snap') { ecoSnap = m.snap; ecoHistory = m.history; renderEco(m.dps); return; }
+    if (m.type === 'eco_rep') {
+      if (m.rep) { pendingChampion = { genome: m.rep.genome, result: null, generation_born: 0, planet: activeRun.planet, env: m.rep.env, lineage: m.lineage }; setViewMode('creature'); }
+      return;
+    }
+    if (m.type === 'gen') {
+      history.push(m.summary.best_fitness);
+      if (history.length > 300) history.shift();
+      renderEvo(m.summary, m.grid);
+    } else if (m.type === 'champion') {
+      const c = { ...m.champion, planet: activeRun.planet, env: activeRun.env };
+      if ($('followNew').checked || !champion) pendingChampion = c;
+      champion = c;
+    }
+  };
+  worker.onerror = (e) => { setStatus(`Worker error: ${e.message}`); };
+}
+function restartEvolution() {
+  if (mode === 'ecology') { restartEcology(); return; }
+  runId += 1;
+  dirty = false;
+  archiveRunning = true;
+  $('pendingNote').classList.add('hidden');
+  history = [];
+  activeRun = { planet: JSON.parse(JSON.stringify(planet)), env };
+  worker.postMessage({ type: 'start', runId, planet: activeRun.planet, env, episode, batch: 16, seed: Math.floor(Math.random() * 1e9) });
+  setStatus('Generation 0 · evaluating first batch…');
+  $('evoNote').textContent = `${activeRun.planet.name} · ${env === 'air' ? 'Air drop' : env[0].toUpperCase() + env.slice(1)}`;
+  kv($('evo'), [['Generation', '0'], ['Best fitness', '–']]);
+  drawGrid(null);
+  drawSpark();
+}
+
+function restartEcology() {
+  runId += 1;
+  dirty = false;
+  archiveRunning = false;
+  $('pendingNote').classList.add('hidden');
+  ecoSnap = null; ecoHistory = []; selectedLineage = null;
+  activeRun = { planet: JSON.parse(JSON.stringify(planet)), env: 'land' };
+  const grid = parseInt($('gridSel').value, 10);
+  worker.postMessage({ type: 'eco_start', runId, planet: activeRun.planet, grid, seed: Math.floor(Math.random() * 1e9), seeds: archiveElites });
+  setStatus('Day 0 · seeding the planet…');
+  $('ecoNote').textContent = `${activeRun.planet.name} · ${grid}×${grid} patches${archiveElites.length ? ` · seeded with ${archiveElites.length} archive elites` : ''}`;
+  kv($('ecoStats'), [['Day', '0']]);
+  $('lineages').querySelector('tbody').innerHTML = '';
+}
+
+function setMode(m) {
+  if (m === mode) return;
+  mode = m;
+  document.querySelectorAll('#modeSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  const eco = m === 'ecology';
+  $('ecoPanel').hidden = !eco; $('mapPanel').hidden = !eco; $('viewSeg').hidden = !eco;
+  $('evoPanel').hidden = eco; $('envSeg').hidden = eco;
+  if (eco) setViewMode('globe');
+  if (lastDerived) updateSceneLook(lastDerived);
+  $('champTitle').textContent = eco ? 'Selected lineage' : 'Champion';
+  $('followNew').parentElement.hidden = eco;
+  if (eco) {
+    // Ask the archive for its elites first so the ecology can start from them.
+    if (archiveRunning) worker.postMessage({ type: 'elites', runId });
+    else restartEcology();
+  } else {
+    restartEvolution();
+  }
+}
+
+// ---------------------------------------------------------------- ecology rendering
+const CLASS_COLORS = ['#e8d44d', '#e04e3a', '#b47aff'];
+function renderEco(dps) {
+  const s = ecoSnap; if (!s) return;
+  const st = s.stats;
+  setStatus(`day <b>${st.day}</b> · <b>${fmt(dps, 0)}</b> days/s · plants <b>${st.plants}</b> · animals <b>${st.animals}</b> · lineages <b>${st.animal_lineages}</b>/<b>${st.plant_lineages}</b>`);
+  kv($('ecoStats'), [
+    ['Day', `${st.day}  (${fmt(dps, 0)} days/s)`],
+    ['Plants', `${st.plants} · ${fmt(st.plant_biomass, 0)} kg · ${st.plant_lineages} lineages`],
+    ['Animals', `${st.animals} · H ${st.herbivores} C ${st.carnivores} D ${st.detritivores} · aquatic ${st.aquatic}`],
+    ['Animal lineages', `${st.animal_lineages}`],
+    ['Dead matter / nutrient', `${fmt(st.dead_matter, 0)} / ${fmt(st.nutrient, 0)} kg`],
+    ['Births / deaths / kills', `${st.births} / ${st.deaths} / ${st.kills}`],
+    ['Land colonised', `${st.land_patches ? Math.round(100 * st.vegetated_land / st.land_patches) : 0} % of land green · ${st.land_plants} land plants · ${st.land_animals} land animals`, st.vegetated_land > 0 ? 'good' : ''],
+    ['Immigrants', `${st.immigrants}`],
+    ['Body measurements', `${st.trait_evals} physics episodes · ${st.pending_evals} queued`, st.pending_evals > 60 ? 'warn' : ''],
+  ]);
+  $('mapNote').textContent = `${s.n}×${s.n} patches · 10 m each`;
+  drawMap(s);
+  drawPop();
+  renderLineages(s.lineages);
+}
+function drawMap(s) {
+  const c = $('map'); const n = s.n; const scale = 16;
+  if (c.width !== n * scale) { c.width = n * scale; c.height = n * scale; }
+  const ctx = c.getContext('2d');
+  for (let i = 0; i < n * n; i++) {
+    const x = (i % n) * scale, y = Math.floor(i / n) * scale;
+    const v = s.vegetation[i] / 255, d = s.dead[i] / 255, h = s.canopy_height[i] / 255;
+    if (s.water[i]) {
+      const r = 18 + 10 * v, g = 60 + 90 * v, b = 120 + 40 * v;
+      ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+    } else {
+      // sand -> green by vegetation; canopy height brightens.
+      const r = 150 - 100 * v + 25 * h, g = 125 + 20 * v + 35 * h, b = 80 - 45 * v;
+      ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+    }
+    ctx.fillRect(x, y, scale, scale);
+    if (d > 0.05) { ctx.fillStyle = `rgba(90,60,30,${Math.min(0.55, d * 0.7)})`; ctx.fillRect(x, y, scale, scale); }
+  }
+  mapTex.needsUpdate = true;
+  const a = s.animals;
+  for (let k = 0; k < a.length; k += 6) {
+    const px = (a[k] + 0.5) * scale, py = (a[k + 1] + 0.5) * scale;
+    const cls = a[k + 4] | 0; const mass = a[k + 3];
+    const r = Math.max(1.6, Math.min(3.2, 1.0 + Math.log10(mass + 1) * 1.2));
+    const sel = selectedLineage != null && (a[k + 2] | 0) === selectedLineage;
+    ctx.beginPath(); ctx.arc(px, py, sel ? r + 1.5 : r, 0, 7);
+    ctx.fillStyle = CLASS_COLORS[cls]; ctx.fill();
+    if (sel) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke(); }
+  }
+}
+function drawPop() {
+  const c = $('popChart'); const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 300, h = 90;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  const H = ecoHistory; if (H.length < 2) { ctx.fillStyle = cssVar('--fg-muted'); ctx.font = '11px ' + cssVar('--mono'); ctx.fillText('populations over time', 0, 12); return; }
+  const series = [
+    [0, '#3f8a4f', Math.max(1, ...H.map((r) => r[0]))],
+    [1, CLASS_COLORS[0], 260], [2, CLASS_COLORS[1], 260], [3, CLASS_COLORS[2], 260],
+    [4, '#9aa', Math.max(1, ...H.map((r) => r[4]))],
+  ];
+  for (const [idx, color, max] of series) {
+    ctx.strokeStyle = color; ctx.lineWidth = idx === 0 ? 2 : 1.4; ctx.beginPath();
+    if (idx === 4) ctx.setLineDash([3, 3]); else ctx.setLineDash([]);
+    H.forEach((r, i) => { const x = (i / (H.length - 1)) * (w - 2) + 1; const y = h - 3 - Math.min(1, r[idx] / max) * (h - 8); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle = cssVar('--fg-muted'); ctx.font = '11px ' + cssVar('--mono');
+  ctx.fillText(`plants ${fmt(H[H.length - 1][0], 0)} kg`, 0, 10);
+}
+function renderLineages(list) {
+  const tb = $('lineages').querySelector('tbody');
+  tb.innerHTML = list.map((l) => {
+    if (l.kind === 'animal') {
+      const diet = `H${fmt(l.herb, 1)} C${fmt(l.carn, 1)} D${fmt(l.detr, 1)}`;
+      const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
+      const sel = l.id === selectedLineage ? ' sel' : '';
+      return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${fmt(l.mean_mass, 1)} kg</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}%</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)} m/s</td><td>${hab}</td></tr>`;
+    }
+    return `<tr class="plant"><td class="name">plant ${l.id}</td><td>${l.count}</td><td>${fmt(l.mean_mass, 1)} kg</td><td>height ${fmt(l.height, 2)} m · SLA ${fmt(l.sla, 0)} · root ${fmt(l.root_frac * 100, 0)}%</td><td>–</td><td>land</td></tr>`;
+  }).join('');
+  tb.querySelectorAll('tr.animal').forEach((tr) => tr.addEventListener('click', () => {
+    selectedLineage = parseInt(tr.dataset.lineage, 10);
+    worker.postMessage({ type: 'eco_rep', lineage: selectedLineage });
+    if (ecoSnap) { drawMap(ecoSnap); renderLineages(ecoSnap.lineages); }
+  }));
+}
+function setStatus(html) { $('status').innerHTML = `<span class="stat">${html}</span>`; }
+
+function renderEvo(s, grid) {
+  setStatus(`gen <b>${s.generation}</b> · best <b>${fmt(s.best_fitness, 2)}</b> · <b>${fmt(s.evals_per_second, 1)}</b> evals/s`);
+  kv($('evo'), [
+    ['Generation', `${s.generation} (${s.evaluations} evaluations)`],
+    ['Best fitness', `${fmt(s.best_fitness, 3)} (batch ${fmt(s.batch_best, 3)})`],
+    ['Archive cells', `${s.occupied_cells} / ${GRID * GRID} · nursery ${s.nursery_size}`],
+    ['Throughput', `${fmt(s.evals_per_second, 1)} evals/s · exploded ${s.exploded_in_batch}`, s.exploded_in_batch > 3 ? 'warn' : ''],
+  ]);
+  drawGrid(grid);
+  drawSpark();
+}
+
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function drawGrid(grid) {
+  const c = $('grid'); const ctx = c.getContext('2d');
+  const n = GRID; const cell = c.width / n;
+  ctx.clearRect(0, 0, c.width, c.height);
+  const empty = cssVar('--grid-empty');
+  const accent = new THREE.Color(cssVar('--accent'));
+  const teal = new THREE.Color(cssVar('--teal'));
+  const max = grid ? Math.max(0.001, ...grid.filter((x) => x != null)) : 1;
+  for (let r = 0; r < n; r++) for (let col = 0; col < n; col++) {
+    const v = grid ? grid[r * n + col] : null;
+    // Rows: small part counts at the bottom.
+    const y = (n - 1 - r) * cell;
+    if (v == null) { ctx.fillStyle = empty; }
+    else { const t = Math.pow(v / max, 0.6); const k = teal.clone().lerp(accent, t); ctx.fillStyle = '#' + k.getHexString(); }
+    ctx.beginPath(); ctx.roundRect(col * cell + 2, y + 2, cell - 4, cell - 4, 4); ctx.fill();
+  }
+}
+function drawSpark() {
+  const c = $('spark'); const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 300, h = 44;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  if (history.length < 2) { ctx.fillStyle = cssVar('--fg-muted'); ctx.font = '11px ' + cssVar('--mono'); ctx.fillText('best fitness per generation', 0, 12); return; }
+  const max = Math.max(...history) || 1;
+  ctx.strokeStyle = cssVar('--accent'); ctx.lineWidth = 1.5; ctx.beginPath();
+  history.forEach((v, i) => { const x = (i / (history.length - 1)) * (w - 2) + 1; const y = h - 3 - (v / max) * (h - 8); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
+  ctx.fillStyle = cssVar('--accent'); ctx.beginPath(); ctx.arc(w - 1, h - 3 - (history[history.length - 1] / max) * (h - 8), 2.5, 0, 7); ctx.fill();
+  ctx.fillStyle = cssVar('--fg-muted'); ctx.font = '11px ' + cssVar('--mono'); ctx.fillText(fmt(max, 2), 0, 10);
+}
+
+// ---------------------------------------------------------------- three.js scene
+const canvas = $('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x6f8fb0, 30, 140);
+const camera = new THREE.PerspectiveCamera(45, 16 / 10, 0.1, 400);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x334433, 0.7); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(18, 30, 10); sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = -20; sun.shadow.camera.right = 20; sun.shadow.camera.top = 20; sun.shadow.camera.bottom = -20; sun.shadow.camera.far = 120;
+scene.add(sun); scene.add(sun.target);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x5a7a4a, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), groundMat);
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const gridHelper = new THREE.GridHelper(200, 100, 0x000000, 0x000000);
+gridHelper.material.opacity = 0.12; gridHelper.material.transparent = true; scene.add(gridHelper);
+const waterMat = new THREE.MeshStandardMaterial({ color: 0x2a6fb0, transparent: true, opacity: 0.45, roughness: 0.2, side: THREE.DoubleSide });
+const water = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), waterMat);
+water.rotation.x = -Math.PI / 2; water.visible = false; scene.add(water);
+const startRing = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.55, 48), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+startRing.rotation.x = -Math.PI / 2; scene.add(startRing);
+const trailGeo = new THREE.BufferGeometry(); const trailPts = [];
+const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })); scene.add(trail);
+
+const MAT = {
+  torso: new THREE.MeshStandardMaterial({ color: 0x2b7f7a, roughness: 0.65 }),
+  limb: new THREE.MeshStandardMaterial({ color: 0x8c9a4a, roughness: 0.75 }),
+  pad: new THREE.MeshStandardMaterial({ color: 0x3a2f2c, roughness: 0.9 }),
+  membrane: new THREE.MeshStandardMaterial({ color: 0xe3a040, roughness: 0.5, transparent: true, opacity: 0.8, side: THREE.DoubleSide }),
+};
+let partMeshes = [];
+
+// ---------------------------------------------------------------- globe scene
+// The planet map canvas is the globe's texture: equirectangular, north at
+// the top row. Oceans start blue, bare land brown, and the land greens as
+// plants colonise it.
+const globeScene = new THREE.Scene();
+const globeCam = new THREE.PerspectiveCamera(38, 16 / 10, 0.1, 100);
+globeCam.position.set(0, 0.25, 3.3); globeCam.lookAt(0, 0, 0);
+const mapTex = new THREE.CanvasTexture($('map'));
+mapTex.magFilter = THREE.NearestFilter; mapTex.minFilter = THREE.LinearFilter; mapTex.generateMipmaps = false;
+const globe = new THREE.Mesh(new THREE.SphereGeometry(1, 72, 54), new THREE.MeshStandardMaterial({ map: mapTex, roughness: 0.95, metalness: 0 }));
+globe.rotation.z = 0.2; globeScene.add(globe);
+const atmo = new THREE.Mesh(new THREE.SphereGeometry(1.045, 72, 54), new THREE.MeshBasicMaterial({ color: 0x8fb3d9, transparent: true, opacity: 0.22, side: THREE.BackSide, depthWrite: false }));
+globeScene.add(atmo);
+const rim = new THREE.Mesh(new THREE.SphereGeometry(1.012, 72, 54), new THREE.MeshBasicMaterial({ color: 0x8fb3d9, transparent: true, opacity: 0.08, side: THREE.FrontSide, depthWrite: false }));
+globeScene.add(rim);
+globeScene.add(new THREE.HemisphereLight(0xffffff, 0x101820, 0.35));
+const sunG = new THREE.DirectionalLight(0xfff2e0, 1.15); sunG.position.set(4, 2, 3); globeScene.add(sunG);
+{
+  const starGeo = new THREE.BufferGeometry(); const pts = [];
+  for (let i = 0; i < 900; i++) { const u = Math.random() * 2 - 1, t = Math.random() * Math.PI * 2, r = 40; const s = Math.sqrt(1 - u * u); pts.push(r * s * Math.cos(t), r * u, r * s * Math.sin(t)); }
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  globeScene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xcfd8e6, size: 0.12, sizeAttenuation: true, transparent: true, opacity: 0.8 })));
+}
+let globeSpin = 0.9, globeTilt = 0.15, globeZoom = 1, globeAuto = true, globeAutoTimer = 0;
+
+function setViewMode(v) {
+  viewMode = v;
+  document.querySelectorAll('#viewSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
+}
+
+function capsuleMesh(radius, len, mat) {
+  const g = new THREE.Group();
+  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, len, 18, 1, true), mat);
+  const top = new THREE.Mesh(new THREE.SphereGeometry(radius, 18, 12), mat); top.position.y = len / 2;
+  const bot = new THREE.Mesh(new THREE.SphereGeometry(radius, 18, 12), mat); bot.position.y = -len / 2;
+  for (const m of [cyl, top, bot]) { m.castShadow = true; m.receiveShadow = true; g.add(m); }
+  return g;
+}
+function buildCreatureMeshes(parts) {
+  for (const m of partMeshes) scene.remove(m);
+  partMeshes = parts.map((p, i) => {
+    let m;
+    if (p.kind === 'membrane') { m = new THREE.Mesh(new THREE.BoxGeometry(p.r0 * 2, p.len, 0.02), MAT.membrane); m.castShadow = true; }
+    else m = capsuleMesh(p.radius, p.len, p.kind === 'pad' ? MAT.pad : i === 0 ? MAT.torso : MAT.limb);
+    scene.add(m); return m;
+  });
+}
+
+// Orbit by drag, zoom by wheel/pinch. Camera follows the creature's centre of mass.
+let azimuth = 0.9, elevation = 0.3, zoom = 1;
+let drag = null, pinch = null;
+canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); if (drag && drag.id !== e.pointerId) { pinch = { ids: [drag.id, e.pointerId], pts: { [drag.id]: { x: drag.x, y: drag.y }, [e.pointerId]: { x: e.clientX, y: e.clientY } }, zoom }; } else drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; });
+const globeView = () => mode === 'ecology' && viewMode === 'globe';
+function applyZoom(f) {
+  if (globeView()) globeZoom = Math.min(2.2, Math.max(0.55, globeZoom * f));
+  else zoom = Math.min(3, Math.max(0.4, zoom * f));
+}
+canvas.addEventListener('pointermove', (e) => {
+  if (pinch && pinch.pts[e.pointerId]) { pinch.pts[e.pointerId] = { x: e.clientX, y: e.clientY }; const [a, b] = pinch.ids.map((id) => pinch.pts[id]); const d = Math.hypot(a.x - b.x, a.y - b.y); if (!pinch.d0) pinch.d0 = d; const z = Math.min(3, Math.max(0.4, pinch.zoom * pinch.d0 / d)); if (globeView()) globeZoom = Math.min(2.2, Math.max(0.55, z)); else zoom = z; return; }
+  if (drag && drag.id === e.pointerId) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+    if (globeView()) { globeSpin += dx * 0.008; globeTilt = Math.min(1.2, Math.max(-1.2, globeTilt + dy * 0.006)); globeAuto = false; globeAutoTimer = 0; }
+    else { azimuth -= dx * 0.008; elevation = Math.min(1.4, Math.max(0.05, elevation + dy * 0.006)); }
+  }
+});
+const endPointer = (e) => { if (pinch) pinch = null; if (drag && drag.id === e.pointerId) drag = null; };
+canvas.addEventListener('pointerup', endPointer); canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); applyZoom(Math.exp(e.deltaY * 0.001)); }, { passive: false });
+
+function updateSceneLook(d) {
+  const thickness = Math.min(3, d.air_density / 1.225);
+  const haze = Math.min(1, Math.sqrt(thickness / 3));
+  const co2 = Math.min(1, planet.co2_frac * 20);
+  const sky = new THREE.Color(0x050510).lerp(new THREE.Color(0x8fb3d9), haze).lerp(new THREE.Color(0xd9a060), co2 * 0.6);
+  atmo.material.color.copy(sky); atmo.material.opacity = 0.06 + 0.3 * haze; rim.material.color.copy(sky); rim.material.opacity = 0.03 + 0.12 * haze;
+  const underwater = (replayMeta ? replayMeta.env : env) === 'water';
+  const bg = underwater ? new THREE.Color(0x0d3350) : sky;
+  renderer.setClearColor(bg); scene.fog.color.copy(bg);
+  scene.fog.near = underwater ? 6 : 30; scene.fog.far = underwater ? 60 : 140;
+  const g = Math.min(1, d.npp_rel / 1.5) * (1 - Math.min(1, d.aridity) * 0.7);
+  groundMat.color.copy(new THREE.Color(0xb39a66).lerp(new THREE.Color(0x4f7a44), Math.max(0, Math.min(1, g))));
+  water.visible = underwater;
+}
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+}
+
+// ---------------------------------------------------------------- replay
+function startReplay(c) {
+  if (replay) { replay.free(); replay = null; }
+  try {
+    replay = new ReplaySim(JSON.stringify(c.genome), JSON.stringify(c.planet), c.env, episode);
+  } catch (err) { setStatus('Replay failed: ' + err); return; }
+  replayMeta = c;
+  const parts = JSON.parse(replay.parts_json());
+  buildCreatureMeshes(parts);
+  const gy = replay.ground_y();
+  ground.position.y = gy; gridHelper.position.y = gy + 0.01;
+  const com = replay.com();
+  startRing.position.set(com[0], gy + 0.02, com[2]);
+  trailPts.length = 0; trailGeo.setFromPoints([]);
+  accumulator = 0;
+  refreshDerived();
+  renderChampion();
+}
+function renderChampion() {
+  const c = replayMeta; if (!c || !replay) return;
+  const r = c.result;
+  $('champBorn').textContent = r ? `born generation ${c.generation_born} · ${c.planet.name} · ${c.env}` : `lineage ${c.lineage} · ${c.planet.name} · ${c.env} · most prolific member`;
+  kv($('champ'), [
+    ['Parts / membranes', `${replay.part_count()} / ${replay.membrane_count()}`],
+    ['Mass', `${fmt(replay.total_mass(), 1)} kg`],
+    ['Membrane area', `${fmt(replay.membrane_area(), 2)} m² (${fmt(replay.membrane_area() / replay.total_mass(), 4)} m²/kg)`],
+    ['Lung gene → O₂ fatigue', `${fmt(replay.lung_frac() * 100, 1)} % → ×${fmt(replay.fatigue(), 2)}`, replay.fatigue() < 0.6 ? 'warn' : ''],
+    ['Water store → hydration', `${fmt(replay.water_store() * 100, 1)} % → ×${fmt(replay.hydration(), 2)}`, replay.hydration() < 0.8 ? 'warn' : ''],
+    ['Base frequency', `${fmt(replay.base_freq(), 2)} Hz`],
+    r ? ['Scored', `fitness ${fmt(r.fitness, 3)} · ${fmt(r.distance, 2)} m · airborne ${fmt(r.airborne_frac * 100, 0)} %`]
+      : ['Diet', (() => { const g = c.genome; const cc = Math.min(1, g.diet_carn || 0), dd = Math.min(1, g.diet_detr || 0); const s = cc + dd; const [c2, d2] = s > 1 ? [cc / s, dd / s] : [cc, dd]; return `herb ${fmt(1 - c2 - d2, 2)} · carn ${fmt(c2, 2)} · detr ${fmt(d2, 2)}`; })()],
+  ]);
+}
+
+let hudTimer = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  resize();
+  const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+  pollGamepad(dt);
+  if (globeView()) {
+    if (!drag) { globeAutoTimer += dt; if (globeAutoTimer > 6) globeAuto = true; }
+    if (globeAuto) globeSpin += dt * 0.12;
+    globe.rotation.set(globeTilt, globeSpin, 0.2, 'XYZ');
+    globeCam.position.set(0, 0.25, 3.3 * globeZoom); globeCam.lookAt(0, 0, 0);
+    globeCam.aspect = camera.aspect; globeCam.updateProjectionMatrix();
+    hudTimer += dt;
+    if (hudTimer > 0.3 && ecoSnap) {
+      hudTimer = 0; const st = ecoSnap.stats;
+      const green = st.land_patches ? Math.round(100 * st.vegetated_land / st.land_patches) : 0;
+      $('hud').innerHTML = [`day ${st.day}`, `land ${green}% green`, `${st.plants} plants`, `${st.animals} animals · ${st.land_animals} on land`].map((c) => `<span class="chip">${c}</span>`).join('') + (gamepadOn ? '<span class="chip">gamepad</span>' : '');
+    }
+    renderer.setClearColor(0x05070d);
+    renderer.render(globeScene, globeCam);
+    return;
+  }
+  if (replay) {
+    if (replay.finished()) {
+      const next = pendingChampion; pendingChampion = null;
+      startReplay(next || replayMeta);
+    } else {
+      accumulator += dt * speed;
+      let steps = Math.floor(accumulator * 120); if (steps > 8) steps = 8;
+      accumulator -= steps / 120;
+      if (steps > 0) replay.step(steps);
+      const tf = replay.transforms();
+      for (let i = 0; i < partMeshes.length; i++) {
+        const m = partMeshes[i]; const o = i * 7;
+        m.position.set(tf[o], tf[o + 1], tf[o + 2]); m.quaternion.set(tf[o + 3], tf[o + 4], tf[o + 5], tf[o + 6]);
+      }
+      const com = replay.com();
+      if (steps > 0 && (trailPts.length === 0 || trailPts[trailPts.length - 1].distanceToSquared(new THREE.Vector3(com[0], com[1], com[2])) > 0.01)) {
+        trailPts.push(new THREE.Vector3(com[0], com[1], com[2])); if (trailPts.length > 400) trailPts.shift(); trailGeo.setFromPoints(trailPts);
+      }
+      // Camera follow.
+      const size = Math.min(6, 0.8 + partMeshes.length * 0.18);
+      const dist = (2.2 + size) * zoom;
+      const target = new THREE.Vector3(com[0], com[1], com[2]);
+      const desired = new THREE.Vector3(Math.cos(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.sin(azimuth) * Math.cos(elevation)).multiplyScalar(dist).add(target);
+      camera.position.lerp(desired, 1 - Math.exp(-4 * dt)); camera.lookAt(target);
+      sun.position.set(target.x + 18, target.y + 30, target.z + 10); sun.target.position.copy(target);
+      hudTimer += dt;
+      if (hudTimer > 0.15) {
+        hudTimer = 0;
+        const chips = [`t ${fmt(replay.time(), 1)} s`, `${fmt(replay.distance(), 2)} m`];
+        if (replayMeta.env === 'air') chips.push(replay.airborne() ? 'airborne' : 'landed');
+        if (replay.exploded()) chips.push('exploded');
+        $('hud').innerHTML = chips.map((c) => `<span class="chip${c === 'exploded' ? ' warn' : ''}">${c}</span>`).join('');
+      }
+    }
+  } else if (pendingChampion) { const c = pendingChampion; pendingChampion = null; startReplay(c); }
+  renderer.render(scene, camera);
+}
+let lastDerived = null;
+
+// ---------------------------------------------------------------- gamepad (TV mode)
+// Standard mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 Back, 9 Start,
+// 12-15 d-pad; axes 0/1 left stick, 2/3 right stick.
+let gamepadOn = false, gpPrev = [], gpFocus = null, gpRepeat = 0, gpHeld = null;
+function focusables() {
+  return Array.from(document.querySelectorAll('button, input[type=range], input[type=checkbox], select, tr.animal'))
+    .filter((el) => el.offsetParent !== null && !el.closest('[hidden]'));
+}
+function setGpFocus(el) {
+  if (gpFocus) gpFocus.classList.remove('gp-focus');
+  gpFocus = el;
+  if (el) { el.classList.add('gp-focus'); if (el.focus) el.focus({ preventScroll: true }); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+}
+function gpMove(dir) {
+  const list = focusables(); if (!list.length) return;
+  let i = list.indexOf(gpFocus);
+  if (i < 0) { setGpFocus(list[0]); return; }
+  i = (i + dir + list.length) % list.length; setGpFocus(list[i]);
+}
+function gpAdjust(dir) {
+  const el = gpFocus; if (!el) return;
+  if (el.tagName === 'INPUT' && el.type === 'range') {
+    const step = parseFloat(el.step) || 0.01, min = parseFloat(el.min), max = parseFloat(el.max);
+    const range = max - min; const v = Math.min(max, Math.max(min, parseFloat(el.value) + dir * Math.max(step, range / 60)));
+    el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); return;
+  }
+  if (el.tagName === 'SELECT') { el.selectedIndex = Math.min(el.options.length - 1, Math.max(0, el.selectedIndex + dir)); el.dispatchEvent(new Event('change', { bubbles: true })); return; }
+  if (el.closest('.seg')) { const sib = Array.from(el.closest('.seg').querySelectorAll('button')); const i = sib.indexOf(el); const n = sib[(i + dir + sib.length) % sib.length]; setGpFocus(n); n.click(); return; }
+  gpMove(dir);
+}
+function gpActivate() { const el = gpFocus; if (!el) { gpMove(1); return; } el.click(); }
+function pollGamepad(dt) {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null; for (const p of pads) if (p && p.connected) { gp = p; break; }
+  if (!gp) { if (gamepadOn) { gamepadOn = false; document.body.classList.remove('tv'); } return; }
+  if (!gamepadOn) { gamepadOn = true; document.body.classList.add('tv'); if (!gpFocus) gpMove(1); }
+  const b = gp.buttons.map((x) => x.pressed);
+  const edge = (i) => b[i] && !gpPrev[i];
+  const ax = gp.axes;
+  // d-pad / left stick navigation with repeat.
+  const up = b[12] || ax[1] < -0.6, down = b[13] || ax[1] > 0.6, left = b[14] || ax[0] < -0.6, right = b[15] || ax[0] > 0.6;
+  const held = up ? 'up' : down ? 'down' : left ? 'left' : right ? 'right' : null;
+  if (held !== gpHeld) { gpHeld = held; gpRepeat = held ? 0.4 : 0; if (held) fireNav(held); }
+  else if (held) { gpRepeat -= dt; if (gpRepeat <= 0) { gpRepeat = 0.16; fireNav(held); } }
+  function fireNav(h) { if (h === 'up') gpMove(-1); else if (h === 'down') gpMove(1); else gpAdjust(h === 'left' ? -1 : 1); }
+  if (edge(0)) gpActivate();
+  if (edge(1)) { if (mode === 'ecology') setViewMode('globe'); }
+  if (edge(2)) $('pauseBtn').click();
+  if (edge(3)) setMode(mode === 'ecology' ? 'archive' : 'ecology');
+  if (edge(4) || edge(5)) { const sel = $('preset'); const n = presets.length; let i = sel.value === 'custom' ? 0 : parseInt(sel.value, 10); i = (i + (edge(5) ? 1 : -1) + n) % n; sel.value = String(i); sel.dispatchEvent(new Event('change')); }
+  if (edge(9)) $('applyBtn').click();
+  if (edge(8) && mode === 'ecology') setViewMode(viewMode === 'globe' ? 'creature' : 'globe');
+  // Right stick: orbit / spin. Triggers: zoom.
+  const rx = Math.abs(ax[2] || 0) > 0.15 ? ax[2] : 0, ry = Math.abs(ax[3] || 0) > 0.15 ? ax[3] : 0;
+  if (rx || ry) {
+    if (globeView()) { globeSpin += rx * dt * 2.5; globeTilt = Math.min(1.2, Math.max(-1.2, globeTilt + ry * dt * 1.8)); globeAuto = false; globeAutoTimer = 0; }
+    else { azimuth -= rx * dt * 2.5; elevation = Math.min(1.4, Math.max(0.05, elevation + ry * dt * 1.8)); }
+  }
+  const lt = gp.buttons[6] ? gp.buttons[6].value : 0, rt = gp.buttons[7] ? gp.buttons[7].value : 0;
+  if (lt > 0.05) applyZoom(Math.exp(lt * dt * 1.6));
+  if (rt > 0.05) applyZoom(Math.exp(-rt * dt * 1.6));
+  gpPrev = b;
+}
+
+// ---------------------------------------------------------------- wiring
+document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => {
+  speed = parseFloat(b.dataset.speed);
+  document.querySelectorAll('[data-speed]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+}));
+$('envSeg').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+  env = b.dataset.env; $('envSeg').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  restartEvolution();
+}));
+$('applyBtn').addEventListener('click', restartEvolution);
+document.querySelectorAll('#modeSeg button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+document.querySelectorAll('#viewSeg button').forEach((b) => b.addEventListener('click', () => setViewMode(b.dataset.view)));
+$('seedBtn').addEventListener('click', () => { if (archiveElites.length) worker.postMessage({ type: 'eco_seeds', seeds: archiveElites, count: 20 }); });
+$('immBtn').addEventListener('click', () => worker.postMessage({ type: 'eco_immigrate', count: 10 }));
+$('gridSel').addEventListener('change', () => { if (mode === 'ecology') restartEcology(); });
+$('pauseBtn').addEventListener('click', () => { paused = !paused; $('pauseBtn').setAttribute('aria-pressed', String(paused)); $('pauseBtn').textContent = paused ? 'Resume' : 'Pause'; worker.postMessage({ type: 'pause', paused }); });
+$('replayBtn').addEventListener('click', () => { if (champion) startReplay(champion); });
+$('copyBtn').addEventListener('click', async () => {
+  if (!replayMeta) return;
+  const text = JSON.stringify(replayMeta.genome, null, 2);
+  try { await navigator.clipboard.writeText(text); $('copyBtn').textContent = 'Copied'; }
+  catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); $('copyBtn').textContent = 'Select & copy'; }
+  setTimeout(() => { $('copyBtn').textContent = 'Copy genome JSON'; }, 1500);
+});
+$('preset').addEventListener('change', () => {
+  const v = $('preset').value; if (v === 'custom') return;
+  planet = JSON.parse(JSON.stringify(presets[parseInt(v, 10)]));
+  refreshDials(); refreshDerived(); restartEvolution();
+});
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { drawGrid(null); drawSpark(); });
+
+await init();
+GRID = grid_size();
+presets = JSON.parse(presets_json());
+planet = JSON.parse(JSON.stringify(presets[0]));
+$('preset').innerHTML = presets.map((p, i) => `<option value="${i}">${p.name}</option>`).join('') + '<option value="custom">Custom</option>';
+buildDials();
+refreshDerived();
+drawGrid(null); drawSpark();
+startWorker();
+requestAnimationFrame(frame);
+</script>

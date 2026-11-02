@@ -1,0 +1,24 @@
+[package]
+name = "evo_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Planet-aware evolution of articulated creatures: Sims-style graph genomes, rapier physics, per-panel fluid forces."
+
+[dependencies]
+rapier3d = { version = "0.22", features = ["simd-stable"] }
+nalgebra = "0.33"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bin]]
+name = "evo_headless"
+path = "src/bin/headless.rs"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+[[bin]]
+name = "evo_serve"
+path = "src/bin/serve.rs"
