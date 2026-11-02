@@ -15,6 +15,9 @@ pub const MEMBRANE_THICKNESS: f32 = 0.02;
 pub const MEMBRANE_AREAL_DENSITY: f32 = 1.5;
 /// Muscle strength per unit cross-section (N*m per m^2 of limb section).
 pub const STRENGTH_PER_AREA: f32 = 4000.0;
+/// Animal tissue is water-dense and not evolvable; the genome's density gene
+/// is a plant trait (dry mass per fresh volume).
+pub const ANIMAL_DENSITY: f32 = 1000.0;
 
 #[derive(Clone, Debug)]
 pub struct Part {
@@ -131,7 +134,7 @@ impl<'a> Ctx<'a> {
             }
             _ => {
                 let v = capsule_volume(len, radius);
-                (v * self.g.density, self.g.density)
+                (v * ANIMAL_DENSITY, ANIMAL_DENSITY)
             }
         };
         let section_area = match node.kind {
@@ -218,7 +221,7 @@ pub fn decode(g: &Genome) -> Phenotype {
     let torso_volume = capsule_volume(parts[0].len, parts[0].radius);
     let lung = g.lung_frac.clamp(0.0, 0.6);
     let water = g.water_store.clamp(0.0, 0.5);
-    let torso_density = g.density * (1.0 - 0.9 * lung) * (1.0 + water);
+    let torso_density = ANIMAL_DENSITY * (1.0 - 0.9 * lung) * (1.0 + water);
     parts[0].density = torso_density;
     parts[0].mass = torso_volume * torso_density;
 

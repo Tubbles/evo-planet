@@ -1027,7 +1027,9 @@ impl EcoWorld {
                 let mut best: Option<(usize, f32)> = None;
                 for &cand in &self.neighbours[patch] {
                     let cand_water = self.patches[cand].water;
-                    let can = if cand_water { water_speed_raw * motility > 0.005 || !measured_water } else { land_speed_raw * motility > 0.005 || !measured_land };
+                    // Entry needs demonstrated ability in that habitat; unmeasured
+                    // young stay where they are until their body has been tested.
+                    let can = if cand_water { measured_water && water_speed_raw * motility > 0.005 } else { measured_land && land_speed_raw * motility > 0.005 };
                     if !can {
                         continue;
                     }
