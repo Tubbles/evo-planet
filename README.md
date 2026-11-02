@@ -204,8 +204,17 @@ but foraging on land scales with speed, so poor crawlers go hungry there.
   or a predation attempt whose success is a logistic in speed difference),
   moves to a neighbouring patch when hungry if its body can use that habitat,
   and reproduces when energy exceeds 0.6 × mass, with 75% of births mutated.
-- **Decomposition** returns dead matter to nutrient at a rate set by
-  temperature and moisture; algae grow logistically in water patches.
+- **Carrion and scavenging.** Dead animals form a carrion pool separate from
+  plant detritus; it is richer (80% assimilation) and rots faster. Scavenging
+  needs no speed, so detritivory has a smooth gradient, and predation is
+  defined as an extension of scavenging: attack rate uses carnivory plus half
+  the detritivory gene. Prey under a fifth of the attacker's mass is caught
+  by engulfment regardless of speed; otherwise the catch is a logistic in
+  speed difference. Reproduction thresholds are nearly proportional to mass,
+  so tiny lineages turn over generations fast, the microbial route to
+  predation.
+- **Decomposition** returns plant detritus and carrion to nutrient at rates
+  set by temperature and moisture.
 - **Species** are lineages. A child with a changed body plan starts a new
   lineage with probability 0.2 (plants 0.03 per seed). Random sea immigrants
   arrive only when the world empties. Caps: 8 plants per patch, 260 animals.

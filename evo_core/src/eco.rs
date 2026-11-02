@@ -142,7 +142,11 @@ pub struct Patch {
     pub shore: bool,
     pub moisture: f32,
     pub nutrient: f32,
+    /// Plant detritus, kg.
     pub dead_matter: f32,
+    /// Dead animals, kg: richer than plant detritus and the bridge from
+    /// scavenging to predation.
+    pub carrion: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -286,7 +290,7 @@ impl EcoWorld {
                 } else {
                     (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: 2.0, dead_matter: 1.0 }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: 2.0, dead_matter: 1.0, carrion: 0.0 }
             })
             .collect();
         // Shore band: land patches touching water stay wet, the first foothold for plants.
@@ -714,25 +718,40 @@ impl EcoWorld {
                     }
                 }
             }
-            if detr > 0.05 {
+            if detr > 0.02 {
+                // Scavenging needs no speed: carrion first (rich), then plant detritus.
                 let pt = &mut self.patches[patch];
-                let bite = (detr * search * 0.12).min(pt.dead_matter * 0.5);
+                let mut want = detr * search * 0.15;
+                let bite = want.min(pt.carrion * 0.6);
+                pt.carrion -= bite;
+                want -= bite;
+                food += bite * 0.8;
+                let bite = want.min(pt.dead_matter * 0.5);
                 pt.dead_matter -= bite;
                 food += bite * 0.6;
             }
-            if carn > 0.05 {
-                // Attack one random neighbour in the patch.
+            // Predation grows out of scavenging: a scavenger will also take a
+            // dying or much smaller animal. Catching much smaller prey needs no
+            // speed (engulfment); otherwise it is a speed contest.
+            let hunt = carn + 0.5 * detr;
+            if hunt > 0.02 {
                 let candidates: Vec<usize> = animals_in[patch].iter().copied().filter(|&j| j != ai && !killed.contains(&j)).collect();
-                if !candidates.is_empty() && self.rng.gen_bool((carn * 0.25) as f64) {
+                if !candidates.is_empty() && self.rng.gen_bool((hunt * 0.25).min(1.0) as f64) {
                     let j = candidates[self.rng.gen_range(0..candidates.len())];
                     let prey = &self.animals[j];
                     let prey_speed = if in_water { prey.traits.water_speed } else { prey.traits.land_speed } * prey.genome.motility.clamp(0.0, 1.0);
                     let size_ok = prey.traits.mass < mass * 2.5;
-                    let p_catch = 1.0 / (1.0 + (-(speed - prey_speed) * 2.0).exp());
+                    let p_catch = if prey.traits.mass < mass * 0.2 {
+                        0.85
+                    } else {
+                        1.0 / (1.0 + (-(speed - prey_speed) * 2.0).exp())
+                    };
                     if size_ok && self.rng.gen_bool((p_catch * 0.6) as f64) {
-                        let meal = (prey.energy.max(0.0) + prey.traits.mass * 0.5) * 0.7;
-                        food += meal.min(mass * 1.5);
-                        self.patches[patch].dead_matter += prey.traits.mass * 0.5;
+                        let body = prey.energy.max(0.0) + prey.traits.mass * 0.5;
+                        let share = (carn + 0.5 * detr).min(1.0);
+                        let meal = (body * 0.8 * share).min(mass * 1.5);
+                        food += meal;
+                        self.patches[patch].carrion += body - meal;
                         killed.push(j);
                         self.animals[ai].kills += 1;
                         self.stats.kills += 1;
@@ -761,7 +780,7 @@ impl EcoWorld {
                     }
                     let plant_food: f32 = plants_in[cand].iter().map(|&pi| self.plants[pi].biomass).sum::<f32>() * if cand_water { 0.6 } else { 0.75 };
                     let value = if directed {
-                        herb * plant_food + detr * self.patches[cand].dead_matter * 0.3 + carn * animals_in[cand].len() as f32 * 0.5 + self.rng.gen_range(0.0..0.05)
+                        herb * plant_food + detr * (self.patches[cand].carrion * 0.8 + self.patches[cand].dead_matter * 0.3) + carn * animals_in[cand].len() as f32 * 0.5 + self.rng.gen_range(0.0..0.05)
                     } else {
                         self.rng.gen_range(0.0..1.0)
                     };
@@ -782,7 +801,8 @@ impl EcoWorld {
             let a = &mut self.animals[ai];
             a.energy += energy_delta;
             a.age += 1.0;
-            let threshold = 0.6 * a.traits.mass + 0.2;
+            // Nearly proportional to mass, so tiny bodies turn over generations fast.
+            let threshold = 0.6 * a.traits.mass + 0.02;
             if a.energy > threshold && self.rng.gen_bool(0.5) {
                 let (child, body_changed) = if self.rng.gen_bool(0.75) { a.genome.mutate(&mut self.rng) } else { (a.genome.clone(), false) };
                 let share = a.energy * 0.35;
@@ -800,7 +820,7 @@ impl EcoWorld {
         gone.dedup();
         for &i in gone.iter().rev() {
             let a = self.animals.swap_remove(i);
-            self.patches[a.patch].dead_matter += a.traits.mass * 0.5;
+            self.patches[a.patch].carrion += a.traits.mass * 0.5 + a.energy.max(0.0);
             self.stats.deaths += 1;
         }
         // Indices changed: rebuild pending list.
@@ -832,7 +852,7 @@ impl EcoWorld {
                 continue;
             }
             if self.animals.len() >= MAX_ANIMALS {
-                self.patches[patch].dead_matter += energy;
+                self.patches[patch].carrion += energy;
                 continue;
             }
             let traits = self.lookup_traits(&genome);
@@ -850,6 +870,9 @@ impl EcoWorld {
             let dec = pt.dead_matter * rate;
             pt.dead_matter -= dec;
             pt.nutrient += dec * 0.8;
+            let rot = pt.carrion * (rate * 3.0).min(0.5);
+            pt.carrion -= rot;
+            pt.nutrient += rot * 0.8;
             // Slow weathering input and leaching.
             pt.nutrient = (pt.nutrient + 0.002 - pt.nutrient * 0.001).max(0.0);
         }
@@ -916,7 +939,7 @@ impl EcoWorld {
         al.sort_unstable();
         al.dedup();
         s.animal_lineages = al.len();
-        s.dead_matter = self.patches.iter().map(|p| p.dead_matter).sum();
+        s.dead_matter = self.patches.iter().map(|p| p.dead_matter + p.carrion).sum();
         s.nutrient = self.patches.iter().map(|p| p.nutrient).sum();
         s.pending_evals = self.pending.len();
         self.stats = s;
@@ -1051,7 +1074,7 @@ impl EcoWorld {
             })
             .collect();
         let canopy_height = canopy.iter().map(|h| ((h / 15.0).min(1.0) * 255.0) as u8).collect();
-        let dead = self.patches.iter().map(|p| ((p.dead_matter / 20.0).min(1.0) * 255.0) as u8).collect();
+        let dead = self.patches.iter().map(|p| (((p.dead_matter + p.carrion) / 20.0).min(1.0) * 255.0) as u8).collect();
         let water = self.patches.iter().map(|p| if p.water { 1 } else { 0 }).collect();
         let mut animals = Vec::with_capacity(self.animals.len() * 5);
         for a in &self.animals {
@@ -1129,11 +1152,12 @@ mod tests {
 
     #[test]
     fn plants_colonise_land_from_the_sea() {
-        let mut w = EcoWorld::new(PlanetParams::earth(), 500, 5);
+        // A mid-sized world: tiny seas get overgrazed by founders before algae establish.
+        let mut w = EcoWorld::new(PlanetParams::earth(), 800, 5);
         for _ in 0..2500 {
             w.tick();
         }
         assert!(w.stats.plants > 0);
-        assert!(w.stats.land_plants > 0, "no land plants after 1500 days: {:?}", w.stats);
+        assert!(w.stats.land_plants > 0, "no land plants after 2500 days: {:?}", w.stats);
     }
 }
