@@ -201,9 +201,16 @@ but foraging on land scales with speed, so poor crawlers go hungry there.
   emptied by digestion ∝ M^0.75, with assimilation of plant versus animal
   tissue set by a continuous gut-type gene (fermenter 50%/45% to carnivore
   15%/90%). Foraging is a Holling type II response with Beddington–DeAngelis
-  crowding; browsing height limits what small animals reach on land. Predation
-  is attack (M^0.75 × speed × weapon gene) against defence (prey M^0.75 ×
-  speed × armour gene) through a logistic, times a Gaussian hump in
+  crowding, where the encounter rate is the area the body sweeps in a day
+  (detection strip two reaches wide along eight hours at the measured speed);
+  reach, mouth, claws, plating and uprightness are read from the body's
+  geometry and its land physics episode, so form has consequences. Plants are
+  scored on leaf area projected from nine sky directions with overlap
+  removed, checked for bending and buckling under gravity, charged for
+  transporting to every leaf, and shed leaves on a lifespan set by leaf mass
+  per area. Predation
+  is attack (M^0.75 × speed × claws × uprightness) against defence (prey
+  M^0.75 × speed × plating) through a logistic, times a Gaussian hump in
   log10(predator/prey mass) centred at 10×; the energy returned from a kill
   falls with relative prey size (zero for prey ten times larger, Fritsch et
   al.); attacks happen only when expected gain per handling time beats the
@@ -211,7 +218,7 @@ but foraging on land scales with speed, so poor crawlers go hungry there.
   for it can scavenge. Each new body is measured once in rapier for its land
   and water speed. Diet classes (herbivore, carnivore, scavenger, omnivore)
   are what an individual actually ate, not genes. Founders are a few hundred
-  grams, seeded in warm shallow seas, with herbivore guts and no weapons.
+  grams, seeded in warm shallow seas, with herbivore guts.
 - **Carrion and detritus.** Dead animals and dung feed a carrion pool and a
   plant-litter pool that decompose to nutrient at temperature- and
   moisture-dependent rates. Scavenging needs no speed and is the natural

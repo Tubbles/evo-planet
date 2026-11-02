@@ -78,6 +78,8 @@ pub struct EpisodeResult {
     pub fatigue: f32,
     pub hydration: f32,
     pub total_mass: f32,
+    /// Mean centre-of-mass height above ground after settling (uprightness).
+    pub mean_height: f32,
 }
 
 pub struct CreatureSim {
@@ -114,6 +116,7 @@ pub struct CreatureSim {
     landed: bool,
     pub exploded: bool,
     pub landing_distance: Option<f32>,
+    com_height_sum: f32,
 }
 
 fn part_bounding_radius(p: &crate::decode::Part) -> f32 {
@@ -303,6 +306,7 @@ impl CreatureSim {
             landed: false,
             exploded: false,
             landing_distance: None,
+            com_height_sum: 0.0,
         };
         sim.start_com = sim.com();
         if !sim.settled {
@@ -508,6 +512,7 @@ impl CreatureSim {
 
         if self.settled {
             self.total_steps += 1;
+            self.com_height_sum += self.com().y - self.ground_y;
             let airborne = self.is_airborne();
             if airborne {
                 self.airborne_steps += 1;
@@ -577,6 +582,7 @@ impl CreatureSim {
             fatigue: self.fatigue,
             hydration: self.hydration,
             total_mass: self.pheno.total_mass,
+            mean_height: if self.total_steps > 0 { self.com_height_sum / self.total_steps as f32 } else { 0.0 },
         }
     }
 

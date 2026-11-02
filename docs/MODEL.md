@@ -57,17 +57,23 @@ A 0.1 carnivore can fill its stomach with meat and still get little out of
 it, which is exactly the gradient we lacked. Replaces the diet-weight genes.
 
 ### Foraging as a functional response
-Encounter rate = search speed × detection width × resource density
-(Holling type II). Handling time per item ∝ item mass / bite rate, bite
-rate ∝ `M^0.75`. Intake = aN / (1 + ahN), limited by stomach space. Big prey
+Encounter rate = swept area / patch area (Holling type II): a detection
+strip two reaches wide along eight hours of travel at the measured speed,
+plus the circle a still body can reach. Reach is the farthest the body
+extends from its centre of mass; on land only an upright body (mean centre
+of mass height in the physics episode) gets its full reach for browsing.
+A body that cannot move eats only what is within arm's length. Bite rate
+comes from the mouth: the trunk's front cross-section. Intake = aN / (1 + ahN), limited by stomach space. Big prey
 means fewer, longer meals; small items mean many quick ones. Movement cost
 uses cost of transport ∝ `M^-0.3` per kg per metre (Tucker 1970).
 
 ### Predation as attack versus defence
-Attack = `M^0.75 · relative speed · weapon`; defence = `prey M^0.75 ·
-prey speed · armour`. Success probability is a logistic of
-`(attack − defence) / scale`. Weapons and armour are genes that cost mass
-and maintenance. Nothing forbids a lion taking a buffalo; it is just
+Attack = `M^0.75 · speed · claws · uprightness`; defence = `prey M^0.75 ·
+prey speed · plating`. Success probability is a logistic of
+`(attack − defence) / scale`. Claws and plating are not genes: claws is the
+cross-section of Pad parts relative to the trunk, plating the fraction of
+body mass in rigidly attached capsules (which also slows the body). Both
+are paid for as real parts in the mass budget. Nothing forbids a lion taking a buffalo; it is just
 unlikely per attempt, and handling a large carcass takes days during which
 it is also carrion for everyone else. Replaces "prey must be under 2.5×"
 and "under 0.2× is engulfed".
@@ -84,10 +90,18 @@ plant litter decomposes to nutrient. Scavenging needs no speed and is the
 natural bridge to predation.
 
 ## Systems (plant side, already mechanistic)
-Light interception with Beer–Lambert extinction, water balance from roots
-versus transpiration, nutrient uptake from the patch pool, structural cap
-from stem strength against weight under gravity, respiration by tissue
-type, seeds and dispersal, land tolerance as an evolvable cost. Next:
+Light interception with Beer–Lambert extinction between plants, and within
+a plant by projecting its leaves from nine sky directions and removing
+overlap (a lone vertical blade captures about 0.6 of its area, a pile of
+leaves much less than their sum); water balance from roots versus
+transpiration; nutrient uptake from the patch pool; structure checked two
+ways under gravity, bending moment at every stem from the horizontal lever
+arm of everything it carries, and Euler buckling of columns; a transport
+cost for every leaf proportional to its mass times the stem path to the
+base; leaf economics, where lifespan scales with leaf mass per area
+(Wright et al. 2004) so thin leaves are cheap to build but shed in weeks;
+respiration by tissue type; seeds and dispersal; land tolerance as an
+evolvable cost. Next:
 defence compounds (digestibility trade-off, leaf economics spectrum) and
 leaf nitrogen as the thing herbivores actually value.
 
@@ -150,6 +164,26 @@ season. Each is a candidate system, each with a real analogue.
    seasonality so fat and size buy survival through lean periods, and plant
    structure (height, toughness) that only large or specialised grazers can
    exploit.
+
+7. Body plan had no consequences: only speed was measured, the search
+   baseline fed anything, and limbs only cost mass. Reach, mouth, claws,
+   plating and uprightness are now read off the geometry and the land
+   episode (see above); the search baseline is gone, replaced by swept
+   area. Plants lacked self-shading, horizontal lever arms and transport,
+   so a jumble of leaves was as good as a tree; all three added. Lifespan
+   halved (150·M^0.25), growth and reproduction sped up.
+8. With leaves rescored, the sea's algae went extinct: leaf thickness had
+   been mapped to 1–4 mm (5–10× real), so respiration per area outweighed
+   the halved capture. Thickness now spans 0.1–2 mm, and leaf lifespan
+   follows leaf mass per area so the thinnest leaf is not free.
+9. One-part bodies were "swimming" at inherited speeds: the physics queue
+   measured 3 bodies a day against ~1,000 births, so most animals lived on
+   their parent's numbers. The queue is now one request per body, ordered
+   by living copies, and the default budget is 8 a day. After that: lineages
+   swim at 0.07–0.33 m/s, a 0.09 kg lineage with claws 0.96 and plating 0.19
+   takes 18% of its diet as meat, 254 carnivores by realised diet at day
+   4000. Mean body still 2–3 parts and drifting small; the next question is
+   what function a fourth part buys in the sea.
 
 ## How we will know it works
 Not by reaching a target. By emergent statistics matching ecological

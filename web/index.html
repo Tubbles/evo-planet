@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Evo Planet</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -447,7 +448,7 @@ function renderEco(dps) {
     ['Animals', `${st.animals} · H ${st.herbivores} C ${st.carnivores} D ${st.detritivores} · aquatic ${st.aquatic}`],
     ['Animal lineages', `${st.animal_lineages}`],
     ['Realised diet', `omnivores ${st.omnivores} · intake from kills ${fmt(st.mean_carn * 100, 0)} % · from carrion ${fmt(st.mean_detr * 100, 0)} %`, st.omnivores > 0 ? 'good' : ''],
-    ['Anatomy (means)', `gut type ${fmt(st.mean_gut, 2)} (0 herbivore, 1 carnivore) · weapon ${fmt(st.mean_weapon, 2)} · armour ${fmt(st.mean_armour, 2)}`],
+    ['Anatomy (means)', `gut type ${fmt(st.mean_gut, 2)} (0 herbivore, 1 carnivore) · claws ${fmt(st.mean_weapon, 2)} · plating ${fmt(st.mean_armour, 2)}`],
     ['Body', `mean ${fmt(st.mean_mass, 2)} kg · ${fmt(st.mean_parts, 1)} genome elements`],
     ['Dead matter / nutrient', `${fmt(st.dead_matter, 0)} / ${fmt(st.nutrient, 0)} kg`],
     ['Births / deaths / kills', `${st.births} / ${st.deaths} / ${st.kills}`],
@@ -566,7 +567,7 @@ function renderLineages(list) {
   const tb = $('lineages').querySelector('tbody');
   tb.innerHTML = list.map((l) => {
     if (l.kind === 'animal') {
-      const diet = `ate P${fmt(l.herb, 1)} M${fmt(l.carn, 1)} C${fmt(l.detr, 1)} · gut ${fmt(l.gut, 1)}${l.weapon > 0.05 ? ` · weapon ${fmt(l.weapon, 1)}` : ''}${l.armour > 0.05 ? ` · armour ${fmt(l.armour, 1)}` : ''}`;
+      const diet = `ate P${fmt(l.herb, 1)} M${fmt(l.carn, 1)} C${fmt(l.detr, 1)} · gut ${fmt(l.gut, 1)} · reach ${fmt(l.reach, 2)} m${l.weapon > 0.05 ? ` · claws ${fmt(l.weapon, 1)}` : ''}${l.armour > 0.05 ? ` · plating ${fmt(l.armour, 1)}` : ''}`;
       const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
       const sel = l.id === selectedLineage ? ' sel' : '';
       return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${fmt(l.mean_mass, 1)} kg</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}%</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)} m/s</td><td>${hab}</td></tr>`;

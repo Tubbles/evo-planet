@@ -258,6 +258,70 @@ pub fn decode(g: &Genome) -> Phenotype {
     }
 }
 
+/// World placement of each part with the root at the origin, axis +Y.
+pub fn placements(pheno: &Phenotype) -> Vec<rapier3d::na::Isometry3<f32>> {
+    use rapier3d::na::Isometry3;
+    let n = pheno.parts.len();
+    let mut isos: Vec<Isometry3<f32>> = Vec::with_capacity(n);
+    isos.push(Isometry3::identity());
+    for i in 1..n {
+        let p = &pheno.parts[i];
+        let parent = p.parent.unwrap();
+        let rot = isos[parent].rotation * p.rot_from_parent;
+        let base_local = Vector3::new(0.0, -p.len * 0.5, 0.0);
+        let pos = isos[parent].translation.vector + isos[parent].rotation * p.anchor_parent - rot * base_local;
+        isos.push(Isometry3::from_parts(pos.into(), rot));
+    }
+    isos
+}
+
+/// Functional measures read off the body's geometry (no physics needed).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BodyMetrics {
+    /// Farthest any part extends from the centre of mass, metres.
+    pub reach: f32,
+    /// Cross-section of the trunk's front end: the mouth, m^2.
+    pub mouth_area: f32,
+    /// Pad (claw, tooth) section relative to the trunk section.
+    pub claws: f32,
+    /// Fraction of body mass in rigidly attached parts: plating.
+    pub plating: f32,
+}
+
+pub fn body_metrics(pheno: &Phenotype) -> BodyMetrics {
+    let isos = placements(pheno);
+    let total: f32 = pheno.parts.iter().map(|p| p.mass).sum::<f32>().max(1e-6);
+    let mut com = Vector3::zeros();
+    for (i, p) in pheno.parts.iter().enumerate() {
+        com += isos[i].translation.vector * (p.mass / total);
+    }
+    let mut reach: f32 = 0.0;
+    let mut pad_section = 0.0;
+    let mut rigid_mass = 0.0;
+    for (i, p) in pheno.parts.iter().enumerate() {
+        let d = (isos[i].translation.vector - com).norm();
+        let extent = match p.kind {
+            NodeKind::Membrane => p.len * 0.5,
+            _ => p.len * 0.5 + p.radius,
+        };
+        reach = reach.max(d + extent);
+        if p.kind == NodeKind::Pad {
+            pad_section += p.section_area;
+        }
+        if i > 0 && p.joint == JointKind::Rigid && p.kind == NodeKind::Capsule {
+            rigid_mass += p.mass;
+        }
+    }
+    let root = &pheno.parts[0];
+    let trunk_section = PI * root.radius * root.radius;
+    BodyMetrics {
+        reach,
+        mouth_area: PI * root.r0 * root.r0,
+        claws: (pad_section / trunk_section.max(1e-6)).min(3.0),
+        plating: rigid_mass / total,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

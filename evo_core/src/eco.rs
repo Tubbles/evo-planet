@@ -27,8 +27,9 @@
 //! Units: one tick is one day; energy is kilograms of dry biomass
 //! equivalent; a patch is roughly a 10 m square.
 
-use crate::decode::decode;
+use crate::decode::{body_metrics, decode};
 use crate::genome::Genome;
+use std::f32::consts::PI;
 use crate::planet::{Derived, PlanetParams};
 use crate::plant::{decode_plant, PlantBody};
 use crate::sim::{fatigue_factor, CreatureSim, Environment, SimConfig};
@@ -36,7 +37,7 @@ use crate::terrain;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub const PATCH_AREA: f32 = 100.0;
 pub const MAX_PLANTS_PER_PATCH: usize = 8;
@@ -75,7 +76,10 @@ pub struct Plant {
 
 impl Plant {
     fn new(genome: Genome, lineage: u32, patch: usize, biomass: f32, energy: f32, gravity: f32) -> Self {
-        let body = decode_plant(&genome, gravity);
+        Self::new_with(genome, lineage, patch, biomass, energy, gravity, None)
+    }
+    fn new_with(genome: Genome, lineage: u32, patch: usize, biomass: f32, energy: f32, gravity: f32, body: Option<PlantBody>) -> Self {
+        let body = body.unwrap_or_else(|| decode_plant(&genome, gravity));
         Self { genome, body: Some(body), lineage, patch, biomass, energy, age: 0.0, height: 0.02, light_frac: 0.0, water_frac: 0.0 }
     }
     pub fn body(&self) -> &PlantBody {
@@ -114,6 +118,13 @@ pub struct Traits {
     pub measured_land: bool,
     pub measured_water: bool,
     pub measured_air: bool,
+    /// Geometry-derived function (see decode::body_metrics).
+    pub reach: f32,
+    pub mouth_area: f32,
+    pub claws: f32,
+    pub plating: f32,
+    /// Mean centre-of-mass height on land relative to half the reach, 0..1.
+    pub upright: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -183,7 +194,7 @@ impl Animal {
     }
 
     pub fn lifespan(&self) -> f32 {
-        300.0 * self.traits.mass.max(0.01).powf(0.25) * self.genome.longevity.max(0.1)
+        150.0 * self.traits.mass.max(0.01).powf(0.25) * self.genome.longevity.max(0.1)
     }
 }
 
@@ -287,10 +298,15 @@ pub struct LineageSummary {
     pub root_frac: f32,
     #[serde(default)]
     pub gut: f32,
+    /// Claws (pad section relative to trunk) and plating (rigid mass fraction).
     #[serde(default)]
     pub weapon: f32,
     #[serde(default)]
     pub armour: f32,
+    #[serde(default)]
+    pub reach: f32,
+    #[serde(default)]
+    pub upright: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -503,12 +519,18 @@ impl EcoWorld {
             return *t;
         }
         let pheno = decode(g);
+        let bm = body_metrics(&pheno);
         let t = Traits {
             mass: pheno.total_mass,
             activity: fatigue_factor(&pheno, &self.derived),
             section_area: pheno.total_section_area,
             base_freq: pheno.base_freq,
             membrane_area: pheno.membrane_area,
+            reach: bm.reach,
+            mouth_area: bm.mouth_area,
+            claws: bm.claws,
+            plating: bm.plating,
+            upright: 0.3,
             ..Default::default()
         };
         self.trait_cache.insert(key, t);
@@ -540,6 +562,27 @@ impl EcoWorld {
     /// Run up to `budget` physics trait measurements for pending animals.
     pub fn measure_pending(&mut self, budget: usize) -> usize {
         let mut done = 0;
+        if budget > 0 && self.pending.len() > 1 {
+            // Measure the bodies that matter most first: one request per
+            // (body, environment), ordered by how many living animals share it,
+            // so a body that is spreading on inherited speeds is checked soon.
+            let mut copies: HashMap<String, usize> = HashMap::new();
+            for a in &self.animals {
+                *copies.entry(a.key.clone()).or_insert(0) += 1;
+            }
+            let mut seen: HashSet<(String, Environment)> = HashSet::new();
+            let mut keep: Vec<(usize, Environment)> = Vec::with_capacity(self.pending.len());
+            for &(idx, env) in self.pending.iter().rev() {
+                if idx >= self.animals.len() {
+                    continue;
+                }
+                if seen.insert((self.animals[idx].key.clone(), env)) {
+                    keep.push((idx, env));
+                }
+            }
+            keep.sort_by_key(|&(idx, _)| copies.get(&self.animals[idx].key).copied().unwrap_or(0));
+            self.pending = keep;
+        }
         while done < budget {
             let Some((idx, env)) = self.pending.pop() else { break };
             if idx >= self.animals.len() {
@@ -564,6 +607,7 @@ impl EcoWorld {
                     _ => {
                         traits.land_speed = speed;
                         traits.measured_land = true;
+                        traits.upright = (r.mean_height / (0.5 * traits.reach).max(0.01)).clamp(0.0, 1.0);
                     }
                 }
                 self.stats.trait_evals += 1;
@@ -607,7 +651,7 @@ impl EcoWorld {
         for (i, p) in self.plants.iter().enumerate() {
             by_patch[p.patch].push(i);
         }
-        let mut seeds: Vec<(Genome, u32, usize, f32)> = Vec::new();
+        let mut seeds: Vec<(Genome, u32, usize, f32, Option<PlantBody>)> = Vec::new();
         let mut dead_plants: Vec<usize> = Vec::new();
         let mut production_today = 0.0f32;
         for (pi, list) in by_patch.iter().enumerate() {
@@ -642,6 +686,7 @@ impl EcoWorld {
             }
             let nutrient_share = if nutrient_demand > 0.0 { (patch.nutrient / nutrient_demand).min(1.0) } else { 1.0 };
             let mut nutrient_used = 0.0;
+            let mut litter_today = 0.0;
             for (i, got, leaf_area) in intercepts {
                 let p = &mut self.plants[i];
                 let root = p.root_mass();
@@ -666,9 +711,21 @@ impl EcoWorld {
                 let photo = got * 0.02 * cf * tf * water_frac * habitat_eff * (0.3 + 0.7 * nutrient_share) * (1.0 - 0.35 * tough);
                 // Leaves respire fast, woody and root tissue slowly.
                 let leaf_m = p.leaf_mass();
-                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * 0.0005) * (0.3 + tf) * (1.0 + 0.3 * tol);
+                // Transport: feeding leaves through long stems costs upkeep per kg*m.
+                let transport = p.body().transport * (p.biomass / p.body().target_mass).clamp(0.0, 1.0);
+                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * 0.0005 + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
                 production_today += photo;
                 p.energy += photo - respiration;
+                // Leaf economics: thin leaves live weeks, thick ones years
+                // (Wright et al. 2004: lifespan ~ LMA^1.5, a year at 0.1 kg/m^2).
+                // Shed leaves are litter and must be regrown from energy.
+                if leaf_m > 0.0 && sla > 0.0 {
+                    let lma = 1.0 / sla;
+                    let leaf_lifespan = (365.0 * (lma / 0.1).powf(1.5)).clamp(20.0, 2000.0);
+                    let shed = leaf_m / leaf_lifespan;
+                    p.biomass = (p.biomass - shed).max(1e-5);
+                    litter_today += shed;
+                }
                 p.light_frac = if light > 0.0 { got / (light * PATCH_AREA) } else { 0.0 };
                 p.water_frac = water_frac;
                 p.age += 1.0;
@@ -686,9 +743,11 @@ impl EcoWorld {
                         let count = ((p.energy / seed_cost) as usize).min(3);
                         for _ in 0..count {
                             p.energy -= seed_cost;
-                            let (child, _body_changed) = p.genome.mutate(&mut self.rng);
+                            let (child, body_changed) = p.genome.mutate(&mut self.rng);
                             let reach = p.genome.dispersal * (1.0 + 0.3 * p.height * (self.derived.air_density / 1.225).sqrt());
-                            seeds.push((child, p.lineage, p.patch, reach));
+                            // Same body as the parent: reuse its decoded structure.
+                            let body = if body_changed { None } else { Some(p.body().clone()) };
+                            seeds.push((child, p.lineage, p.patch, reach, body));
                         }
                     }
                 }
@@ -698,6 +757,7 @@ impl EcoWorld {
             }
             let pt = &mut self.patches[pi];
             pt.nutrient = (pt.nutrient - nutrient_used).max(0.0);
+            pt.dead_matter += litter_today;
         }
         // Seeds hop over the neighbour graph and land where there is room.
         let mut counts: Vec<usize> = vec![0; n_patches];
@@ -705,7 +765,7 @@ impl EcoWorld {
             counts[p.patch] += 1;
         }
         let gravity = self.planet.gravity;
-        for (child, parent_lineage, from, reach) in seeds {
+        for (child, parent_lineage, from, reach, body) in seeds {
             let target = self.disperse(from, reach);
             let cap = if self.patches[target].water { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
             if counts[target] >= cap {
@@ -729,7 +789,7 @@ impl EcoWorld {
                 continue;
             }
             counts[target] += 1;
-            self.plants.push(Plant::new(child, lineage, target, seed_mass, seed_mass * 0.8, gravity));
+            self.plants.push(Plant::new_with(child, lineage, target, seed_mass, seed_mass * 0.8, gravity, body));
         }
         // Remove dead plants (descending index order).
         dead_plants.sort_unstable();
@@ -779,7 +839,7 @@ impl EcoWorld {
                 continue;
             }
             // --- read state -------------------------------------------------
-            let (patch, in_water, adult_mass, mass, motility, section, freq, activity, _gut_type, weapon, armour, fat_frac, gut_frac, membrane_area, water_speed_raw, land_speed_raw, measured_land, measured_water, eff_plant, eff_meat, prev_intake) = {
+            let (patch, in_water, adult_mass, mass, motility, section, freq, activity, _gut_type, _weapon, _armour, fat_frac, gut_frac, membrane_area, water_speed_raw, land_speed_raw, measured_land, measured_water, eff_plant, eff_meat, prev_intake) = {
                 let a = &self.animals[ai];
                 let (ep, em) = a.efficiencies();
                 (
@@ -806,20 +866,24 @@ impl EcoWorld {
                     a.intake_rate,
                 )
             };
+            let (reach_adult, mouth_area, claws, plating, upright) = {
+                let t = &self.animals[ai].traits;
+                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, if self.patches[patch].water { 1.0 } else { t.upright })
+            };
             let temp = self.patches[patch].temp_c;
             // Ectotherm: body temperature is patch temperature; Q10 = 2 around 20 C.
             let q = 2f32.powf((temp - 20.0) / 10.0).clamp(0.15, 3.0);
             let size_f = (mass / adult_mass).clamp(0.01, 1.0); // growth fraction
             let lin_f = size_f.powf(1.0 / 3.0); // juvenile linear scale
             let m34 = mass.powf(0.75);
-            // Armour slows: a shell is dead weight for the muscles.
-            let speed_here = (if in_water { water_speed_raw } else { land_speed_raw }) * motility * lin_f * (1.0 - 0.4 * armour);
-            let land_speed = land_speed_raw * motility * lin_f * (1.0 - 0.4 * armour);
+            // Plating slows: rigid mass is dead weight for the muscles.
+            let speed_here = (if in_water { water_speed_raw } else { land_speed_raw }) * motility * lin_f * (1.0 - 0.3 * plating);
+            let land_speed = land_speed_raw * motility * lin_f * (1.0 - 0.3 * plating);
 
             // --- costs -------------------------------------------------------
             // Field metabolic rate: Kleiber exponent, ectotherm anchor, oxygen limit.
             let fmr = 0.006 * m34 * q / o2.min(1.0).max(0.3);
-            let upkeep = fmr * 0.3 * (weapon + armour);
+            let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
             let activity_cost = 0.004 * section * freq * 20.0 * activity * motility * size_f.powf(2.0 / 3.0);
             let mut delta = -(fmr + upkeep + activity_cost);
             cost_today += fmr + upkeep + activity_cost;
@@ -848,15 +912,19 @@ impl EcoWorld {
             let mut space = (gut_cap - (self.animals[ai].gut_plant + self.animals[ai].gut_meat)).max(0.0);
 
             // --- foraging options, each as a Holling type II intake rate ---------
-            // Maximum intake (kg/day) scales with M^0.75: roughly a tenth of body
-            // mass per day for a kilogram animal; handling time is its inverse.
-            let bite_rate = (0.1 * m34 * q).max(1e-6);
+            // Bite rate from the mouth: trunk cross-section (juveniles scaled),
+            // about a tenth of body mass per day for a well-proportioned kilogram.
+            let bite_rate = (12.0 * mouth_area * lin_f * lin_f * q).max(1e-6);
             let handling = 1.0 / bite_rate;
-            // Browsing reach: about half a metre for a 1 kg body, scaling with length.
-            let reach_h = 0.5 * mass.powf(1.0 / 3.0);
-            // Fraction of the patch's accessible food encountered per day: a
-            // 10 m patch is covered in a day by anything that moves at all.
-            let search = (if in_water { 0.5 } else { 0.2 }) + 2.0 * speed_here;
+            // Browsing reach from the body's actual extent; on land only an
+            // upright body gets its full reach.
+            let reach_h = reach_adult * lin_f * (0.3 + 0.7 * upright);
+            // Fraction of the patch's food encountered per day is the area swept:
+            // a detection strip two reaches wide along the day's path (8 h of
+            // foraging, cut by fatigue), plus the circle a still body can reach.
+            let reach_now = reach_adult * lin_f;
+            let path = speed_here * 28800.0 * activity;
+            let search = ((PI * reach_now * reach_now + 2.0 * reach_now * path) / PATCH_AREA).min(1.0);
 
             // Plants here (accessible leaf mass), plus shore plants reachable from the water.
             let mut plant_targets: Vec<(usize, f32)> = Vec::new();
@@ -904,7 +972,8 @@ impl EcoWorld {
             let interference = 0.15 * crowd;
             let plant_rate = search * plant_b / (1.0 + search * handling * plant_b + interference); // kg/day
             let carrion_here = self.patches[patch].carrion;
-            let carrion_search = 0.5 + speed_here * 0.5; // carrion is found by smell
+            // Carrion is smelt from afar: the detection strip is three times wider.
+            let carrion_search = ((PI * reach_now * reach_now + 6.0 * reach_now * path) / PATCH_AREA).min(1.0);
             let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here + interference);
             // Energy value per kg eaten, by gut.
             let plant_value = plant_rate * eff_plant;
@@ -925,9 +994,9 @@ impl EcoWorld {
                     let pm = prey.mass.max(0.001);
                     let p_in_water = self.patches[prey.patch].water;
                     let p_lin = (pm / prey.traits.mass.max(0.001)).clamp(0.01, 1.0).powf(1.0 / 3.0);
-                    let prey_speed = (if p_in_water { prey.traits.water_speed } else { prey.traits.land_speed }) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.4 * prey.genome.armour.clamp(0.0, 1.0));
-                    let attack = m34 * (0.5 + speed_here) * (0.5 + 1.5 * weapon);
-                    let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 1.5 * prey.genome.armour.clamp(0.0, 1.0));
+                    let prey_speed = (if p_in_water { prey.traits.water_speed } else { prey.traits.land_speed }) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.3 * prey.traits.plating);
+                    let attack = m34 * (0.5 + speed_here) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright);
+                    let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 2.0 * prey.traits.plating);
                     let scale = 0.25 * (attack + defence) + 1e-6;
                     // Encounter: detection distance scales with prey body length, so
                     // small prey are found at a fraction of the rate of large prey.
@@ -1036,7 +1105,7 @@ impl EcoWorld {
                     let value = if directed {
                         let plants_v: f32 = plants_in[cand].iter().map(|&pi| self.plants[pi].biomass).sum::<f32>() * eff_plant;
                         let carrion_v = self.patches[cand].carrion * eff_meat;
-                        let prey_v: f32 = animals_in[cand].iter().map(|&j| self.animals[j].mass).sum::<f32>() * eff_meat * 0.2 * (0.5 + 1.5 * weapon);
+                        let prey_v: f32 = animals_in[cand].iter().map(|&j| self.animals[j].mass).sum::<f32>() * eff_meat * 0.2 * (0.5 + 3.0 * claws);
                         plants_v + carrion_v + prey_v + self.rng.gen_range(0.0..0.02)
                     } else {
                         self.rng.gen_range(0.0..1.0)
@@ -1067,7 +1136,7 @@ impl EcoWorld {
                 if a.mass < adult_mass {
                     // West-Brown-Enquist growth: dm/dt = a m^0.75 (1 - (m/M)^0.25).
                     // Asymptotic, so maturity is a fraction of adult mass, not all of it.
-                    let wbe = 0.08 * m34 * q * (1.0 - (a.mass / adult_mass).powf(0.25)).max(0.02);
+                    let wbe = 0.12 * m34 * q * (1.0 - (a.mass / adult_mass).powf(0.25)).max(0.02);
                     let grow = surplus.min(wbe).min(adult_mass - a.mass);
                     a.mass += grow * 0.7;
                     a.reserve -= grow;
@@ -1077,7 +1146,7 @@ impl EcoWorld {
                 if mature {
                     let mass0 = (a.genome.offspring_frac.clamp(0.01, 0.5) * adult_mass).max(0.001);
                     let cost = mass0 * 1.3; // body plus a starter reserve
-                    if surplus >= cost && self.rng.gen_bool(0.5) {
+                    if surplus >= cost && self.rng.gen_bool(0.8) {
                         a.reserve -= cost;
                         a.offspring += 1;
                         let (child, body_changed) = if self.rng.gen_bool(0.75) { a.genome.mutate(&mut self.rng) } else { (a.genome.clone(), false) };
@@ -1145,7 +1214,13 @@ impl EcoWorld {
             if !b.body_changed {
                 self.trait_cache.entry(key.clone()).or_insert(b.parent_traits);
             }
-            let traits = self.lookup_traits(&b.genome);
+            let mut traits = self.lookup_traits(&b.genome);
+            // A changed body starts with most of its parent's measured speeds as a
+            // prior until its own physics episode runs at half adult mass.
+            if b.body_changed && !traits.measured_water && !traits.measured_land {
+                traits.water_speed = b.parent_traits.water_speed * 0.7;
+                traits.land_speed = b.parent_traits.land_speed * 0.7;
+            }
             // Larval dispersal: young drift one or two patches from the parent,
             // which is what keeps them off the parents' menu in the sea.
             let born_at = self.disperse(b.patch, 1.5);
@@ -1225,8 +1300,8 @@ impl EcoWorld {
             }
             let (h, c, d) = a.diet();
             s.mean_gut += a.genome.gut_type / na;
-            s.mean_weapon += a.genome.weapon / na;
-            s.mean_armour += a.genome.armour / na;
+            s.mean_weapon += a.traits.claws / na;
+            s.mean_armour += a.traits.plating / na;
             let on_land = !self.patches[a.patch].water;
             if c >= h && c >= d {
                 s.carnivores += 1;
@@ -1306,6 +1381,8 @@ impl EcoWorld {
             gut: 0.0,
             weapon: 0.0,
             armour: 0.0,
+            reach: 0.0,
+            upright: 0.0,
         }
     }
 
@@ -1324,8 +1401,10 @@ impl EcoWorld {
                     let (h, ca, d) = a.diet();
                     s.mean_mass += a.mass / c;
                     s.gut += a.genome.gut_type / c;
-                    s.weapon += a.genome.weapon / c;
-                    s.armour += a.genome.armour / c;
+                    s.weapon += a.traits.claws / c;
+                    s.armour += a.traits.plating / c;
+                    s.reach += a.traits.reach / c;
+                    s.upright += a.traits.upright / c;
                     s.herb += h / c;
                     s.carn += ca / c;
                     s.detr += d / c;
