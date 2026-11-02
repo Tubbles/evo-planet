@@ -205,12 +205,14 @@ impl CreatureSim {
             let pos = isos[parent].translation.vector + isos[parent].rotation * p.anchor_parent - rot * base_local;
             isos.push(Isometry3::from_parts(pos.into(), rot));
         }
-        // Lift so the lowest point sits just above the ground (or at spawn depth).
+        // Place the lowest point on the ground (1 cm solver clearance, no drop:
+        // a fall would hand the body kinetic energy and a topple for free), or
+        // at spawn depth / drop height.
         let min_y = (0..n)
             .map(|i| isos[i].translation.y - part_bounding_radius(&pheno.parts[i]))
             .fold(f32::INFINITY, f32::min);
         let lift = match env {
-            Environment::Land => ground_y + 0.15 - min_y,
+            Environment::Land => ground_y + 0.01 - min_y,
             Environment::Water => spawn_y - min_y,
             Environment::Air => spawn_y - min_y,
         };

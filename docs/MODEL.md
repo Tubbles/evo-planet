@@ -217,6 +217,8 @@ season. Each is a candidate system, each with a real analogue.
     episode after settling, and bodies on the ground feel rolling resistance
     (coefficient 0.05), without which a toppled capsule rolls forever in a
     frictionless solver. A single capsule now scores under 1 mm/s on land.
+    Land bodies are also placed on the ground instead of dropped 15 cm,
+    which had handed every body kinetic energy and a topple for free.
 11. Flight was never measured and had no function. See the flight section:
     leap launch, glide beyond a stone, launch height from canopy and
     hillsides, range, surveying and escape. First runs: no gliders yet by day
