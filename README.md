@@ -215,17 +215,29 @@ but foraging on land scales with speed, so poor crawlers go hungry there.
   predation.
 - **Decomposition** returns plant detritus and carrion to nutrient at rates
   set by temperature and moisture.
+- **Costs and caps.** A kill feeds the killer up to 1.5× its mass regardless
+  of diet gene; diet genes drift in small steps with occasional ±0.3 jumps;
+  limb upkeep is low so body plans can drift in complexity; a grazer can only
+  work a plant up to three times its own mass, so big plants need big
+  grazers; offspring whose body did not change inherit the parent's measured
+  speeds instead of a physics episode. Animal cap 500.
 - **Species** are lineages. A child with a changed body plan starts a new
   lineage with probability 0.2 (plants 0.03 per seed). Random sea immigrants
   arrive only when the world empties. Caps: 8 plants per patch, 260 animals.
 
-Observed on Earth over 4000 days (1000 patches, ocean start): three quarters
-of the land greens from the shores inward; land plants grow taller than the
-1.5 m aquatic cap, up to 7.7 m; swimmers evolve to about 1 m/s; the best
-crawling speed among sea animals rises from 0.05 to about 0.3 m/s through
-shore grazing, and herbivores start appearing on land. Carnivores boom then
-crash as herbivores recover; detritivores wax when the dead-matter pool is
-large.
+Observed on Earth over 6000 days (1000 patches, algae and grazers only at
+the start): algae evolve stems, roots, branching and land tolerance and green
+half the land from the shores inward; land plants grow past the 1.5 m
+aquatic cap. Animals shrink to under a kilogram while food is sparse, then,
+once a kill feeds the killer, predation erupts: by day 3000 a quarter of the
+fauna are omnivores, dozens are outright carnivores, mean body mass peaks
+near 100 kg in the arms race, and tens of thousands of kills follow. The boom
+collapses into a scavenger-hunter fauna (detritivory gene around 0.7) with a
+minority of herbivores, and body size falls back. Crawling speed rises under
+shore grazing and a few dozen animals live on land at a time. Diet classes
+in the readouts go by the dominant gene, so scavengers that hunt through the
+scavenging term count as detritivores; the kill count and the omnivore count
+show the predation.
 
 Species are not evolved one at a time. Everything lives in the same world
 at once; speciation is tracked as lineages, and fresh random immigrants

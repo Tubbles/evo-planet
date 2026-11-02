@@ -42,7 +42,9 @@ pub const PATCH_AREA: f32 = 100.0;
 pub const MAX_PLANTS_PER_PATCH: usize = 8;
 /// Algae are small; the sea can hold more individuals per patch.
 pub const MAX_PLANTS_PER_WATER_PATCH: usize = 16;
-pub const MAX_ANIMALS: usize = 260;
+/// Global animal cap. High enough that predator and prey numbers can cycle
+/// without the cap itself deciding who lives.
+pub const MAX_ANIMALS: usize = 500;
 pub const TRAIT_EPISODE_S: f32 = 3.0;
 pub const NEIGHBOURS: usize = 6;
 
@@ -158,6 +160,12 @@ pub struct EcoStats {
     pub herbivores: usize,
     pub carnivores: usize,
     pub detritivores: usize,
+    /// Animals with carnivory above 0.15 (counted in whichever class dominates).
+    pub omnivores: usize,
+    pub mean_carn: f32,
+    pub mean_detr: f32,
+    pub mean_mass: f32,
+    pub mean_parts: f32,
     pub aquatic: usize,
     pub land_plants: usize,
     pub land_animals: usize,
@@ -623,7 +631,7 @@ impl EcoWorld {
         // ---------------- Animals -------------------------------------------
         let o2 = self.derived.o2_rel.clamp(0.05, 3.0);
         let mut deaths: Vec<usize> = Vec::new();
-        let mut births: Vec<(Genome, usize, f32, u32, usize)> = Vec::new();
+        let mut births: Vec<(Genome, usize, f32, u32, usize, Traits)> = Vec::new();
         let mut killed: Vec<usize> = Vec::new();
         let n_animals = self.animals.len();
         let mut animals_in: Vec<Vec<usize>> = vec![Vec::new(); n_patches];
@@ -659,7 +667,7 @@ impl EcoWorld {
             let m34 = mass.powf(0.75);
             // Costs: basal + activity (muscle section x frequency x motility) + travel.
             let basal = 0.006 * m34 * (0.4 + tf) / o2.min(1.0).max(0.3);
-            let activity_cost = 0.004 * section * freq * 50.0 * activity * motility;
+            let activity_cost = 0.004 * section * freq * 20.0 * activity * motility;
             let mut energy_delta = -(basal + activity_cost);
             // Photosynthetic membranes: a mostly sessile animal with panels gains
             // from sunlight, at half a leaf's efficiency (they are wings, not leaves).
@@ -685,7 +693,9 @@ impl EcoWorld {
                         continue; // seedlings are too small to find
                     }
                     let lf = p.body().leaf_mass / p.body().target_mass;
-                    let edible = (p.biomass - 0.004) * lf * 0.15;
+                    // A grazer can only work a plant up to a few times its own mass.
+                    let reach = (3.0 * mass / p.biomass.max(1e-6)).min(1.0);
+                    let edible = (p.biomass - 0.004) * lf * 0.15 * reach;
                     let bite = want.min(edible);
                     p.biomass -= bite;
                     want -= bite;
@@ -709,7 +719,8 @@ impl EcoWorld {
                                 continue;
                             }
                             let lf = p.body().leaf_mass / p.body().target_mass;
-                            let edible = (p.biomass - 0.004) * lf * 0.15;
+                            let reach = (3.0 * mass / p.biomass.max(1e-6)).min(1.0);
+                            let edible = (p.biomass - 0.004) * lf * 0.15 * reach;
                             let bite = shore_want.min(edible);
                             p.biomass -= bite;
                             shore_want -= bite;
@@ -747,9 +758,10 @@ impl EcoWorld {
                         1.0 / (1.0 + (-(speed - prey_speed) * 2.0).exp())
                     };
                     if size_ok && self.rng.gen_bool((p_catch * 0.6) as f64) {
+                        // A kill feeds the killer up to its stomach limit; the diet
+                        // gene only controls how often it tries.
                         let body = prey.energy.max(0.0) + prey.traits.mass * 0.5;
-                        let share = (carn + 0.5 * detr).min(1.0);
-                        let meal = (body * 0.8 * share).min(mass * 1.5);
+                        let meal = (body * 0.8).min(mass * 1.5);
                         food += meal;
                         self.patches[patch].carrion += body - meal;
                         killed.push(j);
@@ -808,7 +820,7 @@ impl EcoWorld {
                 let share = a.energy * 0.35;
                 a.energy -= share;
                 a.offspring += 1;
-                births.push((child, a.patch, share, a.lineage, body_changed as usize));
+                births.push((child, a.patch, share, a.lineage, body_changed as usize, a.traits));
             }
             if a.energy < 0.0 || a.age > 400.0 + 200.0 * (a.traits.mass.ln().max(0.0)) {
                 deaths.push(ai);
@@ -833,8 +845,14 @@ impl EcoWorld {
         for p in &self.plants {
             plant_counts[p.patch] += 1;
         }
-        for (genome, patch, energy, lineage, body_changed) in births {
+        for (genome, patch, energy, lineage, body_changed, parent_traits) in births {
             let lineage = if body_changed == 1 && self.rng.gen_bool(0.2) { self.new_lineage() } else { lineage };
+            // Same body as the parent: inherit its measured speeds instead of
+            // spending physics on it (controller-only mutations are approximated).
+            if body_changed == 0 {
+                let key = hash_genome(&genome);
+                self.trait_cache.entry(key).or_insert(parent_traits);
+            }
             if genome.motility < 0.5 {
                 // A sessile child: settles where it was born and lives as a plant.
                 let cap = if self.patches[patch].water { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
@@ -899,6 +917,12 @@ impl EcoWorld {
         s.aquatic = 0;
         s.land_herbivores = 0;
         s.best_land_speed = 0.0;
+        s.omnivores = 0;
+        s.mean_carn = 0.0;
+        s.mean_detr = 0.0;
+        s.mean_mass = 0.0;
+        s.mean_parts = 0.0;
+        let na = self.animals.len().max(1) as f32;
         s.land_plants = self.plants.iter().filter(|p| !self.patches[p.patch].water).count();
         s.land_patches = self.patches.iter().filter(|p| !p.water).count();
         {
@@ -930,6 +954,13 @@ impl EcoWorld {
                 s.aquatic += 1;
             }
             s.best_land_speed = s.best_land_speed.max(a.traits.land_speed);
+            if c > 0.15 {
+                s.omnivores += 1;
+            }
+            s.mean_carn += c / na;
+            s.mean_detr += d / na;
+            s.mean_mass += a.traits.mass / na;
+            s.mean_parts += a.genome.structural_size() as f32 / na;
         }
         let mut pl: Vec<u32> = self.plants.iter().map(|p| p.lineage).collect();
         pl.sort_unstable();

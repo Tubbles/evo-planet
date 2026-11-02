@@ -446,6 +446,8 @@ function renderEco(dps) {
     ['Plants', `${st.plants} · ${fmt(st.plant_biomass, 0)} kg · ${st.plant_lineages} lineages`],
     ['Animals', `${st.animals} · H ${st.herbivores} C ${st.carnivores} D ${st.detritivores} · aquatic ${st.aquatic}`],
     ['Animal lineages', `${st.animal_lineages}`],
+    ['Diet genes', `omnivores ${st.omnivores} · mean carnivory ${fmt(st.mean_carn, 2)} · scavenging ${fmt(st.mean_detr, 2)}`, st.omnivores > 0 ? 'good' : ''],
+    ['Body', `mean ${fmt(st.mean_mass, 2)} kg · ${fmt(st.mean_parts, 1)} genome elements`],
     ['Dead matter / nutrient', `${fmt(st.dead_matter, 0)} / ${fmt(st.nutrient, 0)} kg`],
     ['Births / deaths / kills', `${st.births} / ${st.deaths} / ${st.kills}`],
     ['Land colonised', `${st.land_patches ? Math.round(100 * st.vegetated_land / st.land_patches) : 0} % of land green · ${st.land_plants} land plants`, st.vegetated_land > 0 ? 'good' : ''],

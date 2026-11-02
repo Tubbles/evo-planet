@@ -581,11 +581,13 @@ impl Genome {
             g.water_store = nudge(rng, g.water_store, 0.25, 0.01, 0.0, 0.5);
             body = true;
         }
+        // Diet genes drift in small steps with an occasional large jump, so a
+        // lineage can cross a fitness valley (grazer -> hunter) in one go.
         if rng.gen_bool((p * 2.0) as f64) {
-            g.diet_carn = nudge(rng, g.diet_carn, 0.3, 0.05, 0.0, 1.0);
+            g.diet_carn = if rng.gen_bool(0.1) { (g.diet_carn + rng.gen_range(-0.3..0.3f32)).clamp(0.0, 1.0) } else { nudge(rng, g.diet_carn, 0.3, 0.05, 0.0, 1.0) };
         }
         if rng.gen_bool((p * 2.0) as f64) {
-            g.diet_detr = nudge(rng, g.diet_detr, 0.3, 0.05, 0.0, 1.0);
+            g.diet_detr = if rng.gen_bool(0.1) { (g.diet_detr + rng.gen_range(-0.3..0.3f32)).clamp(0.0, 1.0) } else { nudge(rng, g.diet_detr, 0.3, 0.05, 0.0, 1.0) };
         }
         // Plant genes (no effect on animals).
         if rng.gen_bool((p * 2.5) as f64) {

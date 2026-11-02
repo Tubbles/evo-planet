@@ -30,8 +30,8 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
             let s = &w.stats;
             let max_h = w.plants.iter().map(|p| p.height).fold(0.0f32, f32::max);
             println!(
-                "day {:>5} | plants {:>5} ({:>8.1} kg, on land {:>4} / {:>3} patches green, tallest {:>4.1} m, {:>3} lin) | animals {:>3} (H {:>3} C {:>3} D {:>3}, aquatic {:>3}, on land {:>3} [{:>3} herb], best land speed {:.2} m/s, {:>3} lin) | P->A {} A->P {} | dead {:>7.1} nutr {:>7.1} | births {:>5} deaths {:>5} kills {:>4} | evals {} pending {}",
-                day, s.plants, s.plant_biomass, s.land_plants, s.vegetated_land, max_h, s.plant_lineages, s.animals, s.herbivores, s.carnivores, s.detritivores, s.aquatic, s.land_animals, s.land_herbivores, s.best_land_speed, s.animal_lineages, s.plant_to_animal, s.animal_to_plant,
+                "day {:>5} | plants {:>5} ({:>8.1} kg, on land {:>4} / {:>3} patches green, tallest {:>4.1} m, {:>3} lin) | animals {:>3} (H {:>3} C {:>3} D {:>3}, aquatic {:>3}, on land {:>3} [{:>3} herb], best land speed {:.2} m/s, {:>3} lin) | omni {:>3} carn {:.2} detr {:.2} | mass {:.2} kg elems {:.1} | P->A {} A->P {} | dead {:>7.1} nutr {:>7.1} | births {:>5} deaths {:>5} kills {:>4} | evals {} pending {}",
+                day, s.plants, s.plant_biomass, s.land_plants, s.vegetated_land, max_h, s.plant_lineages, s.animals, s.herbivores, s.carnivores, s.detritivores, s.aquatic, s.land_animals, s.land_herbivores, s.best_land_speed, s.animal_lineages, s.omnivores, s.mean_carn, s.mean_detr, s.mean_mass, s.mean_parts, s.plant_to_animal, s.animal_to_plant,
                 s.dead_matter, s.nutrient, s.births, s.deaths, s.kills, s.trait_evals, s.pending_evals
             );
         }
