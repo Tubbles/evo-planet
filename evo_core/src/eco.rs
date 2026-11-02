@@ -44,15 +44,26 @@ use std::collections::{HashMap, HashSet};
 /// neighbours (see the home-range spill in the animal tick), so speed keeps
 /// paying beyond the patch instead of saturating at two centimetres a second.
 pub const PATCH_AREA: f32 = 100.0;
+/// Everything below is per square metre or per metre; the cell size only
+/// decides how finely the planet is cut (see EcoWorld::patch_area).
+pub const NUTRIENT0_PER_M2: f32 = 0.02;
+pub const DEAD0_PER_M2: f32 = 0.01;
+/// Individual-plant density caps (performance guards), per m^2.
+pub const PLANT_CAP_PER_M2_WATER: f32 = 0.48;
+pub const PLANT_CAP_PER_M2_LAND: f32 = 0.08;
+/// Beddington-DeAngelis interference per competitor per 100 m^2.
+pub const INTERFERENCE_PER_100M2: f32 = 0.15;
+/// Founding grazers per square metre of sea.
+pub const FOUNDERS_PER_M2: f32 = 1.0 / 1200.0;
+/// Larval drift from the birth site, metres.
+pub const LARVAL_DRIFT_M: f32 = 15.0;
+/// The seed dispersal gene is in tens of metres.
+pub const SEED_DISPERSAL_UNIT_M: f32 = 10.0;
 /// Share of a water patch's plant mass that is suspended (drift, plankton)
 /// and so reachable by filtering a current rather than by travelling.
 pub const SUSPENDED_FRACTION: f32 = 0.2;
 /// Water cleared by a filter feeder, m^3 per kg of body per day.
 pub const CLEARANCE_M3_PER_KG_DAY: f32 = 1.2;
-pub const MAX_PLANTS_PER_PATCH: usize = 8;
-/// Algae are small; the sea holds more individuals per patch so that light,
-/// not a counter, limits production (a square-metre sheet x 48 is LAI 0.5).
-pub const MAX_PLANTS_PER_WATER_PATCH: usize = 48;
 /// Global animal cap. High enough that predator and prey numbers can cycle
 /// without the cap itself deciding who lives.
 /// Performance guard only. Ecological limits come from food, crowding and
@@ -407,6 +418,8 @@ pub struct EcoWorld {
     pub animals: Vec<Animal>,
     pub day: u64,
     pub terrain_seed: u32,
+    /// Area of one patch, m^2: a discretisation choice, not a model parameter.
+    pub patch_area: f32,
     rng: StdRng,
     next_lineage: u32,
     trait_cache: HashMap<String, Traits>,
@@ -431,6 +444,12 @@ fn hash_genome(g: &Genome) -> String {
 impl EcoWorld {
     /// `n_patches` uniform patches on the sphere (clamped to 200..6000).
     pub fn new(planet: PlanetParams, n_patches: usize, seed: u64) -> Self {
+        Self::new_with_area(planet, n_patches, seed, PATCH_AREA)
+    }
+
+    /// Build a world with a chosen cell size (m^2). Results should not depend
+    /// on it beyond discretisation noise; `evo_headless --patch-area` tests that.
+    pub fn new_with_area(planet: PlanetParams, n_patches: usize, seed: u64, patch_area: f32) -> Self {
         let derived = planet.derive();
         let rng = StdRng::seed_from_u64(seed);
         let n = n_patches.clamp(200, 6000);
@@ -456,7 +475,7 @@ impl EcoWorld {
                 } else {
                     (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: 2.0, dead_matter: 1.0, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 } }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 } }
             })
             .collect();
         // Shore band: land patches touching water stay wet, the first foothold for plants.
@@ -480,6 +499,7 @@ impl EcoWorld {
             animals: Vec::new(),
             day: 0,
             terrain_seed,
+            patch_area,
             rng,
             next_lineage: 1,
             trait_cache: HashMap::new(),
@@ -491,7 +511,9 @@ impl EcoWorld {
         let water_n = world.patches.iter().filter(|p| p.water).count().max(1);
         world.seed_plants(water_n * 2);
         // Founders scale with the sea so small worlds are not overgrazed on day one.
-        world.immigrate((water_n / 12).clamp(12, 80));
+        // Founders per area of sea (about one per 1,200 m^2), not per cell.
+        let sea_area = water_n as f32 * patch_area;
+        world.immigrate(((sea_area * FOUNDERS_PER_M2).round() as usize).clamp(12, 200));
         world
     }
 
@@ -511,6 +533,12 @@ impl EcoWorld {
 
     /// Warm shallow seas: water patches next to land with a mild climate.
     /// Life starts where production is highest; nothing is seeded on ice.
+    /// Individual-plant cap of a patch from the density cap and cell size.
+    fn plant_cap(&self, patch: usize) -> usize {
+        let d = if self.patches[patch].submersion >= 0.5 { PLANT_CAP_PER_M2_WATER } else { PLANT_CAP_PER_M2_LAND };
+        ((d * self.patch_area).round() as usize).max(1)
+    }
+
     fn cradle_patches(&self) -> Vec<usize> {
         let shallow: Vec<usize> = (0..self.patches.len())
             .filter(|&i| self.patches[i].water && self.patches[i].temp_c > 12.0 && self.neighbours[i].iter().any(|&j| !self.patches[j].water))
@@ -890,6 +918,8 @@ impl EcoWorld {
 
     pub fn tick(&mut self) {
         self.day += 1;
+        let a = self.patch_area;
+        let patch_w = a.sqrt();
         let g = self.planet.gravity;
         let cf = co2_factor(self.planet.co2_frac);
         let light = self.planet.insolation;
@@ -923,13 +953,13 @@ impl EcoWorld {
             order.sort_by(|a, b| self.plants[*b].height.partial_cmp(&self.plants[*a].height).unwrap());
             // Light arrives per square metre; `remaining` is in m^2 of full sun.
             // Water attenuates it, which is the pull toward land.
-            let mut remaining = light * PATCH_AREA * (0.3 * sub + (1.0 - sub));
+            let mut remaining = light * a * (0.3 * sub + (1.0 - sub));
             let mut nutrient_demand = 0.0;
             let mut intercepts = Vec::with_capacity(order.len());
             for &i in &order {
                 let p = &self.plants[i];
                 let leaf_area = p.leaf_area();
-                let frac = 1.0 - (-0.5 * leaf_area / PATCH_AREA).exp();
+                let frac = 1.0 - (-0.5 * leaf_area / a).exp();
                 let got = remaining * frac;
                 remaining -= got;
                 intercepts.push((i, got, leaf_area));
@@ -978,7 +1008,7 @@ impl EcoWorld {
                     p.biomass = (p.biomass - shed).max(1e-5);
                     litter_today += shed;
                 }
-                p.light_frac = if light > 0.0 { got / (light * PATCH_AREA) } else { 0.0 };
+                p.light_frac = if light > 0.0 { got / (light * a) } else { 0.0 };
                 p.water_frac = water_frac;
                 p.age += 1.0;
                 nutrient_used += p.biomass * 0.002 * nutrient_share * 0.3;
@@ -996,7 +1026,7 @@ impl EcoWorld {
                         for _ in 0..count {
                             p.energy -= seed_cost;
                             let (child, body_changed) = p.genome.mutate(&mut self.rng);
-                            let reach = p.genome.dispersal * (1.0 + 0.3 * p.height * (self.derived.air_density / 1.225).sqrt());
+                            let reach = p.genome.dispersal * SEED_DISPERSAL_UNIT_M / patch_w * (1.0 + 0.3 * p.height * (self.derived.air_density / 1.225).sqrt());
                             // Same body as the parent: reuse its decoded structure.
                             let body = if body_changed { None } else { Some(p.body().clone()) };
                             seeds.push((child, p.lineage, p.patch, reach, body));
@@ -1019,7 +1049,7 @@ impl EcoWorld {
         let gravity = self.planet.gravity;
         for (child, parent_lineage, from, reach, body) in seeds {
             let target = self.disperse(from, reach);
-            let cap = if self.patches[target].submersion >= 0.5 { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
+            let cap = self.plant_cap(target);
             if counts[target] >= cap {
                 self.patches[target].dead_matter += child.seed_mass;
                 continue;
@@ -1205,13 +1235,14 @@ impl EcoWorld {
             // foraging, cut by fatigue), plus the circle a still body can reach.
             let reach_now = reach_adult * lin_f;
             let path = (travel * 28800.0 * activity).max(glide_day);
-            let search = ((PI * reach_now * reach_now + 2.0 * reach_now * path) / PATCH_AREA).min(1.0);
+            let range_area = PI * reach_now * reach_now + 2.0 * reach_now * path; // m^2 swept today
+            let search = (range_area / a).min(1.0);
             // Filter feeding: a fifth of the sea's plant mass is drifting fragments
             // and plankton, and a body clears about a cubic metre of water per
             // kilogram per day (mussels and sponges: 1-10 L/h per 100 g), from a
             // patch two metres deep. Proportional to mass, so no scale advantage;
             // a supplement at fish-level metabolism, not a free living.
-            let filtered = (CLEARANCE_M3_PER_KG_DAY * mass * sub / (PATCH_AREA * 2.0)).min(1.0);
+            let filtered = (CLEARANCE_M3_PER_KG_DAY * mass * sub / (a * 2.0)).min(1.0);
             let search = (search + SUSPENDED_FRACTION * filtered).min(1.0);
 
             // Plants here (accessible leaf mass), plus shore plants reachable from the water.
@@ -1236,10 +1267,40 @@ impl EcoWorld {
             // Home range: once the day's path has swept this patch, the rest of
             // it sweeps the neighbours it could live in, so a faster body feeds
             // from a wider range (up to the six neighbours, a 700 m^2 range).
-            let swept_patches = 2.0 * reach_now * path / PATCH_AREA;
-            let spill = ((swept_patches - 1.0) / 6.0).clamp(0.0, 1.0);
-            if spill > 0.0 {
-                for &j in &self.neighbours[patch] {
+            let swept_patches = range_area / a;
+            // Cells beyond this one that the range covers, ring by ring, each
+            // ring taken in proportion to how much of it the range fills; up to
+            // four rings so the reachable range does not depend on cell size.
+            let mut extra = (swept_patches - 1.0).max(0.0);
+            let mut ring_cells: Vec<(usize, f32)> = Vec::new(); // (cell, coverage)
+            let mut seen = vec![patch];
+            let mut frontier = vec![patch];
+            for _ring in 0..4 {
+                if extra <= 0.0 {
+                    break;
+                }
+                let mut next = Vec::new();
+                for &q in &frontier {
+                    for &k in &self.neighbours[q] {
+                        if !seen.contains(&k) {
+                            seen.push(k);
+                            next.push(k);
+                        }
+                    }
+                }
+                if next.is_empty() {
+                    break;
+                }
+                let cover = (extra / next.len() as f32).min(1.0);
+                for &k in &next {
+                    ring_cells.push((k, cover));
+                }
+                extra -= next.len() as f32 * cover;
+                frontier = next;
+            }
+            let spill = if ring_cells.is_empty() { 0.0 } else { 1.0 };
+            for &(j, spill) in &ring_cells {
+                {
                     let js = self.patches[j].submersion;
                     // Same medium or the shore in between; dry land needs legs.
                     let reachable = (js > 0.0) == (sub > 0.0) || js == 0.5 || sub == 0.5;
@@ -1286,13 +1347,13 @@ impl EcoWorld {
             }
             // Beddington-DeAngelis: conspecific crowding in the patch interferes with feeding.
             let crowd = (animals_in[patch].len().saturating_sub(1)) as f32;
-            let interference = 0.15 * crowd;
+            let interference = INTERFERENCE_PER_100M2 * crowd * 100.0 / a;
             let plant_rate = search * plant_b / (1.0 + search * handling * plant_b + interference); // kg/day
             let carrion_here = self.patches[patch].carrion;
             // Carrion is smelt from afar: the detection strip is three times wider.
             // A flier surveys from height: a far wider strip (vultures find carcasses from kilometres up).
             let strip = if sub < 1.0 && air_speed > 0.0 { 40.0 } else { 6.0 };
-            let carrion_search = ((PI * reach_now * reach_now + strip * reach_now * path) / PATCH_AREA).min(1.0);
+            let carrion_search = ((PI * reach_now * reach_now + strip * reach_now * path) / a).min(1.0);
             let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here + interference);
             // Energy value per kg eaten, by gut.
             let plant_value = plant_rate * eff_plant;
@@ -1305,7 +1366,16 @@ impl EcoWorld {
 
             // --- predation: attack versus defence, decided by profitability -----
             if space > 0.0 && motility > 0.0 && speed_here > 0.0 {
-                let candidates: Vec<usize> = animals_in[patch].iter().copied().filter(|&j| j != ai && !killed.contains(&j)).collect();
+                // Prey in this cell, plus prey in the ring cells the day's range covers
+                // (each kept with probability equal to that cell's coverage).
+                let mut candidates: Vec<usize> = animals_in[patch].iter().copied().filter(|&j| j != ai && !killed.contains(&j)).collect();
+                for &(j, cover) in &ring_cells {
+                    for &k in &animals_in[j] {
+                        if k != ai && !killed.contains(&k) && self.rng.gen_bool(cover as f64) {
+                            candidates.push(k);
+                        }
+                    }
+                }
                 let mut best: Option<(usize, f32, f32)> = None; // (idx, p_success, profitability)
                 for _ in 0..candidates.len().min(3) {
                     let j = candidates[self.rng.gen_range(0..candidates.len())];
@@ -1339,7 +1409,9 @@ impl EcoWorld {
                     let scale = 0.25 * (attack + defence) + 1e-6;
                     // Encounter: detection distance scales with prey body length, so
                     // small prey are found at a fraction of the rate of large prey.
-                    let encounter = (pm / mass).powf(1.0 / 3.0).min(1.0);
+                    // Encounter: the predator meets the prey that its day's range
+                    // covers, detecting small ones at a fraction of the rate.
+                    let encounter = (range_area / a).min(1.0) * (pm / mass).powf(1.0 / 3.0).min(1.0);
                     // Capture: attack versus defence, times a hump in log size ratio
                     // (Brose 2006: small ectotherm predators do best on prey 10-100x
                     // smaller; much larger prey is possible but rare).
@@ -1435,9 +1507,9 @@ impl EcoWorld {
                 let mut best: Option<(usize, f32)> = None;
                 // A glider reaches the next patch when a launch carries it ten metres;
                 // a flier ranges over everything within an hour's flight.
-                let can_glide_over = measured_air && glide_ratio * launch_h >= 10.0;
+                let can_glide_over = measured_air && glide_ratio * launch_h >= patch_w;
                 let flier = measured_air && air_speed_raw * motility > 0.5;
-                let range_hops = if flier { ((air_speed_raw * motility * 3600.0 / 10.0) as usize).clamp(1, 8) } else { 1 };
+                let range_hops = if flier { ((air_speed_raw * motility * 3600.0 / patch_w) as usize).clamp(1, 8) } else { 1 };
                 let candidates: Vec<usize> = if range_hops > 1 {
                     // Breadth-first over the neighbour graph up to range_hops.
                     let mut seen = vec![patch];
@@ -1493,7 +1565,7 @@ impl EcoWorld {
                     let target_water = self.patches[target].water;
                     let use_speed = (if target_water { water_speed_raw } else { land_speed_raw.max(air_speed_raw) }) * motility * lin_f;
                     // Cost of transport ~ M^-0.3 per kg per metre (Tucker), 10 m per patch.
-                    delta -= 0.00001 * mass.powf(0.7) * (g / 9.81) * 10.0 / (0.3 + use_speed).min(3.0);
+                    delta -= 0.00001 * mass.powf(0.7) * (g / 9.81) * patch_w / (0.3 + use_speed).min(3.0);
                     self.animals[ai].patch = target;
                 }
             }
@@ -1569,7 +1641,7 @@ impl EcoWorld {
             let lineage = if b.body_changed && self.rng.gen_bool(0.2) { self.new_lineage() } else { b.lineage };
             if b.genome.motility < 0.5 {
                 // A sessile child: settles where it was born and lives as a plant.
-                let cap = if self.patches[b.patch].submersion >= 0.5 { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
+                let cap = self.plant_cap(b.patch);
                 if plant_counts[b.patch] < cap {
                     plant_counts[b.patch] += 1;
                     let mut plant = Plant::new(b.genome, lineage, b.patch, 0.0, 0.0, self.planet.gravity);
@@ -1604,7 +1676,7 @@ impl EcoWorld {
             }
             // Larval dispersal: young drift one or two patches from the parent,
             // which is what keeps them off the parents' menu in the sea.
-            let born_at = self.disperse_same_habitat(b.patch, 1.5);
+            let born_at = self.disperse_same_habitat(b.patch, LARVAL_DRIFT_M / patch_w);
             self.animals.push(Animal::new(b.genome, key, traits, born_at, lineage, b.mass0, b.reserve0));
             let idx = self.animals.len() - 1;
             self.request_traits(idx);
@@ -1632,8 +1704,11 @@ impl EcoWorld {
         }
 
         // ---------------- Immigration keeps the sea from emptying ------------
-        if self.day % 60 == 0 && self.animals.len() < 40 {
-            self.immigrate(8);
+        // (A rescue, not biology: a planet has no off-map. Kept per area so it
+        // does not depend on the cell size; flagged in the model notes.)
+        let floor = ((self.patches.iter().filter(|p| p.water).count() as f32 * self.patch_area * FOUNDERS_PER_M2).round() as usize).max(12);
+        if self.day % 60 == 0 && self.animals.len() < floor {
+            self.immigrate((floor / 4).max(4));
         }
         if self.day % 120 == 0 && self.plants.len() < self.patches.len() / 10 {
             self.seed_plants(self.patches.len() / 8);

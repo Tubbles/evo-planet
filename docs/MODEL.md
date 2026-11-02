@@ -341,12 +341,11 @@ prior, the queue alternates between the most-copied and the newest body,
 and muscle cost counts only driven joints weighted by how far and how often
 they swing (a strut or a limp limb costs its mass only).
 
-Then the payoff: with a 100 m² patch, any body over 2 cm/s swept its whole
-patch in a day and extra speed bought nothing. A hectare patch was tried
-and starved everyone, because plants are individuals with a per-patch cap
-sized for 100 m². Instead a body's daily path, once it has swept its own
-patch, spills into the neighbours it could live in (a home range of up to
-seven patches), so speed pays up to about 0.1 m/s for a 10 cm body. Chases
+Then the payoff: a body's daily range (reach times path) is an area, and
+the food it meets is density times that area, drawn from its own cell and
+then the neighbours (up to seven cells); speed pays up to the point where
+the range exceeds the cells the graph lets it reach. See "The cell is not
+a thing" below for why the cell size itself must not matter. Chases
 are judged in body lengths per second (Howland), with the floor lowered
 from 0.5 to 0.2 so a sessile party is as easy as it should be. Filter feeding:
 a fifth of the sea's plant mass is suspended, and a body clears about a
@@ -379,6 +378,32 @@ zero at 25 rad/s of joint speed, so muscle power is bounded. The spinning
 bodies went from 0.97 to 0.07 m/s; a fin-sculler from 0.57 to 0.28; the
 "best land body" from 0.09 to 0.004 m/s, so it too had been spin-powered.
 The hand-built gliders are unchanged.
+
+### The cell is not a thing
+There is no patch size in nature. A patch is a discretisation cell, and
+the model must not know how big it is beyond noise. Every rule is now a
+density or a distance: light, nutrients and litter per square metre; plant
+caps as individuals per square metre (a performance guard); crowding per
+competitor per 100 m²; a body's daily range in square metres, swept from
+its own cell and spilling into neighbours; predation encounter as the share
+of the cell that range covers; movement cost per metre of cell width;
+larval drift 15 m; seed dispersal in tens of metres. A body's range spills
+ring by ring over as many cells as it covers (up to four rings), and a
+predator meets prey across those cells, so the reachable range is a
+quantity in square metres and not "the six neighbours". Founders are per
+area of sea. The cell size is a run parameter (`evo_headless
+--patch-area`), and the test is to run the same planet at 25, 100 and
+400 m² and compare time-averaged densities per area. First snapshots at
+1500 days differed two- to fourfold, dominated by boom-and-bust timing;
+the time-averaged comparison is in the audit log below.
+
+One rescue remains and is not biology: when the sea's animals fall below
+about one per 1,200 m² (the founder density), a few immigrants arrive. A
+planet has no off-map. It keeps the demo from ending in extinction and
+should go once the ecology holds itself up. The
+earlier "hectare patch" experiment and the "home range spill" were symptoms
+of this leak; the spill survives only as the honest geometry of a range
+larger than one cell.
 
 ### Audit tooling
 `cargo run --example shore_probe -- <genome.json>...` runs bodies on the beach

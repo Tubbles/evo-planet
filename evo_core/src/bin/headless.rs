@@ -11,13 +11,13 @@ use evo_core::evolve::{EvolveConfig, Evolver};
 use evo_core::planet::PlanetParams;
 use evo_core::sim::{Environment, SimConfig};
 
-fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize) {
+fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32) {
     use evo_core::eco::EcoWorld;
-    let mut w = EcoWorld::new(planet.clone(), patches, seed);
+    let mut w = EcoWorld::new_with_area(planet.clone(), patches, seed, patch_area);
     let d = planet.derive();
     println!(
-        "Ecology on {} | {} patches on a sphere | g={:.1} | pO2 x{:.2} | NPP x{:.2} | aridity {:.2} | sea {:.0}% | highest peak {:.0} m ({:.0} C)",
-        planet.name, patches, planet.gravity, d.o2_rel, d.npp_rel, d.aridity,
+        "Ecology on {} | {} patches of {:.0} m2 on a sphere | g={:.1} | pO2 x{:.2} | NPP x{:.2} | aridity {:.2} | sea {:.0}% | highest peak {:.0} m ({:.0} C)",
+        planet.name, patches, patch_area, planet.gravity, d.o2_rel, d.npp_rel, d.aridity,
         100.0 * w.patches.iter().filter(|p| p.water).count() as f32 / patches as f32,
         w.patches.iter().map(|p| p.elevation).fold(f32::MIN, f32::max),
         w.patches.iter().max_by(|a, b| a.elevation.partial_cmp(&b.elevation).unwrap()).map(|p| p.temp_c).unwrap_or(0.0)
@@ -59,6 +59,7 @@ fn main() {
     let mut days = 1500u64;
     let mut grid = 1500usize;
     let mut evals_per_day = 8usize;
+    let mut patch_area = evo_core::eco::PATCH_AREA;
     let mut planet_sel = "0".to_string();
     let mut env = Environment::Land;
     let mut gens = 40u32;
@@ -111,6 +112,10 @@ fn main() {
                 grid = args[i + 1].parse().unwrap_or(grid);
                 i += 1;
             }
+            "--patch-area" => {
+                patch_area = args[i + 1].parse().unwrap_or(patch_area);
+                i += 1;
+            }
             "--evals-per-day" => {
                 evals_per_day = args[i + 1].parse().unwrap_or(evals_per_day);
                 i += 1;
@@ -138,7 +143,7 @@ fn main() {
         .map(|(_, p)| p.clone())
         .unwrap_or_else(PlanetParams::earth);
     if eco {
-        run_eco(planet, days, grid, seed, evals_per_day);
+        run_eco(planet, days, grid, seed, evals_per_day, patch_area);
         return;
     }
     let d = planet.derive();
