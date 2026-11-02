@@ -59,6 +59,9 @@ pub struct PlantBody {
     pub sla: f32,
     /// Fraction of linear size the stems can support (1 = all of it).
     pub growth_cap: f32,
+    /// Worst stem load ratio at `gravity` (loads scale linearly with g).
+    pub stress: f32,
+    pub gravity: f32,
     pub part_count: usize,
 }
 
@@ -154,6 +157,22 @@ fn effective_leaf_area(leaves: &[(Isometry3<f32>, f32, f32)], total: f32) -> f32
     // Mean over directions, normalised so a lone horizontal leaf scores 1.0.
     let norm = (1.0 + 8.0 * 0.7071) / 9.0;
     (sum_eff / dirs.len() as f32 / norm).min(total)
+}
+
+pub fn growth_cap_for(stress: f32) -> f32 {
+    if stress <= 1.0 { 1.0 } else { (1.0 / stress).sqrt().clamp(0.05, 1.0) }
+}
+
+impl PlantBody {
+    /// Re-evaluate the structural cap under a different gravity without
+    /// decoding again: every load is weight, so stress scales with g.
+    pub fn set_gravity(&mut self, gravity: f32) {
+        if self.gravity > 0.0 && (gravity - self.gravity).abs() > 1e-4 {
+            self.stress *= gravity / self.gravity;
+            self.gravity = gravity;
+            self.growth_cap = growth_cap_for(self.stress);
+        }
+    }
 }
 
 pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
@@ -272,7 +291,7 @@ pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
         let critical = std::f32::consts::PI.powi(2) * STEM_MODULUS * second_moment / 4.0;
         worst = worst.max(stress).max(buckle[i] / critical);
     }
-    let growth_cap = if worst <= 1.0 { 1.0 } else { (1.0 / worst).sqrt().clamp(0.05, 1.0) };
+    let growth_cap = growth_cap_for(worst);
     // Transport: every leaf is fed through the stems on its path to the base.
     let mut transport = 0.0;
     for j in 0..n {
@@ -296,6 +315,8 @@ pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
         transport,
         sla: if leaf_mass > 0.0 { leaf_area_total / leaf_mass } else { 0.0 },
         growth_cap,
+        stress: worst,
+        gravity,
     }
 }
 

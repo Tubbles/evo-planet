@@ -38,6 +38,11 @@ onmessage = (e) => {
     paused = false;
     lastSnap = 0; dayStart = performance.now(); daysSince = 0;
     kick();
+  } else if (m.type === 'eco_planet') {
+    if (eco) {
+      eco.set_planet(JSON.stringify(m.planet));
+      postMessage({ type: 'eco_terrain', runId, terrain: JSON.parse(eco.terrain_json(m.detail || 5)) });
+    }
   } else if (m.type === 'eco_immigrate') {
     if (eco) eco.immigrate(m.count || 10);
   } else if (m.type === 'eco_rep') {

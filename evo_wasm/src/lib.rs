@@ -128,6 +128,12 @@ impl EcoSim {
     }
 
     /// Inject `count` random immigrants into the sea now.
+    /// Change the planet under the running world (see EcoWorld::set_planet).
+    pub fn set_planet(&mut self, planet_json: &str) -> Result<(), JsValue> {
+        let planet: PlanetParams = serde_json::from_str(planet_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        self.world.set_planet(planet);
+        Ok(())
+    }
     pub fn immigrate(&mut self, count: usize) {
         self.world.immigrate(count);
     }

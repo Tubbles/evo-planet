@@ -537,6 +537,84 @@ impl EcoWorld {
         t
     }
 
+    /// Change the planet under a running world. Sea level follows water
+    /// coverage (flooded land drowns its plants, drained seabed strands its
+    /// animals), temperature and moisture follow the new climate, plant
+    /// structural caps follow gravity, and every body's physics traits are
+    /// queued for re-measurement when gravity, pressure or oxygen changed.
+    pub fn set_planet(&mut self, planet: PlanetParams) {
+        let old = std::mem::replace(&mut self.planet, planet);
+        self.derived = self.planet.derive();
+        let n = self.patches.len();
+        // Raw elevation recovered from any patch, then the new sea level.
+        let old_sea = terrain::elevation_at(self.patches[0].pos, self.terrain_seed) - self.patches[0].elevation;
+        let raw: Vec<f32> = self.patches.iter().map(|p| p.elevation + old_sea).collect();
+        let mut sorted = raw.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let k = (self.planet.water_coverage.clamp(0.0, 1.0) * n as f32) as usize;
+        let sea_level = if k == 0 { f32::MIN } else { sorted[(k - 1).min(n - 1)] };
+        let mut flooded: Vec<bool> = vec![false; n];
+        for i in 0..n {
+            let elevation = raw[i] - sea_level;
+            let water = elevation <= 0.0;
+            flooded[i] = water && !self.patches[i].water;
+            let p = &mut self.patches[i];
+            p.elevation = elevation;
+            p.water = water;
+            p.temp_c = terrain::local_temperature(self.planet.temp_c, p.pos, elevation);
+            p.moisture = if water {
+                1.0
+            } else {
+                (self.planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
+            };
+            p.shore = false;
+        }
+        for i in 0..n {
+            if !self.patches[i].water && self.neighbours[i].iter().any(|&j| self.patches[j].water) {
+                self.patches[i].shore = true;
+                self.patches[i].moisture = self.patches[i].moisture.max(0.85);
+            }
+        }
+        // Land plants under new sea die; everything else adjusts its cap.
+        let g = self.planet.gravity;
+        let mut i = 0;
+        while i < self.plants.len() {
+            if flooded[self.plants[i].patch] {
+                let p = self.plants.swap_remove(i);
+                self.patches[p.patch].dead_matter += p.biomass;
+                continue;
+            }
+            if let Some(b) = self.plants[i].body.as_mut() {
+                b.set_gravity(g);
+            }
+            i += 1;
+        }
+        let physics_changed = (old.gravity - self.planet.gravity).abs() > 0.01 * old.gravity
+            || (old.pressure_atm - self.planet.pressure_atm).abs() > 0.01 * old.pressure_atm
+            || (old.o2_frac - self.planet.o2_frac).abs() > 0.01 * old.o2_frac.max(0.01);
+        if physics_changed {
+            // Keep the old numbers as priors; re-measure every living body.
+            for t in self.trait_cache.values_mut() {
+                t.measured_land = false;
+                t.measured_water = false;
+                t.measured_air = false;
+            }
+            let derived = self.derived;
+            for a in self.animals.iter_mut() {
+                a.traits.measured_land = false;
+                a.traits.measured_water = false;
+                a.traits.measured_air = false;
+                a.traits.activity = fatigue_factor(&decode(&a.genome), &derived);
+            }
+            self.pending.clear();
+            for idx in 0..self.animals.len() {
+                self.pending.push((idx, Environment::Land));
+                self.pending.push((idx, Environment::Water));
+            }
+        }
+        self.stats.pending_evals = self.pending.len();
+    }
+
     /// Queue physics measurements in both environments, so a sea creature's
     /// ability to crawl is visible to selection before it ever leaves the sea.
     fn request_traits(&mut self, idx: usize) {

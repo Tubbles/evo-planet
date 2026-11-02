@@ -168,6 +168,13 @@ so a mutation that improves crawling pays off before the lineage ever hauls
 out. Land entry is continuous (any body with measurable land speed can try),
 but foraging on land scales with speed, so poor crawlers go hungry there.
 
+In planet ecology the dials act on the living world as you drag them: the
+sea level follows water coverage (flooded land drowns its plants, drained
+seabed strands its animals), temperature and humidity shift every patch's
+climate, gravity rescales every plant's structural cap and, with pressure
+and oxygen, queues every living body for a fresh physics measurement.
+"Apply & restart" starts a new planet instead.
+
 - **Plants** use the same graph genome as animals, read by a different
   decoder (`evo_core/src/plant.rs`): capsule nodes are stems and branches,
   membrane nodes are leaves (the membrane's spare radius gene is leaf

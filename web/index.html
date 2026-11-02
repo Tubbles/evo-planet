@@ -210,6 +210,7 @@ body.tv .chip { font-size: 15px; }
         <button type="button" class="ghost" id="pauseBtn" aria-pressed="false">Pause</button>
       </div>
       <p class="pending hidden" id="pendingNote">Dials changed. Restart evolution to apply them to the physics.</p>
+      <p class="note" id="liveNote" hidden>In planet ecology the dials act on the living world as you drag them: seas rise or fall, climates shift, gravity re-tests every body. "Apply &amp; restart" starts a fresh planet instead.</p>
     </div>
 
     <div class="panel">
@@ -316,10 +317,9 @@ function buildDials() {
       planet[key] = log ? sliderToLog(t, lo, hi) : t;
       planet.name = 'Custom';
       $('preset').value = 'custom';
-      dirty = true;
-      $('pendingNote').classList.remove('hidden');
       refreshDials();
       refreshDerived();
+      if (mode === 'ecology') { applyPlanetLive(); } else { dirty = true; $('pendingNote').classList.remove('hidden'); }
     });
   }
   refreshDials();
@@ -405,6 +405,21 @@ function restartEvolution() {
   drawSpark();
 }
 
+// In ecology mode the dials act on the running world: sea level, climate,
+// gravity and air change under the living planet (debounced per slider drag).
+let planetLiveTimer = null;
+function applyPlanetLive() {
+  clearTimeout(planetLiveTimer);
+  planetLiveTimer = setTimeout(() => {
+    if (mode !== 'ecology' || !worker) return;
+    activeRun.planet = JSON.parse(JSON.stringify(planet));
+    const detail = (window.innerWidth < 700) ? 5 : 6;
+    worker.postMessage({ type: 'eco_planet', planet: activeRun.planet, detail });
+    $('ecoNote').textContent = `${planet.name} · ${parseInt($('gridSel').value, 10)} patches`;
+    if (lastDerived) updateSceneLook(lastDerived);
+  }, 250);
+}
+
 function restartEcology() {
   runId += 1;
   dirty = false;
@@ -427,7 +442,7 @@ function setMode(m) {
   document.querySelectorAll('#modeSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
   const eco = m === 'ecology';
   $('ecoPanel').hidden = !eco; $('mapPanel').hidden = !eco; $('viewSeg').hidden = !eco;
-  $('evoPanel').hidden = eco; $('envSeg').hidden = eco;
+  $('evoPanel').hidden = eco; $('envSeg').hidden = eco; $('liveNote').hidden = !eco;
   if (eco) setViewMode('globe');
   if (lastDerived) updateSceneLook(lastDerived);
   $('champTitle').textContent = eco ? 'Selected lineage' : 'Champion';
@@ -988,7 +1003,8 @@ $('copyBtn').addEventListener('click', async () => {
 $('preset').addEventListener('change', () => {
   const v = $('preset').value; if (v === 'custom') return;
   planet = JSON.parse(JSON.stringify(presets[parseInt(v, 10)]));
-  refreshDials(); refreshDerived(); restartEvolution();
+  refreshDials(); refreshDerived();
+  if (mode === 'ecology') applyPlanetLive(); else restartEvolution();
 });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { drawGrid(null); drawSpark(); });
 

@@ -32,7 +32,6 @@ export class EcoSim {
         }
     }
     /**
-     * Inject `count` random immigrants into the sea now.
      * @param {number} count
      */
     immigrate(count) {
@@ -95,6 +94,19 @@ export class EcoSim {
             return getStringFromWasm0(ret[0], ret[1]);
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Inject `count` random immigrants into the sea now.
+     * Change the planet under the running world (see EcoWorld::set_planet).
+     * @param {string} planet_json
+     */
+    set_planet(planet_json) {
+        const ptr0 = passStringToWasm0(planet_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.ecosim_set_planet(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
         }
     }
     /**
