@@ -47,7 +47,7 @@ pub const MAX_PLANTS_PER_WATER_PATCH: usize = 48;
 /// without the cap itself deciding who lives.
 /// Performance guard only. Ecological limits come from food, crowding and
 /// predation (Beddington-DeAngelis interference), not from this number.
-pub const MAX_ANIMALS: usize = 2000;
+pub const MAX_ANIMALS: usize = 5000;
 pub const TRAIT_EPISODE_S: f32 = 3.0;
 pub const NEIGHBOURS: usize = 6;
 
@@ -519,6 +519,10 @@ impl EcoWorld {
     /// ability to crawl is visible to selection before it ever leaves the sea.
     fn request_traits(&mut self, idx: usize) {
         let t = self.animals[idx].traits;
+        // Most young die before their speed matters: measure at half adult mass.
+        if self.animals[idx].mass < 0.5 * t.mass && (t.measured_land || t.measured_water || self.animals[idx].age > 0.0) {
+            return;
+        }
         // Measure the current habitat first (popped last-in-first-out).
         let in_water = self.patches[self.animals[idx].patch].water;
         let order = if in_water { [Environment::Land, Environment::Water] } else { [Environment::Water, Environment::Land] };
