@@ -189,8 +189,11 @@ progress after settling, minus the same body's drift with its motors off
 starting where they would rest, so toppling, sliding and floating do not
 count as locomotion. Nimbleness is measured too: turn rate from
 asymmetric drive and climb speed from a posture shift, used in chases.
-As of this writing no walkers or fish-like swimmers have evolved in the
-ecology; `docs/MODEL.md` records what the replays actually show.
+A sea lineage reaches land only by climbing a sloping beach in its own
+shore test, and then survives there only if its breathing gene has moved
+from gills toward lungs. As of this writing no walkers or fish-like
+swimmers have evolved in the ecology; `docs/MODEL.md` records what the
+replays actually show and what higher fidelity would cost.
 
 - **Plants** use the same graph genome as animals, read by a different
   decoder (`evo_core/src/plant.rs`): capsule nodes are stems and branches,

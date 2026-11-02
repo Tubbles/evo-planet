@@ -29,6 +29,10 @@ pub enum Environment {
     /// Dropped from a height over ground. Fitness: horizontal distance at
     /// landing plus time aloft. Rewards gliding, then flapping.
     Air,
+    /// A beach: water over a bed that rises at SHORE_SLOPE toward +X and
+    /// breaks the surface at x = 0. The body starts submerged 3 m out and
+    /// must climb out by itself; the result is how far up the dry beach it got.
+    Shore,
 }
 
 impl Environment {
@@ -38,6 +42,7 @@ impl Environment {
             Environment::Land => "Land",
             Environment::Water => "Water",
             Environment::Air => "Air (drop)",
+            Environment::Shore => "Shore",
         }
     }
 }
@@ -75,6 +80,10 @@ pub const CD_CAPSULE_LATERAL: f32 = 1.1;
 /// Oxygen budget scale: see `fatigue_factor`.
 pub const O2_BUDGET_K: f32 = 40.0;
 pub const AIR_DROP_HEIGHT: f32 = 10.0;
+/// Beach gradient (rise per metre toward +X) for the shore test.
+pub const SHORE_SLOPE: f32 = 0.12;
+/// Farthest the shore test starts, metres seaward of the waterline.
+pub const SHORE_START_X: f32 = -4.0;
 /// Gliding animals leap: the air drop starts with this forward speed (m/s).
 /// A stone thrown this way lands `AIR_LAUNCH_SPEED * sqrt(2h/g)` away; only
 /// distance beyond that is credited to wings.
@@ -110,6 +119,8 @@ pub struct EpisodeResult {
     pub yaw_rate: f32,
     /// Vertical speed of the centre of mass over the second half, m/s (signed).
     pub climb_speed: f32,
+    /// Shore test: metres up the dry beach the body got under its own power.
+    pub shore_progress: f32,
 }
 
 pub struct CreatureSim {
@@ -137,6 +148,10 @@ pub struct CreatureSim {
     pub hydration: f32,
     pub water_level: Option<f32>,
     pub ground_y: f32,
+    /// Bed gradient toward +X (shore test only).
+    pub slope: f32,
+    /// Farthest the centre of mass got up the dry beach, metres past the waterline.
+    shore_best: f32,
 
     settled: bool,
     start_com: Vector3<f32>,
@@ -194,10 +209,17 @@ impl CreatureSim {
             Environment::Land => (0.0, None, 0.0),
             Environment::Water => (-WATER_DEPTH, Some(0.0), -WATER_DEPTH * 0.5),
             Environment::Air => (0.0, None, AIR_DROP_HEIGHT),
+            Environment::Shore => (0.0, Some(0.0), 0.0),
         };
+        let slope = if env == Environment::Shore { SHORE_SLOPE } else { 0.0 };
 
-        // Ground.
-        let ground = RigidBodyBuilder::fixed().translation(vector![0.0, ground_y - 1.0, 0.0]).build();
+        // Ground: flat, or for the shore a plane tilted so its top face passes
+        // through the origin and rises with +X.
+        let theta = slope.atan();
+        let ground = RigidBodyBuilder::fixed()
+            .translation(vector![theta.sin(), ground_y - theta.cos(), 0.0])
+            .rotation(vector![0.0, 0.0, theta])
+            .build();
         let gh = bodies.insert(ground);
         colliders.insert_with_parent(
             ColliderBuilder::cuboid(500.0, 1.0, 500.0).friction(0.9).build(),
@@ -232,10 +254,20 @@ impl CreatureSim {
         let max_y = (0..n)
             .map(|i| isos[i].translation.y + part_bounding_radius(&pheno.parts[i]))
             .fold(f32::NEG_INFINITY, f32::max);
-        let volume: f32 = pheno.parts.iter().map(|p| p.mass / p.density.max(1.0)).sum();
+        let volume: f32 = pheno.parts.iter().map(|p| if p.kind == NodeKind::Membrane { p.mass / crate::decode::ANIMAL_DENSITY } else { p.mass / p.density.max(1.0) }).sum();
         let mean_density = pheno.total_mass / volume.max(1e-6);
+        // Shore: start where the water is 1.2 body heights deep, 1-4 m out.
+        let x_off = if env == Environment::Shore { -((max_y - min_y) * 1.2 / SHORE_SLOPE).clamp(1.0, -SHORE_START_X) } else { 0.0 };
+        let bed_here = ground_y + slope * x_off;
         let lift = match env {
             Environment::Land => ground_y + 0.01 - min_y,
+            Environment::Shore => {
+                if mean_density < 0.98 * derived.water_density {
+                    (0.0 - 0.5 * (min_y + max_y)).max(bed_here + 0.01 - min_y)
+                } else {
+                    bed_here + 0.01 - min_y
+                }
+            }
             Environment::Water => {
                 if mean_density < 0.98 * derived.water_density {
                     // Float: centre of the body at the waterline.
@@ -250,6 +282,7 @@ impl CreatureSim {
         };
         for iso in isos.iter_mut() {
             iso.translation.y += lift;
+            iso.translation.x += x_off;
         }
 
         let fatigue = fatigue_factor(&pheno, &derived);
@@ -353,6 +386,8 @@ impl CreatureSim {
             hydration,
             water_level,
             ground_y,
+            slope,
+            shore_best: 0.0,
             settled: env == Environment::Air,
             start_com,
             time_aloft: 0.0,
@@ -442,8 +477,21 @@ impl CreatureSim {
         min_y
     }
 
+    /// Position and linear velocity of part `i` (debugging and audits).
+    pub fn part_state(&self, i: usize) -> (Vector3<f32>, Vector3<f32>) {
+        match self.bodies.get(self.handles[i]) {
+            Some(rb) => (*rb.translation(), *rb.linvel()),
+            None => (Vector3::zeros(), Vector3::zeros()),
+        }
+    }
+
+    /// Ground height under horizontal position x (sloped on the shore).
+    pub fn ground_at(&self, x: f32) -> f32 {
+        self.ground_y + self.slope * x
+    }
+
     pub fn is_airborne(&self) -> bool {
-        self.lowest_point() > self.ground_y + 0.08
+        self.lowest_point() > self.ground_at(self.com().x) + 0.08
     }
 
     fn update_motors(&mut self) {
@@ -516,7 +564,16 @@ impl CreatureSim {
                         let s = vhat.dot(&normal); // sin(alpha), signed
                         let f_normal = normal * (-0.5 * rho * area * speed * speed * C_P_ALPHA * s);
                         let f_para = v * (-0.5 * rho * area * CD0_PANEL * speed);
-                        rb.add_force_at_point(f_normal + f_para, Point3::from(point), true);
+                        // Explicit drag must not exceed what brings this sample's share
+                        // of the part to rest in one step, or light parts in dense
+                        // fluid blow up numerically.
+                        let mut f = f_normal + f_para;
+                        let f_max = 0.25 * p.mass * speed / self.cfg.dt;
+                        let fm = f.norm();
+                        if fm > f_max {
+                            f *= f_max / fm;
+                        }
+                        rb.add_force_at_point(f, Point3::from(point), true);
                     }
                 }
                 _ => {
@@ -532,8 +589,13 @@ impl CreatureSim {
                         }
                         let va = axis * v.dot(&axis);
                         let vl = v - va;
-                        let f = (va * (CD_CAPSULE_AXIAL * a_axial) + vl * (CD_CAPSULE_LATERAL * a_lat))
+                        let mut f = (va * (CD_CAPSULE_AXIAL * a_axial) + vl * (CD_CAPSULE_LATERAL * a_lat))
                             * (-0.5 * rho * speed / 3.0);
+                        let f_max = p.mass / 3.0 * speed / self.cfg.dt;
+                        let fm = f.norm();
+                        if fm > f_max {
+                            f *= f_max / fm;
+                        }
                         rb.add_force_at_point(f, Point3::from(point), true);
                     }
                 }
@@ -545,7 +607,7 @@ impl CreatureSim {
             if sub <= 0.0 {
                 let half = axis * (p.len * 0.5);
                 let low = (center + half).y.min((center - half).y) - p.radius;
-                if low < self.ground_y + 0.02 {
+                if low < self.ground_y + self.slope * center.x + 0.02 {
                     let v = *rb.linvel();
                     let vh = Vector3::new(v.x, 0.0, v.z);
                     let sp = vh.norm();
@@ -558,7 +620,13 @@ impl CreatureSim {
 
             // Buoyancy and submersion damping.
             if sub > 0.0 {
-                let volume = p.mass / p.density;
+                // A membrane's collider is 2 cm thick for the solver; the tissue
+                // it stands for is a millimetre of skin, so it displaces its mass
+                // in water, not its collider volume.
+                let volume = match p.kind {
+                    NodeKind::Membrane => p.mass / crate::decode::ANIMAL_DENSITY,
+                    _ => p.mass / p.density,
+                };
                 let fb = Vector3::new(0.0, rho_water * volume * g * sub, 0.0);
                 let v = *rb.linvel();
                 let damp = -v * (0.8 * p.mass * sub);
@@ -604,7 +672,11 @@ impl CreatureSim {
 
         if self.settled {
             self.total_steps += 1;
-            self.com_height_sum += self.com().y - self.ground_y;
+            let c = self.com();
+            self.com_height_sum += c.y - self.ground_at(c.x);
+            if self.env == Environment::Shore && self.lowest_point() > 0.0 && c.x > self.shore_best {
+                self.shore_best = c.x;
+            }
             if self.mid_com.is_none() && self.time >= self.cfg.settle_time + 0.5 * (self.cfg.episode_time - self.cfg.settle_time) {
                 self.mid_com = Some(self.com());
             }
@@ -664,6 +736,7 @@ impl CreatureSim {
             match self.env {
                 Environment::Land => distance * self.hydration,
                 Environment::Water => distance,
+                Environment::Shore => self.shore_best * self.hydration,
                 Environment::Air => {
                     // Horizontal distance dominates so gliders beat parachutes;
                     // time aloft still rewards slowing the fall as a first step.
@@ -694,6 +767,7 @@ impl CreatureSim {
                 None => 0.0,
             },
             yaw_rate: if self.yaw_n > 0 { self.yaw_sum / self.yaw_n as f32 } else { 0.0 },
+            shore_progress: self.shore_best,
             climb_speed: match self.mid_com {
                 Some(m) => {
                     let half = 0.5 * (self.cfg.episode_time - self.cfg.settle_time);

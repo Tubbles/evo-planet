@@ -162,6 +162,10 @@ pub struct Genome {
     /// to grazers and digest worse, but photosynthesise slower per area.
     #[serde(default)]
     pub leaf_toughness: f32,
+    /// Gas exchange medium, 0 = gills (water only) .. 1 = lungs (air only).
+    /// Halfway breathes poorly in both: the amphibian's bargain.
+    #[serde(default)]
+    pub breathing: f32,
 }
 
 fn default_seed_mass() -> f32 {
@@ -445,6 +449,7 @@ impl Genome {
             longevity: 1.0,
             maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
+            breathing: 0.0,
         }
     }
 
@@ -487,6 +492,7 @@ impl Genome {
             longevity: 1.0,
             maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
+            breathing: 0.0,
         }
     }
 
@@ -607,6 +613,7 @@ impl Genome {
             longevity: 1.0,
             maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
+            breathing: 0.0,
         }
     }
 
@@ -706,6 +713,9 @@ impl Genome {
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.leaf_toughness = (g.leaf_toughness + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.breathing = (g.breathing + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.maturity_frac = nudge(rng, g.maturity_frac, 0.1, 0.02, 0.2, 0.98);

@@ -245,8 +245,65 @@ season. Each is a candidate system, each with a real analogue.
     speed per environment. Chases use turn rate on both sides (Howland
     1974: manoeuvrability decides as much as speed).
 
+### The test battery (what a body is measured on)
+Every measurement is a physics episode with a control, never a number read
+off the genome:
+- **Water, Land:** sustained speed over the second half of a 4 s episode
+  minus the same body with motors off; turn rate from asymmetric drive;
+  climb speed (water) from a posture shift.
+- **Shore:** a beach rising 12 cm per metre. The body starts submerged
+  where the water is 1.2 body heights deep and must climb out; the score
+  is metres up the dry beach with the whole body out of the water, minus
+  the motors-off control. A sea animal may enter a land patch only if it
+  scored over half a metre (scaled for juveniles), or can fly.
+- **Air:** launched at 3 m/s from 10 m; glide beyond a stone, sustained
+  flight if still aloft; turn and climb for fliers.
+- **Posture:** mean centre-of-mass height on land (uprightness) and the
+  geometric reach, mouth, claws and plating from the decoded body.
+
+### Breathing
+A breathing gene runs from gills (0) to lungs (1). Gas exchange efficiency
+is 1 − 0.9·b in water and 0.1 + 0.9·b in air, so halfway breathes poorly
+in both: the amphibian's bargain. Efficiency scales the day's activity and
+the bite rate; below 0.2 the animal suffocates with probability one half
+per day. A sea lineage that climbs the beach still dies on land unless its
+breathing has moved toward lungs, and a lung-breather drowns. Deaths by
+suffocation are counted.
+
+### Larvae stay in their medium
+Newborns drift one or two patches from the parent, but only through
+patches of the birth medium. Before this, sea larvae landed on beaches and
+died: 6,000 suffocations in a 3,000-day run, all of them newborns, and
+every "land animal" in the count was one of them. With it, the land count
+is zero until a lineage passes the shore test, which none has.
+
+### Numerical honesty
+Explicit fluid drag is capped at the force that would stop a sample's
+share of the part in one step, which removed a blow-up that threw light
+parts at hundreds of metres per second (found by tracing a floating body
+in the shore scene). A membrane displaces its tissue mass in water, not
+its 2 cm collider volume, which had made a 53 g wing float like 700 g of
+cork.
+
+### Fidelity: where ten times more would go, and what it costs
+The physics runs at 120 Hz for four seconds per test, five tests per body,
+one body measured per living copy. The ecology runs one tick per day with
+a 100 m² patch as the unit of space. "Ten times" could mean any of:
+- longer and more tests per body (the battery above is the start; closed-
+  loop control, so a body can steer toward food rather than run its
+  oscillators open-loop, is the big missing piece and the likeliest reason
+  no gait has evolved);
+- sub-day ticks with within-patch position, so finding food is a path and
+  not a sweep fraction;
+- ten times the patches;
+- finer physics (smaller step, deformable ground, water currents).
+Each is roughly a tenfold cost on its own axis; the browser now runs about
+ten days a second at 800 patches. Closed-loop control is the one that
+changes what evolves rather than how precisely it is measured.
+
 ### Audit tooling
-`cargo run --example gait_audit -- <days> <out_dir>` re-runs the fastest
+`cargo run --example shore_probe -- <genome.json>...` runs bodies on the beach
+with motors on and off. `cargo run --example gait_audit -- <days> <out_dir>` re-runs the fastest
 land and water bodies from an ecology with motors on and off, logs spin,
 height and progress, and writes their genomes. The page exposes
 `window.evoDebug.replayGenome(json, env)` and `setZoom(z)` so a script

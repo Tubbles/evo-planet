@@ -477,7 +477,7 @@ function renderEco(dps) {
     ['Animals on land', `${st.land_animals} (${st.land_herbivores} herbivores) · best land speed ${fmt(st.best_land_speed, 2)} m/s`, st.land_herbivores > 0 ? 'good' : ''],
     ['Kingdom transitions', `plant → animal ${st.plant_to_animal} · animal → plant ${st.animal_to_plant}`, (st.plant_to_animal + st.animal_to_plant) > 0 ? 'good' : ''],
     ['Energy flows / day', `plants fix ${fmt(st.primary_production, 1)} kg · grazed ${fmt(st.grazing_intake, 2)} · hunted ${fmt(st.predation_intake, 2)} · scavenged ${fmt(st.scavenging_intake, 2)} · animal cost ${fmt(st.metabolic_cost, 2)}`],
-    ['Deaths', `starved ${st.deaths_starved} · old age ${st.deaths_old} · killed ${st.kills}`],
+    ['Deaths', `starved ${st.deaths_starved} · old age ${st.deaths_old} · killed ${st.kills}${st.deaths_suffocated ? ` · suffocated ${st.deaths_suffocated}` : ''}`],
     ['Food-web checks', `predator:prey mass ratio 10^${fmt(st.kills ? st.ppmr_log_sum / st.kills : 0, 2)} (field ≈ 10^1.6) · ${st.kills ? fmt(100 * st.kills_by_larger / st.kills, 0) : 0} % of kills by the larger · satiated ${fmt(st.satiated_frac * 100, 0)} % (field ≈ 88 %) · leaf toughness ${fmt(st.mean_toughness, 2)}`],
     ['Immigrants', `${st.immigrants}`],
     ['Body measurements', `${st.trait_evals} physics episodes · ${st.pending_evals} queued`, st.pending_evals > 60 ? 'warn' : ''],
@@ -592,7 +592,7 @@ function renderLineages(list) {
       const diet = `ate P${fmt(l.herb, 1)} M${fmt(l.carn, 1)} C${fmt(l.detr, 1)} · gut ${fmt(l.gut, 1)} · reach ${fmt(l.reach, 2)} m${l.weapon > 0.05 ? ` · claws ${fmt(l.weapon, 1)}` : ''}${l.armour > 0.05 ? ` · plating ${fmt(l.armour, 1)}` : ''}`;
       const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
       const sel = l.id === selectedLineage ? ' sel' : '';
-      return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${kg(l.mean_mass)}</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}%</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)}${l.air_speed > 0 ? ` / <b>${fmt(l.air_speed, 2)} air</b>` : ''} m/s${l.glide > 0.5 ? ` · glides ${fmt(l.glide, 1)} m` : ''}${l.turn > 0.05 ? ` · turns ${fmt(l.turn, 1)} rad/s` : ''}${l.climb > 0.02 ? ` · climbs ${fmt(l.climb, 2)} m/s` : ''}</td><td>${hab}</td></tr>`;
+      return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${kg(l.mean_mass)}</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}% · ${l.breathing < 0.33 ? 'gills' : l.breathing < 0.67 ? 'gills/lungs' : 'lungs'}</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)}${l.air_speed > 0 ? ` / <b>${fmt(l.air_speed, 2)} air</b>` : ''} m/s${l.glide > 0.5 ? ` · glides ${fmt(l.glide, 1)} m` : ''}${l.turn > 0.05 ? ` · turns ${fmt(l.turn, 1)} rad/s` : ''}${l.climb > 0.02 ? ` · climbs ${fmt(l.climb, 2)} m/s` : ''}${l.shore > 0.05 ? ` · beach ${fmt(l.shore, 2)} m` : ''}</td><td>${hab}</td></tr>`;
     }
     const sel = l.id === selectedLineage ? ' sel' : '';
     const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
@@ -815,13 +815,15 @@ function updateSceneLook(d) {
   const co2 = Math.min(1, planet.co2_frac * 20);
   const sky = new THREE.Color(0x050510).lerp(new THREE.Color(0x8fb3d9), haze).lerp(new THREE.Color(0xd9a060), co2 * 0.6);
   atmo.material.color.copy(sky); atmo.material.opacity = 0.06 + 0.3 * haze; rim.material.color.copy(sky); rim.material.opacity = 0.03 + 0.12 * haze;
-  const underwater = (replayMeta ? replayMeta.env : env) === 'water';
+  const replayEnv = replayMeta ? replayMeta.env : env;
+  const underwater = replayEnv === 'water';
+  const shore = replayEnv === 'shore';
   const bg = underwater ? new THREE.Color(0x0d3350) : sky;
   renderer.setClearColor(bg); scene.fog.color.copy(bg);
   scene.fog.near = underwater ? 6 : 30; scene.fog.far = underwater ? 60 : 140;
   const g = Math.min(1, d.npp_rel / 1.5) * (1 - Math.min(1, d.aridity) * 0.7);
   groundMat.color.copy(new THREE.Color(0xb39a66).lerp(new THREE.Color(0x4f7a44), Math.max(0, Math.min(1, g))));
-  water.visible = underwater;
+  water.visible = underwater || shore;
 }
 
 function resize() {
@@ -853,6 +855,9 @@ function startReplay(c) {
   buildCreatureMeshes(parts);
   const gy = replay.ground_y();
   ground.position.y = gy; gridHelper.position.y = gy + 0.01;
+  // Shore: the bed is a plane through the origin rising toward +X.
+  const sl = replay.slope ? replay.slope() : 0;
+  ground.rotation.order = 'ZXY'; ground.rotation.set(-Math.PI / 2, 0, Math.atan(sl)); gridHelper.rotation.z = Math.atan(sl);
   const com = replay.com();
   startRing.position.set(com[0], gy + 0.02, com[2]);
   trailPts.length = 0; trailGeo.setFromPoints([]);

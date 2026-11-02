@@ -129,6 +129,9 @@ pub struct Traits {
     pub climb_water: f32,
     pub turn_air: f32,
     pub climb_air: f32,
+    /// Shore test: metres up a dry beach under its own power (0 = never got out).
+    pub shore: f32,
+    pub measured_shore: bool,
     /// Geometry-derived function (see decode::body_metrics).
     pub reach: f32,
     pub mouth_area: f32,
@@ -287,6 +290,8 @@ pub struct EcoStats {
     pub metabolic_cost: f32,
     pub deaths_starved: u64,
     pub deaths_old: u64,
+    #[serde(default)]
+    pub deaths_suffocated: u64,
     /// Sum of log10(predator mass / prey mass) over all kills; mean = sum / kills.
     pub ppmr_log_sum: f32,
     pub kills_by_larger: u64,
@@ -334,6 +339,11 @@ pub struct LineageSummary {
     pub turn: f32,
     #[serde(default)]
     pub climb: f32,
+    /// Shore test mean (m up the beach) and breathing gene mean (0 gills, 1 lungs).
+    #[serde(default)]
+    pub shore: f32,
+    #[serde(default)]
+    pub breathing: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -625,12 +635,14 @@ impl EcoWorld {
                 t.measured_land = false;
                 t.measured_water = false;
                 t.measured_air = false;
+                t.measured_shore = false;
             }
             let derived = self.derived;
             for a in self.animals.iter_mut() {
                 a.traits.measured_land = false;
                 a.traits.measured_water = false;
                 a.traits.measured_air = false;
+                a.traits.measured_shore = false;
                 a.traits.activity = fatigue_factor(&decode(&a.genome), &derived);
             }
             self.pending.clear();
@@ -705,6 +717,7 @@ impl EcoWorld {
             let already = match env {
                 Environment::Water => traits.measured_water,
                 Environment::Air => traits.measured_air,
+                Environment::Shore => traits.measured_shore,
                 _ => traits.measured_land,
             };
             if !already {
@@ -715,17 +728,19 @@ impl EcoWorld {
                 // body is run again with its motors off (sham control) and that
                 // passive drift, a buoyant rise with a tilted fin or a slide after
                 // a topple, is subtracted. The air drop has its own control (a stone).
+                let mut passive_shore = 0.0;
                 let passive = if env == Environment::Air || r.exploded {
                     0.0
                 } else {
                     let sham = SimConfig { episode_time: TRAIT_EPISODE_S, motors: false, ..Default::default() };
                     let c = CreatureSim::run_episode(pheno, &self.planet, env, sham);
+                    passive_shore = if c.exploded { 0.0 } else { c.shore_progress };
                     if c.exploded { 0.0 } else { c.sustained_speed }
                 };
                 let speed = if r.exploded { 0.0 } else { (r.sustained_speed - passive).max(0.0) };
                 // Nimbleness, only for bodies that locomote: the same body driven
                 // asymmetrically (turning) and with a shifted posture (climb/dive).
-                let (turn, climb) = if speed > 0.01 && !r.exploded {
+                let (turn, climb) = if speed > 0.01 && !r.exploded && env != Environment::Shore {
                     let pheno2 = decode(&genome);
                     let st = SimConfig { episode_time: TRAIT_EPISODE_S, steer: 0.6, ..Default::default() };
                     let rs = CreatureSim::run_episode(pheno2.clone(), &self.planet, env, st);
@@ -742,6 +757,10 @@ impl EcoWorld {
                     (0.0, 0.0)
                 };
                 match env {
+                    Environment::Shore => {
+                        traits.shore = if r.exploded { 0.0 } else { (r.shore_progress - passive_shore).max(0.0) };
+                        traits.measured_shore = true;
+                    }
                     Environment::Water => {
                         traits.water_speed = speed;
                         traits.turn_water = turn;
@@ -783,6 +802,25 @@ impl EcoWorld {
         }
         self.stats.pending_evals = self.pending.len();
         done
+    }
+
+    /// Larval drift: a random walk that stays in the birth patch's medium
+    /// (water larvae drift through water, land young stay on land).
+    fn disperse_same_habitat(&mut self, from: usize, reach: f32) -> usize {
+        let water = self.patches[from].water;
+        let mut p = from;
+        let mut hops = reach.floor() as usize;
+        if self.rng.gen_bool((reach.fract()) as f64) {
+            hops += 1;
+        }
+        for _ in 0..hops {
+            let nb: Vec<usize> = self.neighbours[p].iter().copied().filter(|&k| self.patches[k].water == water).collect();
+            if nb.is_empty() {
+                break;
+            }
+            p = nb[self.rng.gen_range(0..nb.len())];
+        }
+        p
     }
 
     /// Random walk of `hops` steps over the neighbour graph.
@@ -983,6 +1021,7 @@ impl EcoWorld {
         for (i, a) in self.animals.iter().enumerate() {
             animals_in[a.patch].push(i);
         }
+        let mut shore_requests: Vec<usize> = Vec::new();
         for p in self.patches.iter_mut() {
             p.canopy = 0.0;
         }
@@ -1034,9 +1073,9 @@ impl EcoWorld {
                     a.intake_rate,
                 )
             };
-            let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air, glide_ratio) = {
+            let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air, glide_ratio, measured_shore, shore_progress) = {
                 let t = &self.animals[ai].traits;
-                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, if self.patches[patch].water { 1.0 } else { t.upright }, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT)
+                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, if self.patches[patch].water { 1.0 } else { t.upright }, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT, t.measured_shore, t.shore)
             };
             // Launch height here: the canopy plus the drop to the lowest neighbour.
             let launch_h = {
@@ -1046,6 +1085,9 @@ impl EcoWorld {
             };
             // Metres a glider covers in a day from about twenty launches.
             let glide_day = if in_water { 0.0 } else { 20.0 * glide_ratio * launch_h };
+            // Gas exchange: gills work in water, lungs in air; halfway is poor in both.
+            let breathing = self.animals[ai].genome.breathing.clamp(0.0, 1.0);
+            let resp_eff = if in_water { 1.0 - 0.9 * breathing } else { 0.1 + 0.9 * breathing };
             let temp = self.patches[patch].temp_c;
             // Ectotherm: body temperature is patch temperature; Q10 = 2 around 20 C.
             let q = 2f32.powf((temp - 20.0) / 10.0).clamp(0.15, 3.0);
@@ -1064,6 +1106,8 @@ impl EcoWorld {
             // Field metabolic rate: Kleiber exponent, ectotherm anchor, oxygen limit.
             let fmr = 0.006 * m34 * q / o2.min(1.0).max(0.3);
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
+            // Short of oxygen, the muscles cannot be kept working all day.
+            let activity = activity * resp_eff;
             let activity_cost = 0.004 * section * freq * 20.0 * activity * motility * size_f.powf(2.0 / 3.0);
             let mut delta = -(fmr + upkeep + activity_cost);
             cost_today += fmr + upkeep + activity_cost;
@@ -1094,7 +1138,7 @@ impl EcoWorld {
             // --- foraging options, each as a Holling type II intake rate ---------
             // Bite rate from the mouth: trunk cross-section (juveniles scaled),
             // about a tenth of body mass per day for a well-proportioned kilogram.
-            let bite_rate = (12.0 * mouth_area * lin_f * lin_f * q).max(1e-6);
+            let bite_rate = (12.0 * mouth_area * lin_f * lin_f * q * resp_eff).max(1e-6);
             let handling = 1.0 / bite_rate;
             // Browsing reach from the body's actual extent; on land only an
             // upright body gets its full reach.
@@ -1322,6 +1366,12 @@ impl EcoWorld {
                     // young stay where they are until their body has been tested.
                     let can = if cand_water {
                         measured_water && water_speed_raw * motility > 0.005
+                    } else if in_water {
+                        // Out of the sea only by climbing a beach in the physics.
+                        if !measured_shore && measured_water && water_speed_raw * motility > 0.005 {
+                            shore_requests.push(ai);
+                        }
+                        (measured_shore && shore_progress * lin_f > 0.5) || flier
                     } else {
                         (measured_land && land_speed_raw * motility > 0.005) || flier || can_glide_over
                     };
@@ -1385,12 +1435,21 @@ impl EcoWorld {
                     }
                 }
             }
-            if a.reserve < 0.0 {
+            if resp_eff < 0.2 && self.rng.gen_bool(0.5) {
+                // A gill-breather on dry land, or a lung-breather under water.
+                self.stats.deaths_suffocated += 1;
+                deaths.push(ai);
+            } else if a.reserve < 0.0 {
                 self.stats.deaths_starved += 1;
                 deaths.push(ai);
             } else if a.age > a.lifespan() {
                 self.stats.deaths_old += 1;
                 deaths.push(ai);
+            }
+        }
+        for ai in shore_requests {
+            if ai < self.animals.len() && !self.pending.iter().any(|(i, e)| *i == ai && *e == Environment::Shore) {
+                self.pending.push((ai, Environment::Shore));
             }
         }
         // Resolve deaths and kills.
@@ -1449,7 +1508,7 @@ impl EcoWorld {
             }
             // Larval dispersal: young drift one or two patches from the parent,
             // which is what keeps them off the parents' menu in the sea.
-            let born_at = self.disperse(b.patch, 1.5);
+            let born_at = self.disperse_same_habitat(b.patch, 1.5);
             self.animals.push(Animal::new(b.genome, key, traits, born_at, lineage, b.mass0, b.reserve0));
             let idx = self.animals.len() - 1;
             self.request_traits(idx);
@@ -1617,6 +1676,8 @@ impl EcoWorld {
             glide: 0.0,
             turn: 0.0,
             climb: 0.0,
+            shore: 0.0,
+            breathing: 0.0,
         }
     }
 
@@ -1690,6 +1751,8 @@ impl EcoWorld {
                     s.glide += a.traits.glide_distance / c;
                     s.turn += (if self.patches[a.patch].water { a.traits.turn_water } else { a.traits.turn_land.max(a.traits.turn_air) }) / c;
                     s.climb += a.traits.climb_water.max(a.traits.climb_air) / c;
+                    s.shore += a.traits.shore / c;
+                    s.breathing += a.genome.breathing / c;
                     s.parts += decode(&a.genome).part_count() as f32 / c;
                     s.membrane_area += a.traits.membrane_area / c;
                     s.lung_frac += a.genome.lung_frac / c;

@@ -467,6 +467,14 @@ export class ReplaySim {
         }
     }
     /**
+     * Bed gradient toward +X (shore replay); 0 elsewhere.
+     * @returns {number}
+     */
+    slope() {
+        const ret = wasm.replaysim_slope(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * @param {number} n
      */
     step(n) {

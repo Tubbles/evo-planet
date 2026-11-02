@@ -19,6 +19,7 @@ fn parse_env(s: &str) -> Environment {
     match s.to_lowercase().as_str() {
         "water" => Environment::Water,
         "air" => Environment::Air,
+        "shore" => Environment::Shore,
         _ => Environment::Land,
     }
 }
@@ -291,6 +292,10 @@ impl ReplaySim {
     }
     pub fn distance(&self) -> f32 {
         self.sim.horizontal_distance()
+    }
+    /// Bed gradient toward +X (shore replay); 0 elsewhere.
+    pub fn slope(&self) -> f32 {
+        self.sim.slope
     }
     pub fn ground_y(&self) -> f32 {
         self.sim.ground_y
