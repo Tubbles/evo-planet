@@ -49,7 +49,7 @@ pub const MAX_PLANTS_PER_WATER_PATCH: usize = 48;
 /// Performance guard only. Ecological limits come from food, crowding and
 /// predation (Beddington-DeAngelis interference), not from this number.
 pub const MAX_ANIMALS: usize = 5000;
-pub const TRAIT_EPISODE_S: f32 = 3.0;
+pub const TRAIT_EPISODE_S: f32 = 4.0;
 pub const NEIGHBOURS: usize = 6;
 
 // ---------------------------------------------------------------------------
@@ -118,7 +118,8 @@ pub struct Traits {
     pub measured_land: bool,
     pub measured_water: bool,
     pub measured_air: bool,
-    /// Sustained horizontal speed in the air-drop episode, m/s (0 unless airborne).
+    /// Sustained flight speed, m/s: set only when the body is still aloft at
+    /// the end of the air-drop episode (powered or very efficient flight).
     pub air_speed: f32,
     /// Geometry-derived function (see decode::body_metrics).
     pub reach: f32,
@@ -222,6 +223,9 @@ pub struct Patch {
     /// Dead animals, kg: richer than plant detritus and the bridge from
     /// scavenging to predation.
     pub carrion: f32,
+    /// Tallest plant in the patch, metres: the launch height for gliders.
+    #[serde(default)]
+    pub canopy: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -314,6 +318,9 @@ pub struct LineageSummary {
     pub upright: f32,
     #[serde(default)]
     pub air_speed: f32,
+    /// Mean glide distance beyond a thrown stone from a 10 m launch, metres.
+    #[serde(default)]
+    pub glide: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -405,7 +412,7 @@ impl EcoWorld {
                 } else {
                     (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: 2.0, dead_matter: 1.0, carrion: 0.0 }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: 2.0, dead_matter: 1.0, carrion: 0.0, canopy: 0.0 }
             })
             .collect();
         // Shore band: land patches touching water stay wet, the first foothold for plants.
@@ -690,7 +697,8 @@ impl EcoWorld {
             if !already {
                 let cfg = SimConfig { episode_time: TRAIT_EPISODE_S, ..Default::default() };
                 let r = CreatureSim::run_episode(decode(&genome), &self.planet, env, cfg);
-                let speed = if r.exploded { 0.0 } else { r.distance / TRAIT_EPISODE_S };
+                // Sustained progress only: a pill that topples and rolls once is not walking.
+                let speed = if r.exploded { 0.0 } else { r.sustained_speed };
                 match env {
                     Environment::Water => {
                         traits.water_speed = speed;
@@ -702,8 +710,12 @@ impl EcoWorld {
                         // How far the body gets through the air in the episode from a
                         // 10 m launch: a brick scores nothing, a parachuter little, a glider
                         // metres per second, a flapper more. Continuous, so wings can grow.
-                        traits.glide_distance = if r.exploded { 0.0 } else { r.air_distance };
-                        traits.air_speed = if traits.glide_distance > 0.5 { traits.glide_distance / TRAIT_EPISODE_S } else { 0.0 };
+                        // Launched at 3 m/s from 10 m: metres beyond where a stone lands are
+                        // the wings' doing (glide ratio = that / 10). Still aloft at the
+                        // end of the episode means sustained flight at the measured speed.
+                        let beyond = (r.air_distance - crate::sim::ballistic_distance(self.planet.gravity)).max(0.0);
+                        traits.glide_distance = if r.exploded { 0.0 } else { beyond };
+                        traits.air_speed = if !r.exploded && r.airborne_frac >= 0.95 && r.distance > 5.0 { r.distance / TRAIT_EPISODE_S } else { 0.0 };
                         traits.measured_air = true;
                     }
                     _ => {
@@ -924,6 +936,13 @@ impl EcoWorld {
         for (i, a) in self.animals.iter().enumerate() {
             animals_in[a.patch].push(i);
         }
+        for p in self.patches.iter_mut() {
+            p.canopy = 0.0;
+        }
+        for p in &self.plants {
+            let pt = &mut self.patches[p.patch];
+            pt.canopy = pt.canopy.max(p.height);
+        }
         let mut plants_in: Vec<Vec<usize>> = vec![Vec::new(); n_patches];
         for (i, p) in self.plants.iter().enumerate() {
             plants_in[p.patch].push(i);
@@ -968,10 +987,18 @@ impl EcoWorld {
                     a.intake_rate,
                 )
             };
-            let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air) = {
+            let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air, glide_ratio) = {
                 let t = &self.animals[ai].traits;
-                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, if self.patches[patch].water { 1.0 } else { t.upright }, t.air_speed, t.measured_air)
+                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, if self.patches[patch].water { 1.0 } else { t.upright }, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT)
             };
+            // Launch height here: the canopy plus the drop to the lowest neighbour.
+            let launch_h = {
+                let e = self.patches[patch].elevation;
+                let drop = self.neighbours[patch].iter().map(|&k| e - self.patches[k].elevation).fold(0.0f32, f32::max);
+                (self.patches[patch].canopy + drop.min(50.0)).max(0.0)
+            };
+            // Metres a glider covers in a day from about twenty launches.
+            let glide_day = if in_water { 0.0 } else { 20.0 * glide_ratio * launch_h };
             let temp = self.patches[patch].temp_c;
             // Ectotherm: body temperature is patch temperature; Q10 = 2 around 20 C.
             let q = 2f32.powf((temp - 20.0) / 10.0).clamp(0.15, 3.0);
@@ -1029,7 +1056,7 @@ impl EcoWorld {
             // a detection strip two reaches wide along the day's path (8 h of
             // foraging, cut by fatigue), plus the circle a still body can reach.
             let reach_now = reach_adult * lin_f;
-            let path = travel * 28800.0 * activity;
+            let path = (travel * 28800.0 * activity).max(glide_day);
             let search = ((PI * reach_now * reach_now + 2.0 * reach_now * path) / PATCH_AREA).min(1.0);
 
             // Plants here (accessible leaf mass), plus shore plants reachable from the water.
@@ -1079,7 +1106,9 @@ impl EcoWorld {
             let plant_rate = search * plant_b / (1.0 + search * handling * plant_b + interference); // kg/day
             let carrion_here = self.patches[patch].carrion;
             // Carrion is smelt from afar: the detection strip is three times wider.
-            let carrion_search = ((PI * reach_now * reach_now + 6.0 * reach_now * path) / PATCH_AREA).min(1.0);
+            // A flier surveys from height: a far wider strip (vultures find carcasses from kilometres up).
+            let strip = if !in_water && air_speed > 0.0 { 40.0 } else { 6.0 };
+            let carrion_search = ((PI * reach_now * reach_now + strip * reach_now * path) / PATCH_AREA).min(1.0);
             let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here + interference);
             // Energy value per kg eaten, by gut.
             let plant_value = plant_rate * eff_plant;
@@ -1102,7 +1131,18 @@ impl EcoWorld {
                     let p_lin = (pm / prey.traits.mass.max(0.001)).clamp(0.01, 1.0).powf(1.0 / 3.0);
                     let prey_speed = (if p_in_water { prey.traits.water_speed } else { prey.traits.land_speed.max(prey.traits.air_speed) }) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.3 * prey.traits.plating);
                     let attack = m34 * (0.5 + speed_here) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright);
-                    let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 2.0 * prey.traits.plating);
+                    // Taking off is the escape a ground predator cannot follow: a glider
+                    // needs a perch (its patch's launch height), a flier needs nothing.
+                    let takeoff = if p_in_water {
+                        0.0
+                    } else if prey.traits.air_speed > 0.0 {
+                        1.0
+                    } else {
+                        let e = self.patches[prey.patch].elevation;
+                        let drop = self.neighbours[prey.patch].iter().map(|&k| e - self.patches[k].elevation).fold(0.0f32, f32::max);
+                        (prey.traits.glide_distance / crate::sim::AIR_DROP_HEIGHT * (self.patches[prey.patch].canopy + drop.min(50.0)) / 10.0).clamp(0.0, 1.0)
+                    };
+                    let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 2.0 * prey.traits.plating) * (1.0 + 3.0 * takeoff);
                     let scale = 0.25 * (attack + defence) + 1e-6;
                     // Encounter: detection distance scales with prey body length, so
                     // small prey are found at a fraction of the rate of large prey.
@@ -1200,14 +1240,39 @@ impl EcoWorld {
             if hungry && self.rng.gen_bool(0.6) {
                 let directed = self.rng.gen_bool(0.5);
                 let mut best: Option<(usize, f32)> = None;
-                for &cand in &self.neighbours[patch] {
+                // A glider reaches the next patch when a launch carries it ten metres;
+                // a flier ranges over everything within an hour's flight.
+                let can_glide_over = measured_air && glide_ratio * launch_h >= 10.0;
+                let flier = measured_air && air_speed_raw * motility > 0.5;
+                let range_hops = if flier { ((air_speed_raw * motility * 3600.0 / 10.0) as usize).clamp(1, 8) } else { 1 };
+                let candidates: Vec<usize> = if range_hops > 1 {
+                    // Breadth-first over the neighbour graph up to range_hops.
+                    let mut seen = vec![patch];
+                    let mut frontier = vec![patch];
+                    for _ in 0..range_hops {
+                        let mut next = Vec::new();
+                        for &q in &frontier {
+                            for &k in &self.neighbours[q] {
+                                if !seen.contains(&k) {
+                                    seen.push(k);
+                                    next.push(k);
+                                }
+                            }
+                        }
+                        frontier = next;
+                    }
+                    seen.into_iter().filter(|&k| k != patch).collect()
+                } else {
+                    self.neighbours[patch].clone()
+                };
+                for cand in candidates {
                     let cand_water = self.patches[cand].water;
                     // Entry needs demonstrated ability in that habitat; unmeasured
                     // young stay where they are until their body has been tested.
                     let can = if cand_water {
                         measured_water && water_speed_raw * motility > 0.005
                     } else {
-                        (measured_land && land_speed_raw * motility > 0.005) || (measured_air && air_speed_raw * motility > 0.005)
+                        (measured_land && land_speed_raw * motility > 0.005) || flier || can_glide_over
                     };
                     if !can {
                         continue;
@@ -1430,8 +1495,8 @@ impl EcoWorld {
                 s.aquatic += 1;
             }
             s.best_land_speed = s.best_land_speed.max(a.traits.land_speed);
-            if a.traits.air_speed > 1.0 {
-                s.fliers += 1; // gliders and fliers: metres per second through the air
+            if a.traits.air_speed > 0.0 || a.traits.glide_distance > 0.5 {
+                s.fliers += 1; // gliders (beat a thrown stone) and fliers
             }
             {
                 let mut v = [h, c, d];
@@ -1498,6 +1563,7 @@ impl EcoWorld {
             reach: 0.0,
             upright: 0.0,
             air_speed: 0.0,
+            glide: 0.0,
         }
     }
 
@@ -1513,7 +1579,7 @@ impl EcoWorld {
         let keep = |l: &LineageSummary| match habitat {
             "land" => l.aquatic_share < 0.5,
             "water" => l.aquatic_share >= 0.5,
-            "air" => l.air_speed > 0.0,
+            "air" => l.air_speed > 0.0 || l.glide > 0.5,
             _ => true,
         };
         out.retain(|l| keep(l));
@@ -1568,6 +1634,7 @@ impl EcoWorld {
                     s.land_speed += a.traits.land_speed / c;
                     s.water_speed += a.traits.water_speed / c;
                     s.air_speed += a.traits.air_speed / c;
+                    s.glide += a.traits.glide_distance / c;
                     s.parts += decode(&a.genome).part_count() as f32 / c;
                     s.membrane_area += a.traits.membrane_area / c;
                     s.lung_frac += a.genome.lung_frac / c;
@@ -1613,12 +1680,12 @@ impl EcoWorld {
         let fits = |a: &&Animal| match habitat {
             "land" => !self.patches[a.patch].water,
             "water" => self.patches[a.patch].water,
-            "air" => a.traits.air_speed > 0.0,
+            "air" => a.traits.air_speed > 0.0 || a.traits.glide_distance > 0.5,
             _ => true,
         };
         let pool: Vec<&Animal> = if members.iter().any(fits) { members.iter().copied().filter(fits).collect() } else { members };
         pool.into_iter().max_by_key(|a| (a.offspring, (a.reserve * 100.0) as i64)).map(|a| {
-            let env = if habitat == "air" && a.traits.air_speed > 0.0 {
+            let env = if habitat == "air" && (a.traits.air_speed > 0.0 || a.traits.glide_distance > 0.5) {
                 Environment::Air
             } else if self.patches[a.patch].water {
                 Environment::Water

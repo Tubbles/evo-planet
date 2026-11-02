@@ -79,13 +79,28 @@ it is also carrion for everyone else. Replaces "prey must be under 2.5×"
 and "under 0.2× is engulfed".
 
 ### Flight as measured function
-Any body whose membranes give a wing loading under 50 kg/m² is also dropped
-from 10 m in the physics. The horizontal distance it covers before touching
-the ground, over the episode, is its air speed: a brick scores nothing, a
-parachuter a little, a glider metres per second, a flapper more. It is
-continuous so wings can grow by degrees. Over land the day's foraging path
-uses the larger of crawl and air speed (the flier lands to eat), prey
-escape uses it, and a flier may enter land patches it cannot crawl in.
+Any body whose membranes give a wing loading under 50 kg/m² is also launched
+at 3 m/s from 10 m in the physics, the way a gliding animal leaps. Metres
+beyond where a thrown stone lands are the wings' doing (the glide, with
+glide ratio = that over 10 m); a body still aloft at the end of the episode
+is a flier at its measured air speed. Hand-built gliders at 3-4 kg/m² reach
+about 6 m beyond the stone, so the gradient exists but is modest: the flat
+plate model has no camber and a fixed parasitic drag.
+
+What flight buys, each with a real analogue:
+- **Launch height.** Gliders use the patch's canopy (tallest plant) and
+  the drop to the lowest neighbour as a perch. About twenty launches a day
+  times glide ratio times launch height is ground covered for free, and a
+  launch that carries ten metres reaches the next patch. Tall plants make
+  gliding useful, as trees did.
+- **Range.** A flier ranges over every patch within an hour's flight
+  (up to eight hops) and crosses water, so islands and far coasts are
+  reachable before anything can crawl there.
+- **Surveying.** A flier's carrion search strip is forty reaches wide
+  instead of six, as vultures find carcasses from height.
+- **Escape.** Taking off is the escape a ground predator cannot follow: a
+  flier's defence is quadrupled, a glider's in proportion to glide ratio
+  times launch height over ten metres.
 Lift scales with the planet's air density, so dense atmospheres favour it.
 
 ### Decision by profitability
@@ -194,6 +209,19 @@ season. Each is a candidate system, each with a real analogue.
    takes 18% of its diet as meat, 254 carnivores by realised diet at day
    4000. Mean body still 2–3 parts and drifting small; the next question is
    what function a fourth part buys in the sea.
+
+10. Land speeds were toppling, not walking: speed was total displacement over
+    the episode, so a pill that fell over and rolled scored 0.2 m/s and was
+    credited with kilometres of foraging path a day. Two fixes, both
+    physical: speed is now sustained progress over the second half of a 4 s
+    episode after settling, and bodies on the ground feel rolling resistance
+    (coefficient 0.05), without which a toppled capsule rolls forever in a
+    frictionless solver. A single capsule now scores under 1 mm/s on land.
+11. Flight was never measured and had no function. See the flight section:
+    leap launch, glide beyond a stone, launch height from canopy and
+    hillsides, range, surveying and escape. First runs: no gliders yet by day
+    3000; the plants are 1-2 m tall, so the perch is low. Taller plants are
+    the lever, and they need the bending and transport model to pay off.
 
 ## How we will know it works
 Not by reaching a target. By emergent statistics matching ecological

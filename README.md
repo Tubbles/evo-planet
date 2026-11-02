@@ -179,8 +179,13 @@ The lineage table can be filtered by kind (animals, plants, both) and
 habitat (all, land, sea, fliers) and sorted by count, mass, speed, height,
 parts or land share; tapping a lineage replays a member from the filtered
 habitat. Flight is measured for any winged body light enough for it to
-matter and gives a real function: a wider foraging sweep over land, escape
-from predators, and access to land patches.
+matter: launched at 3 m/s from 10 m, metres beyond a thrown stone are the
+glide, still aloft at the end is flight. Gliders use the canopy and
+hillsides as perches to cross patches, cover ground and escape; fliers
+range over many patches a day, cross water, survey carrion from above and
+are out of reach of ground predators. Land and water speeds are sustained
+progress after settling, with rolling resistance on the ground, so a body
+that topples once does not count as walking.
 
 - **Plants** use the same graph genome as animals, read by a different
   decoder (`evo_core/src/plant.rs`): capsule nodes are stems and branches,

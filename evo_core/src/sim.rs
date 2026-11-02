@@ -59,11 +59,23 @@ impl Default for SimConfig {
 pub const C_P_ALPHA: f32 = 2.61;
 /// Parasitic drag of a thin panel at zero incidence.
 pub const CD0_PANEL: f32 = 0.09;
+/// Rolling resistance coefficient of a body on the ground (soft tissue on
+/// soil: 0.03-0.1). Without it a toppled capsule rolls forever.
+pub const C_ROLLING: f32 = 0.05;
 pub const CD_CAPSULE_AXIAL: f32 = 0.5;
 pub const CD_CAPSULE_LATERAL: f32 = 1.1;
 /// Oxygen budget scale: see `fatigue_factor`.
 pub const O2_BUDGET_K: f32 = 40.0;
 pub const AIR_DROP_HEIGHT: f32 = 10.0;
+/// Gliding animals leap: the air drop starts with this forward speed (m/s).
+/// A stone thrown this way lands `AIR_LAUNCH_SPEED * sqrt(2h/g)` away; only
+/// distance beyond that is credited to wings.
+pub const AIR_LAUNCH_SPEED: f32 = 3.0;
+
+/// Horizontal distance a wingless body covers in the air drop (the leap alone).
+pub fn ballistic_distance(gravity: f32) -> f32 {
+    AIR_LAUNCH_SPEED * (2.0 * AIR_DROP_HEIGHT / gravity.max(0.1)).sqrt()
+}
 pub const WATER_DEPTH: f32 = 12.0;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -82,6 +94,10 @@ pub struct EpisodeResult {
     pub mean_height: f32,
     /// Horizontal distance covered before first touching the ground (air drops).
     pub air_distance: f32,
+    /// Sustained locomotion speed, m/s: horizontal progress over the second
+    /// half of the episode, after any toppling or sinking has played out. A
+    /// body that falls over once and rolls scores zero here.
+    pub sustained_speed: f32,
 }
 
 pub struct CreatureSim {
@@ -119,6 +135,8 @@ pub struct CreatureSim {
     pub exploded: bool,
     pub landing_distance: Option<f32>,
     com_height_sum: f32,
+    /// Centre of mass at the episode's midpoint, for sustained speed.
+    mid_com: Option<Vector3<f32>>,
 }
 
 fn part_bounding_radius(p: &crate::decode::Part) -> f32 {
@@ -207,6 +225,7 @@ impl CreatureSim {
         for (i, p) in pheno.parts.iter().enumerate() {
             let rb = RigidBodyBuilder::dynamic()
                 .position(isos[i])
+                .linvel(if env == Environment::Air { vector![AIR_LAUNCH_SPEED, 0.0, 0.0] } else { vector![0.0, 0.0, 0.0] })
                 .linear_damping(0.05)
                 .angular_damping(0.2)
                 .ccd_enabled(true)
@@ -309,6 +328,7 @@ impl CreatureSim {
             exploded: false,
             landing_distance: None,
             com_height_sum: 0.0,
+            mid_com: None,
         };
         sim.start_com = sim.com();
         if !sim.settled {
@@ -468,6 +488,23 @@ impl CreatureSim {
                 }
             }
 
+            // Rolling resistance: a part resting on the ground loses horizontal
+            // momentum at C_ROLLING * g, which stops passive rolling after a
+            // topple while costing a walker little.
+            if sub <= 0.0 {
+                let half = axis * (p.len * 0.5);
+                let low = (center + half).y.min((center - half).y) - p.radius;
+                if low < self.ground_y + 0.02 {
+                    let v = *rb.linvel();
+                    let vh = Vector3::new(v.x, 0.0, v.z);
+                    let sp = vh.norm();
+                    if sp > 1e-4 {
+                        let f = (C_ROLLING * p.mass * g).min(p.mass * sp / self.cfg.dt);
+                        rb.add_force(-vh / sp * f, true);
+                    }
+                }
+            }
+
             // Buoyancy and submersion damping.
             if sub > 0.0 {
                 let volume = p.mass / p.density;
@@ -515,6 +552,9 @@ impl CreatureSim {
         if self.settled {
             self.total_steps += 1;
             self.com_height_sum += self.com().y - self.ground_y;
+            if self.mid_com.is_none() && self.time >= self.cfg.settle_time + 0.5 * (self.cfg.episode_time - self.cfg.settle_time) {
+                self.mid_com = Some(self.com());
+            }
             let airborne = self.is_airborne();
             if airborne {
                 self.airborne_steps += 1;
@@ -568,7 +608,7 @@ impl CreatureSim {
                 Environment::Air => {
                     // Horizontal distance dominates so gliders beat parachutes;
                     // time aloft still rewards slowing the fall as a first step.
-                    let d = self.landing_distance.unwrap_or(distance);
+                    let d = (self.landing_distance.unwrap_or(distance) - ballistic_distance(-self.gravity.y)).max(0.0);
                     (d + 0.25 * self.time_aloft) * self.hydration
                 }
             }
@@ -586,6 +626,14 @@ impl CreatureSim {
             total_mass: self.pheno.total_mass,
             mean_height: if self.total_steps > 0 { self.com_height_sum / self.total_steps as f32 } else { 0.0 },
             air_distance: self.landing_distance.unwrap_or(distance),
+            sustained_speed: match self.mid_com {
+                Some(m) => {
+                    let d = self.com() - m;
+                    let half = 0.5 * (self.cfg.episode_time - self.cfg.settle_time);
+                    if half > 0.0 { (d.x * d.x + d.z * d.z).sqrt() / half } else { 0.0 }
+                }
+                None => 0.0,
+            },
         }
     }
 
