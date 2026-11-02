@@ -101,6 +101,24 @@ Sex and mating (asexual with mutation), senses and brains beyond the
 physics CPG, disease, parasites, symbiosis, social hunting, migration by
 season. Each is a candidate system, each with a real analogue.
 
+## Changes made from the research pass (see reports/Mechanistic ecology for evolution sims.md)
+
+- Kill return scales with relative size (Fritsch et al.): zero for prey ten
+  times larger, 40% at equal size, full for prey much smaller. This is the
+  rule that stops predation running away to ever-smaller predators.
+- Capture probability is attack-versus-defence times a Gaussian hump in
+  log10(predator/prey mass) centred at 10× (Brose 2006 ratios).
+- Fat capacity ∝ M^1.19 (Lindstedt & Boyce), growth follows West–Brown–Enquist.
+- Crowding enters feeding as Beddington–DeAngelis interference; the animal
+  count is only a performance guard now.
+- Plants carry a leaf-toughness gene on the leaf-economics axis: tough leaves
+  lose less to grazing, digest worse, and photosynthesise slower.
+- Founders are a few hundred grams, seeded in warm shallow seas; the sea's
+  algae density is light-limited rather than counter-limited.
+- Logged for falsification: realised predator–prey mass ratio of kills
+  (field mean ≈ 10^1.6, 80% by the larger), satiation fraction (≈ 88%),
+  daily energy flows, death causes.
+
 ## How we will know it works
 Not by reaching a target. By emergent statistics matching ecological
 regularities: body-size distributions spanning orders of magnitude,

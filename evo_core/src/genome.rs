@@ -154,6 +154,10 @@ pub struct Genome {
     /// Lifespan multiplier on the allometric baseline.
     #[serde(default = "default_longevity")]
     pub longevity: f32,
+    /// Plant leaf toughness (leaf economics spectrum): tough leaves lose less
+    /// to grazers and digest worse, but photosynthesise slower per area.
+    #[serde(default)]
+    pub leaf_toughness: f32,
 }
 
 fn default_seed_mass() -> f32 {
@@ -432,6 +436,7 @@ impl Genome {
             weapon: 0.0,
             armour: 0.0,
             longevity: 1.0,
+            leaf_toughness: 0.0,
         }
     }
 
@@ -472,6 +477,7 @@ impl Genome {
             weapon: 0.0,
             armour: 0.0,
             longevity: 1.0,
+            leaf_toughness: 0.0,
         }
     }
 
@@ -590,6 +596,7 @@ impl Genome {
             weapon: 0.0,
             armour: 0.0,
             longevity: 1.0,
+            leaf_toughness: 0.0,
         }
     }
 
@@ -686,6 +693,9 @@ impl Genome {
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.longevity = nudge(rng, g.longevity, 0.15, 0.03, 0.3, 3.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.leaf_toughness = (g.leaf_toughness + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.density = nudge(rng, g.density, 0.12, 5.0, 20.0, 1200.0);
