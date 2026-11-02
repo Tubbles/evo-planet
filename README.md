@@ -192,7 +192,10 @@ asymmetric drive and climb speed from a posture shift, used in chases.
 The shore is an intertidal band, under water half the day, where gills
 still work, algae mats grow and slow grazers can live; dry land beyond it
 is a crawl away, and a lineage survives there only if its breathing gene
-has moved from gills toward lungs and it finds food. As of this writing no walkers or fish-like
+has moved from gills toward lungs and it finds food. Mutation can duplicate a working segment (serial homology), so limbs
+multiply the way they do in animals; a body's daily path ranges into
+neighbouring patches, so speed keeps paying; chases are judged in body
+lengths per second. As of this writing no walkers or fish-like
 swimmers have evolved in the ecology; `docs/MODEL.md` records what the
 replays actually show and what higher fidelity would cost.
 

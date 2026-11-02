@@ -75,6 +75,11 @@ pub const CD0_PANEL: f32 = 0.09;
 /// Rolling resistance coefficient of a body on the ground (soft tissue on
 /// soil: 0.03-0.1). Without it a toppled capsule rolls forever.
 pub const C_ROLLING: f32 = 0.05;
+/// Spin drag coefficient of a part rotating about its own axis.
+pub const C_SPIN: f32 = 1.0;
+/// Joint angular speed at which muscle torque reaches zero (Hill), rad/s.
+/// Vertebrate limb joints peak around 10-40 rad/s.
+pub const OMEGA_MAX: f32 = 25.0;
 pub const CD_CAPSULE_AXIAL: f32 = 0.5;
 pub const CD_CAPSULE_LATERAL: f32 = 1.1;
 /// Oxygen budget scale: see `fatigue_factor`.
@@ -485,6 +490,11 @@ impl CreatureSim {
         }
     }
 
+    /// Angular velocity of part `i` (debugging and audits).
+    pub fn part_angvel(&self, i: usize) -> Vector3<f32> {
+        self.bodies.get(self.handles[i]).map(|rb| *rb.angvel()).unwrap_or_else(Vector3::zeros)
+    }
+
     /// Ground height under horizontal position x (sloped on the shore).
     pub fn ground_at(&self, x: f32) -> f32 {
         self.ground_y + self.slope * x
@@ -503,7 +513,16 @@ impl CreatureSim {
             if p.joint == JointKind::Rigid {
                 continue;
             }
-            let strength = p.max_torque * self.fatigue;
+            // Hill force-velocity limit: a muscle's torque falls linearly with
+            // the joint's angular speed and is gone at OMEGA_MAX, so power is
+            // bounded. Without it a joint delivers full torque at any speed and
+            // a body can be spun at ten revolutions a second by one motor.
+            let omega_rel = match (self.bodies.get(self.handles[i]), p.parent.and_then(|q| self.bodies.get(self.handles[q]))) {
+                (Some(c), Some(q)) => (c.angvel() - q.angvel()).norm(),
+                _ => 0.0,
+            };
+            let hill = (1.0 - omega_rel / OMEGA_MAX).clamp(0.05, 1.0);
+            let strength = p.max_torque * self.fatigue * hill;
             let stiffness = strength * 3.0;
             let damping = strength * 0.3;
             let w = 2.0 * PI * f * p.cpg.freq_mult * t;
@@ -518,8 +537,10 @@ impl CreatureSim {
             };
             if let Some(j) = self.impulse_joints.get_mut(jh) {
                 j.data.set_motor_position(JointAxis::AngX, t1, stiffness, damping);
+                j.data.set_motor_max_force(JointAxis::AngX, strength);
                 if p.joint == JointKind::Ball {
                     j.data.set_motor_position(JointAxis::AngZ, t2, stiffness, damping);
+                    j.data.set_motor_max_force(JointAxis::AngZ, strength);
                 }
             }
         }
@@ -598,6 +619,30 @@ impl CreatureSim {
                         }
                         rb.add_force_at_point(f, Point3::from(point), true);
                     }
+                }
+            }
+
+            // Spin drag about the part's own axis: the point samples above lie on
+            // the axis and see no velocity from axial rotation, so without this a
+            // disc could spin up without limit. A rotating cylinder of radius r
+            // and length L in a fluid: torque ~ 0.5 rho C r^4 L w|w| (plus the
+            // caps), opposed to the spin and capped so it cannot reverse it in one
+            // step (inertia about the axis ~ 0.5 m r^2).
+            {
+                let w = *rb.angvel();
+                let wa = w.dot(&axis);
+                if wa.abs() > 1e-3 {
+                    let (r_eff, l_eff) = match p.kind {
+                        NodeKind::Membrane => (p.r0, p.len),
+                        _ => (p.radius, p.len + 2.0 * p.radius),
+                    };
+                    let mut tau = 0.5 * rho * C_SPIN * r_eff.powi(4) * l_eff * wa * wa.abs();
+                    let inertia = 0.5 * p.mass * r_eff * r_eff;
+                    let tau_max = inertia * wa.abs() / self.cfg.dt;
+                    if tau.abs() > tau_max {
+                        tau = tau.signum() * tau_max;
+                    }
+                    rb.add_torque(axis * (-tau), true);
                 }
             }
 

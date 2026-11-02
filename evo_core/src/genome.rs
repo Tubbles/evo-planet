@@ -725,6 +725,41 @@ impl Genome {
             body = true;
         }
 
+        // Duplicate a segment (serial homology): copy a used node with its
+        // attachment onto the same host, shifted along the host or mirrored,
+        // keeping its oscillator. Two legs become four; a fin becomes a pair.
+        // This is how limbs multiply in animals, by duplication of a working
+        // module, not by inventing a random one.
+        if g.nodes.len() < MAX_NODES && rng.gen_bool((p * 2.0) as f64) {
+            let hosts: Vec<(usize, usize)> = g
+                .nodes
+                .iter()
+                .enumerate()
+                .flat_map(|(h, n)| n.connections.iter().enumerate().map(move |(ci, _)| (h, ci)))
+                .filter(|&(h, ci)| g.nodes[h].connections[ci].target != h && g.nodes[h].connections.len() < MAX_CONNECTIONS_PER_NODE)
+                .collect();
+            if !hosts.is_empty() {
+                let (h, ci) = hosts[rng.gen_range(0..hosts.len())];
+                let src = g.nodes[h].connections[ci];
+                let copy = g.nodes[src.target].clone();
+                let new_idx = g.nodes.len();
+                g.nodes.push(copy);
+                let mut c = src;
+                c.target = new_idx;
+                if rng.gen_bool(0.5) {
+                    // Serial: further along the host, same side.
+                    c.along = (c.along + rng.gen_range(-0.4..0.4f32)).clamp(0.0, 1.0);
+                    c.phase_flip = rng.gen_bool(0.5);
+                } else {
+                    // Bilateral: the mirror image, in antiphase half the time.
+                    c.reflect = !c.reflect;
+                    c.phase_flip = rng.gen_bool(0.5);
+                }
+                g.nodes[h].connections.push(c);
+                body = true;
+            }
+        }
+
         // Add a node (initially unconnected unless a pointer mutates to it).
         if g.nodes.len() < MAX_NODES && rng.gen_bool((p * 2.0) as f64) {
             let n = g.nodes.len();

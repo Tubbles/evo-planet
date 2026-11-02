@@ -39,7 +39,16 @@ use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+/// A patch is 100 m², the scale the individual-plant model is sized for. A
+/// body whose daily path sweeps more than its patch ranges into the
+/// neighbours (see the home-range spill in the animal tick), so speed keeps
+/// paying beyond the patch instead of saturating at two centimetres a second.
 pub const PATCH_AREA: f32 = 100.0;
+/// Share of a water patch's plant mass that is suspended (drift, plankton)
+/// and so reachable by filtering a current rather than by travelling.
+pub const SUSPENDED_FRACTION: f32 = 0.2;
+/// Water cleared by a filter feeder, m^3 per kg of body per day.
+pub const CLEARANCE_M3_PER_KG_DAY: f32 = 1.2;
 pub const MAX_PLANTS_PER_PATCH: usize = 8;
 /// Algae are small; the sea holds more individuals per patch so that light,
 /// not a counter, limits production (a square-metre sheet x 48 is LAI 0.5).
@@ -573,7 +582,16 @@ impl EcoWorld {
         let t = Traits {
             mass: pheno.total_mass,
             activity: fatigue_factor(&pheno, &self.derived),
-            section_area: pheno.total_section_area,
+            // Muscle work: cross-section of driven joints weighted by how far
+            // and how often they are swung. A rigid strut or a limp limb costs
+            // only its mass.
+            section_area: pheno
+                .parts
+                .iter()
+                .skip(1)
+                .filter(|p| p.joint != crate::genome::JointKind::Rigid)
+                .map(|p| p.section_area * p.cpg.freq_mult * (p.cpg.amp.abs().min(p.limit) / 0.8).min(1.5))
+                .sum::<f32>(),
             base_freq: pheno.base_freq,
             membrane_area: pheno.membrane_area,
             reach: bm.reach,
@@ -718,8 +736,26 @@ impl EcoWorld {
                     keep.push((idx, env));
                 }
             }
+            // Most-copied bodies (an unmeasured body that is spreading) and the
+            // newest bodies (where selection information lives) take turns, so a
+            // fresh body plan is measured soon instead of last.
             keep.sort_by_key(|&(idx, _)| copies.get(&self.animals[idx].key).copied().unwrap_or(0));
-            self.pending = keep;
+            let mut order: Vec<(usize, Environment)> = Vec::with_capacity(keep.len());
+            let (mut lo, mut hi) = (0usize, keep.len());
+            let mut take_new = false;
+            while lo < hi {
+                if take_new {
+                    order.push(keep[lo]);
+                    lo += 1;
+                } else {
+                    hi -= 1;
+                    order.push(keep[hi]);
+                }
+                take_new = !take_new;
+            }
+            // Popped from the back: reverse so the first chosen is popped first.
+            order.reverse();
+            self.pending = order;
         }
         while done < budget {
             let Some((idx, env)) = self.pending.pop() else { break };
@@ -1170,6 +1206,13 @@ impl EcoWorld {
             let reach_now = reach_adult * lin_f;
             let path = (travel * 28800.0 * activity).max(glide_day);
             let search = ((PI * reach_now * reach_now + 2.0 * reach_now * path) / PATCH_AREA).min(1.0);
+            // Filter feeding: a fifth of the sea's plant mass is drifting fragments
+            // and plankton, and a body clears about a cubic metre of water per
+            // kilogram per day (mussels and sponges: 1-10 L/h per 100 g), from a
+            // patch two metres deep. Proportional to mass, so no scale advantage;
+            // a supplement at fish-level metabolism, not a free living.
+            let filtered = (CLEARANCE_M3_PER_KG_DAY * mass * sub / (PATCH_AREA * 2.0)).min(1.0);
+            let search = (search + SUSPENDED_FRACTION * filtered).min(1.0);
 
             // Plants here (accessible leaf mass), plus shore plants reachable from the water.
             let mut plant_targets: Vec<(usize, f32)> = Vec::new();
@@ -1190,7 +1233,36 @@ impl EcoWorld {
                     plant_b += acc;
                 }
             }
-            if in_water {
+            // Home range: once the day's path has swept this patch, the rest of
+            // it sweeps the neighbours it could live in, so a faster body feeds
+            // from a wider range (up to the six neighbours, a 700 m^2 range).
+            let swept_patches = 2.0 * reach_now * path / PATCH_AREA;
+            let spill = ((swept_patches - 1.0) / 6.0).clamp(0.0, 1.0);
+            if spill > 0.0 {
+                for &j in &self.neighbours[patch] {
+                    let js = self.patches[j].submersion;
+                    // Same medium or the shore in between; dry land needs legs.
+                    let reachable = (js > 0.0) == (sub > 0.0) || js == 0.5 || sub == 0.5;
+                    if !reachable || (js == 0.0 && land_speed_raw * motility <= 0.005) {
+                        continue;
+                    }
+                    for &pi in &plants_in[j] {
+                        let p = &self.plants[pi];
+                        if p.biomass < 0.004 {
+                            continue;
+                        }
+                        let lf = p.body().leaf_mass / p.body().target_mass;
+                        let browse = if js >= 1.0 { 1.0 } else { (reach_h / p.height.max(0.02)).clamp(0.1, 1.0) };
+                        let tough = p.genome.leaf_toughness.clamp(0.0, 1.0);
+                        let acc = (p.biomass - 0.004) * lf * 0.5 * (1.0 - 0.8 * tough) * browse * spill;
+                        if acc > 0.0 {
+                            plant_targets.push((pi, acc));
+                            plant_b += acc;
+                        }
+                    }
+                }
+            }
+            if in_water && spill <= 0.0 {
                 // Shore grazing: reach plants on adjacent land, better the more one can crawl.
                 let amph = 0.8 * (0.1 + 4.0 * land_speed).min(1.0);
                 for &j in &self.neighbours[patch] {
@@ -1247,7 +1319,11 @@ impl EcoWorld {
                     // a turn rate of about 1.5 rad/s doubles either side's term.
                     let my_turn = self.animals[ai].traits.turn_water * sub + self.animals[ai].traits.turn_land.max(self.animals[ai].traits.turn_air) * (1.0 - sub);
                     let prey_turn = prey.traits.turn_water * p_sub + prey.traits.turn_land.max(prey.traits.turn_air) * (1.0 - p_sub);
-                    let attack = m34 * (0.5 + speed_here) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright) * (0.5 + 0.5 * (my_turn / 1.5).min(1.0));
+                    // Chases scale with body size (Howland 1974): speeds in body
+                    // lengths per second, a sessile party at the floor of 0.2.
+                    let my_bl = speed_here / (2.0 * reach_now).max(0.01);
+                    let prey_bl = prey_speed / (2.0 * prey.traits.reach * p_lin).max(0.01);
+                    let attack = m34 * (0.2 + my_bl.min(10.0)) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright) * (0.5 + 0.5 * (my_turn / 1.5).min(1.0));
                     // Taking off is the escape a ground predator cannot follow: a glider
                     // needs a perch (its patch's launch height), a flier needs nothing.
                     let takeoff = if p_in_water {
@@ -1259,7 +1335,7 @@ impl EcoWorld {
                         let drop = self.neighbours[prey.patch].iter().map(|&k| e - self.patches[k].elevation).fold(0.0f32, f32::max);
                         (prey.traits.glide_distance / crate::sim::AIR_DROP_HEIGHT * (self.patches[prey.patch].canopy + drop.min(50.0)) / 10.0).clamp(0.0, 1.0)
                     };
-                    let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 2.0 * prey.traits.plating) * (1.0 + 3.0 * takeoff) * (0.5 + 0.5 * (prey_turn / 1.5).min(1.0));
+                    let defence = pm.powf(0.75) * (0.2 + prey_bl.min(10.0)) * (0.5 + 2.0 * prey.traits.plating) * (1.0 + 3.0 * takeoff) * (0.5 + 0.5 * (prey_turn / 1.5).min(1.0));
                     let scale = 0.25 * (attack + defence) + 1e-6;
                     // Encounter: detection distance scales with prey body length, so
                     // small prey are found at a fraction of the rate of large prey.
@@ -1518,11 +1594,13 @@ impl EcoWorld {
                 self.trait_cache.entry(key.clone()).or_insert(b.parent_traits);
             }
             let mut traits = self.lookup_traits(&b.genome);
-            // A changed body starts with most of its parent's measured speeds as a
-            // prior until its own physics episode runs at half adult mass.
+            // A changed body inherits its parent's measured speeds as a neutral
+            // prior until its own physics runs: assumed no better and no worse.
             if b.body_changed && !traits.measured_water && !traits.measured_land {
-                traits.water_speed = b.parent_traits.water_speed * 0.7;
-                traits.land_speed = b.parent_traits.land_speed * 0.7;
+                traits.water_speed = b.parent_traits.water_speed;
+                traits.land_speed = b.parent_traits.land_speed;
+                traits.turn_water = b.parent_traits.turn_water;
+                traits.turn_land = b.parent_traits.turn_land;
             }
             // Larval dispersal: young drift one or two patches from the parent,
             // which is what keeps them off the parents' menu in the sea.

@@ -331,6 +331,55 @@ The most numerous lineage (804 members) is three flat plates jammed
 together, tumbling through the water at 0.35 m/s net of a 0.33 m/s passive
 drift. The sham control handles the drift; it is still not a fish.
 
+### Why bodies stayed at two or three parts, and what changed
+Three biases against new body plans, none of them biology: a changed body
+started at 0.7× its parent's speed until measured; the measurement queue
+put the most-copied bodies first, so a brand-new plan was measured last
+and in practice never; and every limb paid full muscle cost whether it
+moved or not. Now a new body inherits its parent's speeds as a neutral
+prior, the queue alternates between the most-copied and the newest body,
+and muscle cost counts only driven joints weighted by how far and how often
+they swing (a strut or a limp limb costs its mass only).
+
+Then the payoff: with a 100 m² patch, any body over 2 cm/s swept its whole
+patch in a day and extra speed bought nothing. A hectare patch was tried
+and starved everyone, because plants are individuals with a per-patch cap
+sized for 100 m². Instead a body's daily path, once it has swept its own
+patch, spills into the neighbours it could live in (a home range of up to
+seven patches), so speed pays up to about 0.1 m/s for a 10 cm body. Chases
+are judged in body lengths per second (Howland), with the floor lowered
+from 0.5 to 0.2 so a sessile party is as easy as it should be. Filter feeding:
+a fifth of the sea's plant mass is suspended, and a body clears about a
+cubic metre of water per kilogram per day, as mussels and sponges do. A
+first version used frontal area times a current, which at 100 m² handed
+every still body a fifth of the patch's plants a day and bred 120 kg
+sessile giants with idle parts within 900 days; clearance scales with mass
+and gives no such advantage.
+
+### Segment duplication
+Limbs multiply in animals by duplicating a working module (serial homology,
+Hox-patterned segments), not by inventing a random one. Mutation now has
+that operator: a used node is copied with its attachment onto the same
+host, either further along it (serial) or mirrored (bilateral), keeping its
+oscillator with a random phase flip. Two legs become four; a fin becomes a
+pair. The random-new-node operator stays. In a 900-day probe, three-part
+bodies went from 15 of 226 to 71 of 281, and the fastest bodies were
+six-part; two-part bodies still dominate, and the open-loop oscillators
+remain the likeliest ceiling on coordination.
+
+### Two more physics leaks, found by the audit
+The fastest "swimmers" after the home-range change spun at 65-95 rad/s.
+Tracing both parts showed them co-rotating, so it was not the motor: the
+drag model samples points on a capsule's axis, so a short fat part had no
+resistance to spinning about its own axis, and the counter-torque from
+damping its limb spun it up without limit. Every part now has spin drag
+about its own axis (a rotating cylinder, torque ~ ½ρ·C·r⁴·L·ω|ω|). Joint
+motors also now obey a Hill force-velocity limit: torque falls linearly to
+zero at 25 rad/s of joint speed, so muscle power is bounded. The spinning
+bodies went from 0.97 to 0.07 m/s; a fin-sculler from 0.57 to 0.28; the
+"best land body" from 0.09 to 0.004 m/s, so it too had been spin-powered.
+The hand-built gliders are unchanged.
+
 ### Audit tooling
 `cargo run --example shore_probe -- <genome.json>...` runs bodies on the beach
 with motors on and off. `cargo run --example gait_audit -- <days> <out_dir>` re-runs the fastest
