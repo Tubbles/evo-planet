@@ -118,13 +118,70 @@ pub struct Animal {
     pub genome: Genome,
     #[serde(default)]
     pub key: String,
+    /// Adult body measured by physics; `mass` grows toward `traits.mass`.
     pub traits: Traits,
     pub patch: usize,
-    pub energy: f32,
-    pub age: f32,
     pub lineage: u32,
+    /// Current body mass, kg.
+    pub mass: f32,
+    /// Stored energy (fat), kg biomass equivalent. Death below zero.
+    pub reserve: f32,
+    /// Gut contents awaiting digestion, kg.
+    pub gut_plant: f32,
+    pub gut_meat: f32,
+    pub age: f32,
     pub kills: u32,
     pub offspring: u32,
+    /// Lifetime intake by source, for the realised diet class.
+    pub ate_plant: f32,
+    pub ate_meat: f32,
+    pub ate_carrion: f32,
+    /// Yesterday's energy gain, used as the foraging decision baseline.
+    pub intake_rate: f32,
+}
+
+impl Animal {
+    fn new(genome: Genome, key: String, traits: Traits, patch: usize, lineage: u32, mass: f32, reserve: f32) -> Self {
+        Self {
+            genome,
+            key,
+            traits,
+            patch,
+            lineage,
+            mass: mass.max(0.001),
+            reserve,
+            gut_plant: 0.0,
+            gut_meat: 0.0,
+            age: 0.0,
+            kills: 0,
+            offspring: 0,
+            ate_plant: 0.0,
+            ate_meat: 0.0,
+            ate_carrion: 0.0,
+            intake_rate: 0.0,
+        }
+    }
+
+    /// Realised diet fractions (plant, meat from kills, carrion). An animal
+    /// that has not eaten yet is read from its gut type.
+    pub fn diet(&self) -> (f32, f32, f32) {
+        let total = self.ate_plant + self.ate_meat + self.ate_carrion;
+        if total <= 1e-6 {
+            let g = self.genome.gut_type.clamp(0.0, 1.0);
+            return (1.0 - g, g * 0.5, g * 0.5);
+        }
+        (self.ate_plant / total, self.ate_meat / total, self.ate_carrion / total)
+    }
+
+    /// Plant and meat assimilation efficiencies from gut type.
+    pub fn efficiencies(&self) -> (f32, f32) {
+        let g = self.genome.gut_type.clamp(0.0, 1.0);
+        (0.5 - 0.35 * g, 0.45 + 0.45 * g)
+    }
+
+    pub fn lifespan(&self) -> f32 {
+        300.0 * self.traits.mass.max(0.01).powf(0.25) * self.genome.longevity.max(0.1)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -162,10 +219,14 @@ pub struct EcoStats {
     pub detritivores: usize,
     /// Animals with carnivory above 0.15 (counted in whichever class dominates).
     pub omnivores: usize,
+    /// Realised diet means: fraction of lifetime intake from kills and from carrion.
     pub mean_carn: f32,
     pub mean_detr: f32,
     pub mean_mass: f32,
     pub mean_parts: f32,
+    pub mean_gut: f32,
+    pub mean_weapon: f32,
+    pub mean_armour: f32,
     pub aquatic: usize,
     pub land_plants: usize,
     pub land_animals: usize,
@@ -207,6 +268,12 @@ pub struct LineageSummary {
     pub height: f32,
     pub sla: f32,
     pub root_frac: f32,
+    #[serde(default)]
+    pub gut: f32,
+    #[serde(default)]
+    pub weapon: f32,
+    #[serde(default)]
+    pub armour: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -387,7 +454,8 @@ impl EcoWorld {
             let traits = self.lookup_traits(&genome);
             let mass = traits.mass;
             let key = hash_genome(&genome);
-            self.animals.push(Animal { genome, key, traits, patch, energy: mass * 0.5 + 0.2, age: 0.0, lineage, kills: 0, offspring: 0 });
+            let reserve = (0.05 + genome.fat_frac) * mass * 0.8;
+            self.animals.push(Animal::new(genome, key, traits, patch, lineage, mass, reserve));
             let idx = self.animals.len() - 1;
             self.request_traits(idx);
             self.stats.immigrants += 1;
@@ -608,8 +676,8 @@ impl EcoWorld {
                 if self.animals.len() < MAX_ANIMALS {
                     let traits = self.lookup_traits(&child);
                     let key = hash_genome(&child);
-                    let energy = (traits.mass * 0.5 + 0.2).max(seed_mass);
-                    self.animals.push(Animal { genome: child, key, traits, patch: target, energy, age: 0.0, lineage, kills: 0, offspring: 0 });
+                    let mass0 = (child.offspring_frac * traits.mass).max(seed_mass);
+                    self.animals.push(Animal::new(child, key, traits, target, lineage, mass0, mass0 * 0.3));
                     let idx = self.animals.len() - 1;
                     self.request_traits(idx);
                     self.stats.plant_to_animal += 1;
@@ -629,9 +697,21 @@ impl EcoWorld {
         }
 
         // ---------------- Animals -------------------------------------------
+        // Mechanistic: allometric metabolism, gut and digestion, Holling
+        // functional response, attack-versus-defence predation, profitability
+        // decisions, growth and life history. See docs/MODEL.md.
         let o2 = self.derived.o2_rel.clamp(0.05, 3.0);
         let mut deaths: Vec<usize> = Vec::new();
-        let mut births: Vec<(Genome, usize, f32, u32, usize, Traits)> = Vec::new();
+        struct Birth {
+            genome: Genome,
+            patch: usize,
+            lineage: u32,
+            body_changed: bool,
+            parent_traits: Traits,
+            mass0: f32,
+            reserve0: f32,
+        }
+        let mut births: Vec<Birth> = Vec::new();
         let mut killed: Vec<usize> = Vec::new();
         let n_animals = self.animals.len();
         let mut animals_in: Vec<Vec<usize>> = vec![Vec::new(); n_patches];
@@ -654,145 +734,232 @@ impl EcoWorld {
             if killed.contains(&ai) {
                 continue;
             }
-            let (patch, mass, herb, carn, detr, speed, land_speed, in_water, activity, section, freq, motility, membrane_area) = {
+            // --- read state -------------------------------------------------
+            let (patch, in_water, adult_mass, mass, motility, section, freq, activity, _gut_type, weapon, armour, fat_frac, gut_frac, membrane_area, water_speed_raw, land_speed_raw, measured_land, measured_water, eff_plant, eff_meat, prev_intake) = {
                 let a = &self.animals[ai];
-                let (h, c, d) = a.genome.diet();
-                let in_water = self.patches[a.patch].water;
-                let mot = a.genome.motility.clamp(0.0, 1.0);
-                // Muscle use scales with motility: a half-sessile body moves at half speed.
-                let speed = if in_water { a.traits.water_speed } else { a.traits.land_speed } * mot;
-                (a.patch, a.traits.mass.max(0.05), h, c, d, speed, a.traits.land_speed * mot, in_water, a.traits.activity, a.traits.section_area, a.traits.base_freq, mot, a.traits.membrane_area)
+                let (ep, em) = a.efficiencies();
+                (
+                    a.patch,
+                    self.patches[a.patch].water,
+                    a.traits.mass.max(0.001),
+                    a.mass.max(0.001),
+                    a.genome.motility.clamp(0.0, 1.0),
+                    a.traits.section_area,
+                    a.traits.base_freq,
+                    a.traits.activity,
+                    a.genome.gut_type.clamp(0.0, 1.0),
+                    a.genome.weapon.clamp(0.0, 1.0),
+                    a.genome.armour.clamp(0.0, 1.0),
+                    a.genome.fat_frac.clamp(0.02, 0.6),
+                    a.genome.gut_frac.clamp(0.02, 0.4),
+                    a.traits.membrane_area,
+                    a.traits.water_speed,
+                    a.traits.land_speed,
+                    a.traits.measured_land,
+                    a.traits.measured_water,
+                    ep,
+                    em,
+                    a.intake_rate,
+                )
             };
-            let tf = temp_factor(self.patches[patch].temp_c);
+            let temp = self.patches[patch].temp_c;
+            // Ectotherm: body temperature is patch temperature; Q10 = 2 around 20 C.
+            let q = 2f32.powf((temp - 20.0) / 10.0).clamp(0.15, 3.0);
+            let size_f = (mass / adult_mass).clamp(0.01, 1.0); // growth fraction
+            let lin_f = size_f.powf(1.0 / 3.0); // juvenile linear scale
             let m34 = mass.powf(0.75);
-            // Costs: basal + activity (muscle section x frequency x motility) + travel.
-            let basal = 0.006 * m34 * (0.4 + tf) / o2.min(1.0).max(0.3);
-            let activity_cost = 0.004 * section * freq * 20.0 * activity * motility;
-            let mut energy_delta = -(basal + activity_cost);
-            // Photosynthetic membranes: a mostly sessile animal with panels gains
-            // from sunlight, at half a leaf's efficiency (they are wings, not leaves).
+            // Armour slows: a shell is dead weight for the muscles.
+            let speed_here = (if in_water { water_speed_raw } else { land_speed_raw }) * motility * lin_f * (1.0 - 0.4 * armour);
+            let land_speed = land_speed_raw * motility * lin_f * (1.0 - 0.4 * armour);
+
+            // --- costs -------------------------------------------------------
+            // Field metabolic rate: Kleiber exponent, ectotherm anchor, oxygen limit.
+            let fmr = 0.006 * m34 * q / o2.min(1.0).max(0.3);
+            let upkeep = fmr * 0.3 * (weapon + armour);
+            let activity_cost = 0.004 * section * freq * 20.0 * activity * motility * size_f.powf(2.0 / 3.0);
+            let mut delta = -(fmr + upkeep + activity_cost);
             if membrane_area > 0.0 && motility < 1.0 {
                 let light_here = light * if in_water { 0.3 } else { 1.0 };
-                energy_delta += membrane_area * light_here * 0.02 * cf * tf * 0.5 * (1.0 - motility);
+                delta += membrane_area * lin_f * lin_f * light_here * 0.02 * cf * temp_factor(temp) * 0.5 * (1.0 - motility);
             }
-            // Land plants assimilate better than watery algae: the incentive to go ashore.
-            let assim = if in_water { 0.6 } else { 0.75 };
 
-            // Foraging: search rate grows with speed. Drifting food in water
-            // reaches a still animal; on land it has to walk to the plants.
-            let search = (if in_water { 0.3 } else { 0.1 } + speed).min(4.0) * m34;
-            let mut food = 0.0;
-            if herb > 0.05 {
-                let mut want = herb * search * 0.08;
-                for &pi in &plants_in[patch] {
-                    if want <= 0.0 {
-                        break;
-                    }
-                    let p = &mut self.plants[pi];
-                    if p.biomass < 0.004 {
-                        continue; // seedlings are too small to find
-                    }
-                    let lf = p.body().leaf_mass / p.body().target_mass;
-                    // A grazer can only work a plant up to a few times its own mass.
-                    let reach = (3.0 * mass / p.biomass.max(1e-6)).min(1.0);
-                    let edible = (p.biomass - 0.004) * lf * 0.15 * reach;
-                    let bite = want.min(edible);
-                    p.biomass -= bite;
-                    want -= bite;
-                    food += bite * assim;
+            // --- digestion of yesterday's gut contents -------------------------
+            let gut_cap = gut_frac * mass;
+            let digest_rate = 0.12 * m34 * q;
+            {
+                let a = &mut self.animals[ai];
+                let total = a.gut_plant + a.gut_meat;
+                if total > 0.0 {
+                    let frac = (digest_rate / total).min(1.0);
+                    let dp = a.gut_plant * frac;
+                    let dm = a.gut_meat * frac;
+                    a.gut_plant -= dp;
+                    a.gut_meat -= dm;
+                    delta += dp * eff_plant + dm * eff_meat;
+                    // Undigested remainder returns to the patch as dung.
+                    self.patches[patch].dead_matter += dp * (1.0 - eff_plant) + dm * (1.0 - eff_meat);
                 }
-                // Shore grazing: from the water, reach plants on adjacent land.
-                // Works a little for any body and better for one that crawls.
-                if in_water && want > 0.0 {
-                    // Steep payoff for crawling: a body that can haul itself up the
-                    // beach reaches far more of the shore's plants.
-                    let amph = 0.8 * (0.1 + 4.0 * land_speed).min(1.0);
-                    let mut shore_want = want * amph;
-                    let nbs: Vec<usize> = self.neighbours[patch].iter().copied().filter(|&j| !self.patches[j].water).collect();
-                    'outer: for j in nbs {
-                        for &pi in &plants_in[j] {
-                            if shore_want <= 0.0 {
-                                break 'outer;
-                            }
-                            let p = &mut self.plants[pi];
-                            if p.biomass < 0.004 {
-                                continue;
-                            }
-                            let lf = p.body().leaf_mass / p.body().target_mass;
-                            let reach = (3.0 * mass / p.biomass.max(1e-6)).min(1.0);
-                            let edible = (p.biomass - 0.004) * lf * 0.15 * reach;
-                            let bite = shore_want.min(edible);
-                            p.biomass -= bite;
-                            shore_want -= bite;
-                            food += bite * 0.75; // land plants, reached from the water
+            }
+            let mut space = (gut_cap - (self.animals[ai].gut_plant + self.animals[ai].gut_meat)).max(0.0);
+
+            // --- foraging options, each as a Holling type II intake rate ---------
+            // Bite rate (kg/day) scales with M^0.75; handling time is its inverse.
+            let bite_rate = (0.3 * m34 * q).max(1e-6);
+            let handling = 1.0 / bite_rate;
+            // Browsing reach: about half a metre for a 1 kg body, scaling with length.
+            let reach_h = 0.5 * mass.powf(1.0 / 3.0);
+            let search = ((if in_water { 0.3 } else { 0.1 }) + speed_here) * 0.3; // fraction of patch found per day
+
+            // Plants here (accessible leaf mass), plus shore plants reachable from the water.
+            let mut plant_targets: Vec<(usize, f32)> = Vec::new();
+            let mut plant_b = 0.0f32;
+            for &pi in &plants_in[patch] {
+                let p = &self.plants[pi];
+                if p.biomass < 0.004 {
+                    continue;
+                }
+                let lf = p.body().leaf_mass / p.body().target_mass;
+                let browse = (reach_h / p.height.max(0.02)).clamp(0.1, 1.0);
+                let acc = (p.biomass - 0.004) * lf * 0.15 * browse;
+                if acc > 0.0 {
+                    plant_targets.push((pi, acc));
+                    plant_b += acc;
+                }
+            }
+            if in_water {
+                // Shore grazing: reach plants on adjacent land, better the more one can crawl.
+                let amph = 0.8 * (0.1 + 4.0 * land_speed).min(1.0);
+                for &j in &self.neighbours[patch] {
+                    if self.patches[j].water {
+                        continue;
+                    }
+                    for &pi in &plants_in[j] {
+                        let p = &self.plants[pi];
+                        if p.biomass < 0.004 {
+                            continue;
+                        }
+                        let lf = p.body().leaf_mass / p.body().target_mass;
+                        let acc = (p.biomass - 0.004) * lf * 0.15 * amph;
+                        if acc > 0.0 {
+                            plant_targets.push((pi, acc));
+                            plant_b += acc;
                         }
                     }
                 }
             }
-            if detr > 0.02 {
-                // Scavenging needs no speed: carrion first (rich), then plant detritus.
-                let pt = &mut self.patches[patch];
-                let mut want = detr * search * 0.15;
-                let bite = want.min(pt.carrion * 0.6);
-                pt.carrion -= bite;
-                want -= bite;
-                food += bite * 0.8;
-                let bite = want.min(pt.dead_matter * 0.5);
-                pt.dead_matter -= bite;
-                food += bite * 0.6;
-            }
-            // Predation grows out of scavenging: a scavenger will also take a
-            // dying or much smaller animal. Catching much smaller prey needs no
-            // speed (engulfment); otherwise it is a speed contest.
-            let hunt = carn + 0.5 * detr;
-            if hunt > 0.02 {
+            let plant_rate = search * plant_b / (1.0 + search * handling * plant_b); // kg/day
+            let carrion_here = self.patches[patch].carrion;
+            let carrion_search = 0.5 + speed_here * 0.5; // carrion is found by smell
+            let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here);
+            // Energy value per kg eaten, by gut.
+            let plant_value = plant_rate * eff_plant;
+            let carrion_value = carrion_rate * eff_meat;
+            let alternative_rate = plant_value.max(carrion_value).max(prev_intake * 0.5);
+
+            let mut food_plant = 0.0f32;
+            let mut food_carrion = 0.0f32;
+            let mut food_meat = 0.0f32;
+
+            // --- predation: attack versus defence, decided by profitability -----
+            if space > 0.0 && motility > 0.0 && speed_here > 0.0 {
                 let candidates: Vec<usize> = animals_in[patch].iter().copied().filter(|&j| j != ai && !killed.contains(&j)).collect();
-                if !candidates.is_empty() && self.rng.gen_bool((hunt * 0.25).min(1.0) as f64) {
+                let mut best: Option<(usize, f32, f32)> = None; // (idx, p_success, profitability)
+                for _ in 0..candidates.len().min(3) {
                     let j = candidates[self.rng.gen_range(0..candidates.len())];
                     let prey = &self.animals[j];
-                    let prey_speed = if in_water { prey.traits.water_speed } else { prey.traits.land_speed } * prey.genome.motility.clamp(0.0, 1.0);
-                    let size_ok = prey.traits.mass < mass * 2.5;
-                    let p_catch = if prey.traits.mass < mass * 0.2 {
-                        0.85
-                    } else {
-                        1.0 / (1.0 + (-(speed - prey_speed) * 2.0).exp())
-                    };
-                    if size_ok && self.rng.gen_bool((p_catch * 0.6) as f64) {
-                        // A kill feeds the killer up to its stomach limit; the diet
-                        // gene only controls how often it tries.
-                        let body = prey.energy.max(0.0) + prey.traits.mass * 0.5;
-                        let meal = (body * 0.8).min(mass * 1.5);
-                        food += meal;
-                        self.patches[patch].carrion += body - meal;
-                        killed.push(j);
-                        self.animals[ai].kills += 1;
-                        self.stats.kills += 1;
+                    let pm = prey.mass.max(0.001);
+                    let p_in_water = self.patches[prey.patch].water;
+                    let p_lin = (pm / prey.traits.mass.max(0.001)).clamp(0.01, 1.0).powf(1.0 / 3.0);
+                    let prey_speed = (if p_in_water { prey.traits.water_speed } else { prey.traits.land_speed }) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.4 * prey.genome.armour.clamp(0.0, 1.0));
+                    let attack = m34 * (0.5 + speed_here) * (0.5 + 1.5 * weapon);
+                    let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 1.5 * prey.genome.armour.clamp(0.0, 1.0));
+                    let scale = 0.25 * (attack + defence) + 1e-6;
+                    let p_success = 1.0 / (1.0 + (-(attack - defence) / scale).exp());
+                    let edible = pm * 0.8;
+                    let meal_now = edible.min(space);
+                    // Handling: a day to subdue plus eating time; big carcasses take days.
+                    let handle = (0.2 + edible * handling).min(5.0);
+                    let gain = meal_now * eff_meat + (edible - meal_now) * eff_meat * 0.3; // leftovers partly recoverable
+                    let attempt_cost = 0.1 * fmr;
+                    let profitability = (p_success * gain - attempt_cost) / handle;
+                    if profitability > 0.0 && best.map(|(_, _, pr)| profitability > pr).unwrap_or(true) {
+                        best = Some((j, p_success, profitability));
+                    }
+                }
+                if let Some((j, p_success, profitability)) = best {
+                    if profitability > alternative_rate {
+                        delta -= 0.1 * fmr; // the attempt costs energy either way
+                        if self.rng.gen_bool(p_success.clamp(0.0, 1.0) as f64) {
+                            let prey_mass = self.animals[j].mass;
+                            let prey_reserve = self.animals[j].reserve.max(0.0);
+                            let edible = prey_mass * 0.8 + prey_reserve;
+                            let meal = edible.min(space);
+                            space -= meal;
+                            food_meat += meal;
+                            self.patches[patch].carrion += edible - meal + prey_mass * 0.2;
+                            killed.push(j);
+                            self.animals[ai].kills += 1;
+                            self.stats.kills += 1;
+                        }
                     }
                 }
             }
-            energy_delta += food;
 
-            // Movement: leave if hungry, toward the reachable neighbour with the
-            // most food for this diet (directed foraging). Entry to land is
-            // continuous: a crawler can haul out, it just forages badly until
-            // it walks.
-            let hungry = food < basal;
+            // --- eat: higher-value source first, limited by stomach space -------
+            if space > 0.0 {
+                let mut order2 = [(0u8, carrion_value), (1u8, plant_value)];
+                if order2[1].1 > order2[0].1 {
+                    order2.swap(0, 1);
+                }
+                for (kind, _) in order2 {
+                    if space <= 0.0 {
+                        break;
+                    }
+                    if kind == 0 && carrion_rate > 0.0 {
+                        let take = carrion_rate.min(space).min(carrion_here);
+                        self.patches[patch].carrion -= take;
+                        space -= take;
+                        food_carrion += take;
+                    } else if kind == 1 && plant_rate > 0.0 && plant_b > 0.0 {
+                        let mut take = plant_rate.min(space);
+                        let scale_take = take / plant_b;
+                        for (pi, acc) in &plant_targets {
+                            let bite = acc * scale_take;
+                            let p = &mut self.plants[*pi];
+                            let bite = bite.min(p.biomass * 0.9);
+                            p.biomass -= bite;
+                            take -= bite;
+                            food_plant += bite;
+                        }
+                        space -= food_plant;
+                    }
+                }
+            }
+            {
+                let a = &mut self.animals[ai];
+                a.gut_plant += food_plant;
+                a.gut_meat += food_carrion + food_meat;
+                a.ate_plant += food_plant;
+                a.ate_meat += food_meat;
+                a.ate_carrion += food_carrion;
+            }
+
+            // --- movement: when hungry, toward the best reachable neighbour --------
+            let hungry = delta < 0.0 && self.animals[ai].reserve < 0.5 * (0.05 + fat_frac) * mass;
             if hungry && self.rng.gen_bool(0.6) {
-                let a = &self.animals[ai];
-                let mot = a.genome.motility.clamp(0.0, 1.0);
-                // Half the time pick the best-stocked neighbour, half the time
-                // wander: pure optimal foraging strips the richest patches bare.
                 let directed = self.rng.gen_bool(0.5);
                 let mut best: Option<(usize, f32)> = None;
                 for &cand in &self.neighbours[patch] {
                     let cand_water = self.patches[cand].water;
-                    let can = if cand_water { a.traits.water_speed * mot > 0.005 || !a.traits.measured_water } else { a.traits.land_speed * mot > 0.005 || !a.traits.measured_land };
+                    let can = if cand_water { water_speed_raw * motility > 0.005 || !measured_water } else { land_speed_raw * motility > 0.005 || !measured_land };
                     if !can {
                         continue;
                     }
-                    let plant_food: f32 = plants_in[cand].iter().map(|&pi| self.plants[pi].biomass).sum::<f32>() * if cand_water { 0.6 } else { 0.75 };
                     let value = if directed {
-                        herb * plant_food + detr * (self.patches[cand].carrion * 0.8 + self.patches[cand].dead_matter * 0.3) + carn * animals_in[cand].len() as f32 * 0.5 + self.rng.gen_range(0.0..0.05)
+                        let plants_v: f32 = plants_in[cand].iter().map(|&pi| self.plants[pi].biomass).sum::<f32>() * eff_plant;
+                        let carrion_v = self.patches[cand].carrion * eff_meat;
+                        let prey_v: f32 = animals_in[cand].iter().map(|&j| self.animals[j].mass).sum::<f32>() * eff_meat * 0.2 * (0.5 + 1.5 * weapon);
+                        plants_v + carrion_v + prey_v + self.rng.gen_range(0.0..0.02)
                     } else {
                         self.rng.gen_range(0.0..1.0)
                     };
@@ -802,27 +969,43 @@ impl EcoWorld {
                 }
                 if let Some((target, _)) = best {
                     let target_water = self.patches[target].water;
-                    // Travel cost: weight times distance over efficiency.
-                    // ~10 J per kg per metre, in biomass units (17 MJ/kg).
-                    let use_speed = if target_water { a.traits.water_speed } else { a.traits.land_speed } * mot;
-                    energy_delta -= 0.00001 * mass * (g / 9.81) * 10.0 / (0.3 + use_speed).min(3.0);
+                    let use_speed = (if target_water { water_speed_raw } else { land_speed_raw }) * motility * lin_f;
+                    // Cost of transport ~ M^-0.3 per kg per metre (Tucker), 10 m per patch.
+                    delta -= 0.00001 * mass.powf(0.7) * (g / 9.81) * 10.0 / (0.3 + use_speed).min(3.0);
                     self.animals[ai].patch = target;
                 }
             }
 
+            // --- reserve, growth, reproduction, death -----------------------------
             let a = &mut self.animals[ai];
-            a.energy += energy_delta;
+            a.intake_rate = (delta + fmr + upkeep + activity_cost).max(0.0); // gross gain today
+            a.reserve += delta;
             a.age += 1.0;
-            // Nearly proportional to mass, so tiny bodies turn over generations fast.
-            let threshold = 0.6 * a.traits.mass + 0.02;
-            if a.energy > threshold && self.rng.gen_bool(0.5) {
-                let (child, body_changed) = if self.rng.gen_bool(0.75) { a.genome.mutate(&mut self.rng) } else { (a.genome.clone(), false) };
-                let share = a.energy * 0.35;
-                a.energy -= share;
-                a.offspring += 1;
-                births.push((child, a.patch, share, a.lineage, body_changed as usize, a.traits));
+            let cap = (0.05 + fat_frac) * a.mass;
+            if a.reserve > cap {
+                let surplus = a.reserve - cap;
+                if a.mass < adult_mass {
+                    // Ontogenetic growth: anabolism limited by M^0.75, 70% efficient.
+                    let grow = surplus.min(0.05 * m34 * q).min(adult_mass - a.mass);
+                    a.mass += grow * 0.7;
+                    a.reserve -= grow;
+                } else {
+                    let mass0 = (a.genome.offspring_frac.clamp(0.01, 0.5) * adult_mass).max(0.001);
+                    let cost = mass0 * 1.3; // body plus a starter reserve
+                    if surplus >= cost && self.rng.gen_bool(0.5) {
+                        a.reserve -= cost;
+                        a.offspring += 1;
+                        let (child, body_changed) = if self.rng.gen_bool(0.75) { a.genome.mutate(&mut self.rng) } else { (a.genome.clone(), false) };
+                        births.push(Birth { genome: child, patch: a.patch, lineage: a.lineage, body_changed, parent_traits: a.traits, mass0, reserve0: mass0 * 0.3 });
+                    }
+                    // Beyond two offspring's worth of store, surplus is wasted as heat.
+                    let max_store = cap + 2.0 * cost;
+                    if a.reserve > max_store {
+                        a.reserve = max_store;
+                    }
+                }
             }
-            if a.energy < 0.0 || a.age > 400.0 + 200.0 * (a.traits.mass.ln().max(0.0)) {
+            if a.reserve < 0.0 || a.age > a.lifespan() {
                 deaths.push(ai);
             }
         }
@@ -832,7 +1015,7 @@ impl EcoWorld {
         gone.dedup();
         for &i in gone.iter().rev() {
             let a = self.animals.swap_remove(i);
-            self.patches[a.patch].carrion += a.traits.mass * 0.5 + a.energy.max(0.0);
+            self.patches[a.patch].carrion += a.mass * 0.8 + a.reserve.max(0.0);
             self.stats.deaths += 1;
         }
         // Indices changed: rebuild pending list.
@@ -845,37 +1028,36 @@ impl EcoWorld {
         for p in &self.plants {
             plant_counts[p.patch] += 1;
         }
-        for (genome, patch, energy, lineage, body_changed, parent_traits) in births {
-            let lineage = if body_changed == 1 && self.rng.gen_bool(0.2) { self.new_lineage() } else { lineage };
-            // Same body as the parent: inherit its measured speeds instead of
-            // spending physics on it (controller-only mutations are approximated).
-            if body_changed == 0 {
-                let key = hash_genome(&genome);
-                self.trait_cache.entry(key).or_insert(parent_traits);
-            }
-            if genome.motility < 0.5 {
+        for b in births {
+            let lineage = if b.body_changed && self.rng.gen_bool(0.2) { self.new_lineage() } else { b.lineage };
+            if b.genome.motility < 0.5 {
                 // A sessile child: settles where it was born and lives as a plant.
-                let cap = if self.patches[patch].water { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
-                if plant_counts[patch] < cap {
-                    plant_counts[patch] += 1;
-                    let mut plant = Plant::new(genome, lineage, patch, 0.0, 0.0, self.planet.gravity);
-                    plant.biomass = (energy * 0.5).min(plant.body().target_mass).max(0.002);
-                    plant.energy = energy * 0.5;
+                let cap = if self.patches[b.patch].water { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
+                if plant_counts[b.patch] < cap {
+                    plant_counts[b.patch] += 1;
+                    let mut plant = Plant::new(b.genome, lineage, b.patch, 0.0, 0.0, self.planet.gravity);
+                    plant.biomass = b.mass0.min(plant.body().target_mass).max(0.002);
+                    plant.energy = b.reserve0;
                     self.plants.push(plant);
                     self.stats.animal_to_plant += 1;
                     self.stats.births += 1;
                 } else {
-                    self.patches[patch].dead_matter += energy;
+                    self.patches[b.patch].carrion += b.mass0;
                 }
                 continue;
             }
             if self.animals.len() >= MAX_ANIMALS {
-                self.patches[patch].carrion += energy;
+                self.patches[b.patch].carrion += b.mass0;
                 continue;
             }
-            let traits = self.lookup_traits(&genome);
-            let key = hash_genome(&genome);
-            self.animals.push(Animal { genome, key, traits, patch, energy, age: 0.0, lineage, kills: 0, offspring: 0 });
+            // Same body as the parent: inherit its measured speeds instead of
+            // spending physics on it (controller-only mutations are approximated).
+            let key = hash_genome(&b.genome);
+            if !b.body_changed {
+                self.trait_cache.entry(key.clone()).or_insert(b.parent_traits);
+            }
+            let traits = self.lookup_traits(&b.genome);
+            self.animals.push(Animal::new(b.genome, key, traits, b.patch, lineage, b.mass0, b.reserve0));
             let idx = self.animals.len() - 1;
             self.request_traits(idx);
             self.stats.births += 1;
@@ -935,8 +1117,14 @@ impl EcoWorld {
             s.vegetated_land = veg.iter().filter(|v| **v).count();
         }
         s.land_animals = 0;
+        s.mean_gut = 0.0;
+        s.mean_weapon = 0.0;
+        s.mean_armour = 0.0;
         for a in &self.animals {
-            let (h, c, d) = a.genome.diet();
+            let (h, c, d) = a.diet();
+            s.mean_gut += a.genome.gut_type / na;
+            s.mean_weapon += a.genome.weapon / na;
+            s.mean_armour += a.genome.armour / na;
             let on_land = !self.patches[a.patch].water;
             if c >= h && c >= d {
                 s.carnivores += 1;
@@ -954,12 +1142,16 @@ impl EcoWorld {
                 s.aquatic += 1;
             }
             s.best_land_speed = s.best_land_speed.max(a.traits.land_speed);
-            if c > 0.15 {
-                s.omnivores += 1;
+            {
+                let mut v = [h, c, d];
+                v.sort_by(|x, y| y.partial_cmp(x).unwrap());
+                if v[1] >= 0.25 {
+                    s.omnivores += 1;
+                }
             }
             s.mean_carn += c / na;
             s.mean_detr += d / na;
-            s.mean_mass += a.traits.mass / na;
+            s.mean_mass += a.mass / na;
             s.mean_parts += a.genome.structural_size() as f32 / na;
         }
         let mut pl: Vec<u32> = self.plants.iter().map(|p| p.lineage).collect();
@@ -1008,6 +1200,9 @@ impl EcoWorld {
             height: 0.0,
             sla: 0.0,
             root_frac: 0.0,
+            gut: 0.0,
+            weapon: 0.0,
+            armour: 0.0,
         }
     }
 
@@ -1023,8 +1218,11 @@ impl EcoWorld {
                 let mut s = Self::empty_summary(id, "animal", idx.len());
                 for &i in &idx {
                     let a = &self.animals[i];
-                    let (h, ca, d) = a.genome.diet();
-                    s.mean_mass += a.traits.mass / c;
+                    let (h, ca, d) = a.diet();
+                    s.mean_mass += a.mass / c;
+                    s.gut += a.genome.gut_type / c;
+                    s.weapon += a.genome.weapon / c;
+                    s.armour += a.genome.armour / c;
                     s.herb += h / c;
                     s.carn += ca / c;
                     s.detr += d / c;
@@ -1074,7 +1272,7 @@ impl EcoWorld {
         self.animals
             .iter()
             .filter(|a| a.lineage == lineage)
-            .max_by_key(|a| (a.offspring, (a.energy * 100.0) as i64))
+            .max_by_key(|a| (a.offspring, (a.reserve * 100.0) as i64))
             .map(|a| (a.genome.clone(), if self.patches[a.patch].water { Environment::Water } else { Environment::Land }))
     }
 
@@ -1109,9 +1307,9 @@ impl EcoWorld {
         let water = self.patches.iter().map(|p| if p.water { 1 } else { 0 }).collect();
         let mut animals = Vec::with_capacity(self.animals.len() * 5);
         for a in &self.animals {
-            let (h, c, d) = a.genome.diet();
+            let (h, c, d) = a.diet();
             let class = if c >= h && c >= d { 1.0 } else if d >= h { 2.0 } else { 0.0 };
-            animals.extend_from_slice(&[a.patch as f32, a.lineage as f32, a.traits.mass, class, if self.patches[a.patch].water { 1.0 } else { 0.0 }]);
+            animals.extend_from_slice(&[a.patch as f32, a.lineage as f32, a.mass, class, if self.patches[a.patch].water { 1.0 } else { 0.0 }]);
         }
         Snapshot { n_patches: n, day: self.day, water, vegetation, dead, canopy_height, animals, stats: self.stats.clone(), lineages: self.lineages(8) }
     }

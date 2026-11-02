@@ -30,8 +30,8 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
             let s = &w.stats;
             let max_h = w.plants.iter().map(|p| p.height).fold(0.0f32, f32::max);
             println!(
-                "day {:>5} | plants {:>5} ({:>8.1} kg, on land {:>4} / {:>3} patches green, tallest {:>4.1} m, {:>3} lin) | animals {:>3} (H {:>3} C {:>3} D {:>3}, aquatic {:>3}, on land {:>3} [{:>3} herb], best land speed {:.2} m/s, {:>3} lin) | omni {:>3} carn {:.2} detr {:.2} | mass {:.2} kg elems {:.1} | P->A {} A->P {} | dead {:>7.1} nutr {:>7.1} | births {:>5} deaths {:>5} kills {:>4} | evals {} pending {}",
-                day, s.plants, s.plant_biomass, s.land_plants, s.vegetated_land, max_h, s.plant_lineages, s.animals, s.herbivores, s.carnivores, s.detritivores, s.aquatic, s.land_animals, s.land_herbivores, s.best_land_speed, s.animal_lineages, s.omnivores, s.mean_carn, s.mean_detr, s.mean_mass, s.mean_parts, s.plant_to_animal, s.animal_to_plant,
+                "day {:>5} | plants {:>5} ({:>8.1} kg, on land {:>4} / {:>3} patches green, tallest {:>4.1} m, {:>3} lin) | animals {:>3} (H {:>3} C {:>3} D {:>3}, aquatic {:>3}, on land {:>3} [{:>3} herb], best land speed {:.2} m/s, {:>3} lin) | omni {:>3} meat {:.2} carrion {:.2} | gut {:.2} weapon {:.2} armour {:.2} | mass {:.2} kg elems {:.1} | P->A {} A->P {} | dead {:>7.1} nutr {:>7.1} | births {:>5} deaths {:>5} kills {:>4} | evals {} pending {}",
+                day, s.plants, s.plant_biomass, s.land_plants, s.vegetated_land, max_h, s.plant_lineages, s.animals, s.herbivores, s.carnivores, s.detritivores, s.aquatic, s.land_animals, s.land_herbivores, s.best_land_speed, s.animal_lineages, s.omnivores, s.mean_carn, s.mean_detr, s.mean_gut, s.mean_weapon, s.mean_armour, s.mean_mass, s.mean_parts, s.plant_to_animal, s.animal_to_plant,
                 s.dead_matter, s.nutrient, s.births, s.deaths, s.kills, s.trait_evals, s.pending_evals
             );
         }
@@ -41,8 +41,8 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
     for l in w.lineages(6) {
         if l.kind == "animal" {
             println!(
-                "  animal lineage {:>4}: n={:>3} mass {:>6.1} kg | diet H{:.2} C{:.2} D{:.2} | land {:.2} m/s water {:.2} m/s | parts {:.1} | membranes {:.2} m² | lung {:.0}% | aquatic {:.0}%",
-                l.id, l.count, l.mean_mass, l.herb, l.carn, l.detr, l.land_speed, l.water_speed, l.parts, l.membrane_area, l.lung_frac * 100.0, l.aquatic_share * 100.0
+                "  animal lineage {:>4}: n={:>3} mass {:>6.2} kg | ate plant {:.2} meat {:.2} carrion {:.2} | gut {:.2} weapon {:.2} armour {:.2} | land {:.2} m/s water {:.2} m/s | parts {:.1} | membranes {:.2} m² | aquatic {:.0}%",
+                l.id, l.count, l.mean_mass, l.herb, l.carn, l.detr, l.gut, l.weapon, l.armour, l.land_speed, l.water_speed, l.parts, l.membrane_area, l.aquatic_share * 100.0
             );
         } else {
             println!(

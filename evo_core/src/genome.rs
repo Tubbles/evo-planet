@@ -132,6 +132,28 @@ pub struct Genome {
     /// photosynthesise in proportion to (1 - motility).
     #[serde(default = "default_motility")]
     pub motility: f32,
+    /// Gut type: 0 = long fermenting herbivore gut, 1 = short carnivore gut.
+    /// Sets assimilation efficiency of plant versus animal tissue.
+    #[serde(default)]
+    pub gut_type: f32,
+    /// Stomach capacity as a fraction of body mass.
+    #[serde(default = "default_gut_frac")]
+    pub gut_frac: f32,
+    /// Energy reserve (fat) capacity as a fraction of body mass.
+    #[serde(default = "default_fat_frac")]
+    pub fat_frac: f32,
+    /// Offspring mass as a fraction of adult mass.
+    #[serde(default = "default_offspring_frac")]
+    pub offspring_frac: f32,
+    /// Weapon investment (jaws, claws): raises attack, costs upkeep.
+    #[serde(default)]
+    pub weapon: f32,
+    /// Armour investment (shell, hide): raises defence, costs upkeep and speed.
+    #[serde(default)]
+    pub armour: f32,
+    /// Lifespan multiplier on the allometric baseline.
+    #[serde(default = "default_longevity")]
+    pub longevity: f32,
 }
 
 fn default_seed_mass() -> f32 {
@@ -147,6 +169,18 @@ fn default_repro_frac() -> f32 {
     0.6
 }
 fn default_motility() -> f32 {
+    1.0
+}
+fn default_gut_frac() -> f32 {
+    0.1
+}
+fn default_fat_frac() -> f32 {
+    0.15
+}
+fn default_offspring_frac() -> f32 {
+    0.1
+}
+fn default_longevity() -> f32 {
     1.0
 }
 
@@ -391,6 +425,13 @@ impl Genome {
             lifespan: default_lifespan(),
             repro_frac: default_repro_frac(),
             motility: 1.0,
+            gut_type: 0.0,
+            gut_frac: default_gut_frac(),
+            fat_frac: default_fat_frac(),
+            offspring_frac: default_offspring_frac(),
+            weapon: 0.0,
+            armour: 0.0,
+            longevity: 1.0,
         }
     }
 
@@ -424,6 +465,13 @@ impl Genome {
             lifespan: rng.gen_range(40.0..400.0),
             repro_frac: rng.gen_range(0.4..0.9),
             motility: 0.0,
+            gut_type: 0.0,
+            gut_frac: default_gut_frac(),
+            fat_frac: default_fat_frac(),
+            offspring_frac: default_offspring_frac(),
+            weapon: 0.0,
+            armour: 0.0,
+            longevity: 1.0,
         }
     }
 
@@ -535,6 +583,13 @@ impl Genome {
             lifespan: rng.gen_range(60.0..1200.0),
             repro_frac: rng.gen_range(0.4..0.9),
             motility: 0.0,
+            gut_type: 0.0,
+            gut_frac: default_gut_frac(),
+            fat_frac: default_fat_frac(),
+            offspring_frac: default_offspring_frac(),
+            weapon: 0.0,
+            armour: 0.0,
+            longevity: 1.0,
         }
     }
 
@@ -609,6 +664,28 @@ impl Genome {
         if rng.gen_bool((p * 1.5) as f64) {
             g.motility = (g.motility + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
             body = true;
+        }
+        // Anatomy and life history (animal side).
+        if rng.gen_bool((p * 2.0) as f64) {
+            g.gut_type = (g.gut_type + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.gut_frac = nudge(rng, g.gut_frac, 0.2, 0.01, 0.02, 0.4);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.fat_frac = nudge(rng, g.fat_frac, 0.2, 0.01, 0.02, 0.6);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.offspring_frac = nudge(rng, g.offspring_frac, 0.2, 0.01, 0.01, 0.5);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.weapon = (g.weapon + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.armour = (g.armour + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.longevity = nudge(rng, g.longevity, 0.15, 0.03, 0.3, 3.0);
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.density = nudge(rng, g.density, 0.12, 5.0, 20.0, 1200.0);
