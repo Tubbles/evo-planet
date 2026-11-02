@@ -43,8 +43,8 @@ fn run_eco(planet: PlanetParams, days: u64, grid: usize, seed: u64, evals_per_da
             );
         } else {
             println!(
-                "  plant lineage {:>4}: n={:>4} mass {:>6.2} kg | height {:>5.2} m | SLA {:>5.1} | root {:.2}",
-                l.id, l.count, l.mean_mass, l.height, l.sla, l.root_frac
+                "  plant lineage {:>4}: n={:>4} mass {:>6.2} kg | height {:>5.2} m | SLA {:>5.1} | root {:.2} | parts {:.1} | leaf {:.2} m² | land tol {:.2} | on land {:.0}%",
+                l.id, l.count, l.mean_mass, l.height, l.sla, l.root_frac, l.parts, l.membrane_area, l.lung_frac, (1.0 - l.aquatic_share) * 100.0
             );
         }
     }

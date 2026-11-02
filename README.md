@@ -148,14 +148,21 @@ plants and animals are seeded only in water, and the globe view shows the
 planet start blue and brown and green up as plants colonise the shores and
 then the interior.
 
-- **Plants** (parametric genome: height, target mass, leaf/stem/root
-  allocation, specific leaf area, seed mass, dispersal, lifespan, land
-  tolerance). Water attenuates light to a quarter, which is the pull toward
-  land; on land, photosynthesis and root water uptake scale with the land
-  tolerance gene, which costs upkeep everywhere, so aquatic lineages stay
-  aquatic until a seed lands on the wet shore band and the trade-off flips.
-  Light per patch is intercepted tallest-first with Beer-Lambert extinction,
-  so neighbours shade each other. Photosynthesis scales with light, CO₂,
+- **Plants** use the same graph genome as animals, read by a different
+  decoder (`evo_core/src/plant.rs`): capsule nodes are stems and branches,
+  membrane nodes are leaves (the membrane's spare radius gene is leaf
+  thickness, so specific leaf area evolves), pad nodes are roots. The root
+  node stands vertically; parts below ground count as root mass. The decoder
+  runs a static cantilever check over every stem (weight above × lever over
+  section × strength, scaled by gravity) and returns a growth cap: the
+  fraction of full size the stems can carry. Plant genes added to the genome:
+  land tolerance, seed mass, dispersal, lifespan, and tissue dry-mass density.
+  Water attenuates light to 30%, which is the pull toward land; on land,
+  photosynthesis and root water uptake scale with land tolerance, which costs
+  upkeep everywhere, so aquatic lineages stay aquatic until a seed lands on
+  the wet shore band and the trade-off flips. Light per patch is intercepted
+  tallest-first with Beer-Lambert extinction, so neighbours shade each other.
+  Leaves respire fast, woody tissue slowly. Photosynthesis scales with light, CO₂,
   temperature, a water factor (root uptake against leaf transpiration under
   aridity) and nutrient share. Respiration scales with biomass. A static
   structural check caps realised height at stem strength over weight above
@@ -196,6 +203,10 @@ when the world empties, and archive champions can be injected as seed stock.
 - "Dense low-g" preset, Air, 30 generations: a 21-part body with 14 membranes
   and 9.8 m² of panel stayed aloft for the full drop. Parachute, not yet glider.
 - Earth, Water, 12 generations: a 2-part body with one membrane fin swam 3.6 m.
+
+## License
+
+GNU Affero General Public License v3.0 or later. See `LICENSE`.
 
 ## Pointers for turning this into a game
 

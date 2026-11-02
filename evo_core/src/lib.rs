@@ -11,6 +11,7 @@ pub mod eco;
 pub mod evolve;
 pub mod genome;
 pub mod planet;
+pub mod plant;
 pub mod sim;
 
 pub use decode::{decode, Part, Phenotype};

@@ -177,6 +177,30 @@ impl EcoSim {
     pub fn day(&self) -> u64 {
         self.world.day
     }
+
+    /// Largest plant of a lineage, decoded for display: JSON {genome, body}, or "".
+    pub fn plant_representative_json(&self, lineage: u32) -> String {
+        match self.world.plant_representative(lineage) {
+            Some(g) => {
+                let body = evo_core::plant::decode_plant(&g, self.world.planet.gravity);
+                format!(
+                    "{{\"genome\":{},\"body\":{}}}",
+                    serde_json::to_string(&g).unwrap_or_default(),
+                    serde_json::to_string(&body).unwrap_or_default()
+                )
+            }
+            None => String::new(),
+        }
+    }
+}
+
+/// Decode any genome as a plant body for display.
+#[wasm_bindgen]
+pub fn plant_body_json(genome_json: &str, gravity: f32) -> String {
+    match serde_json::from_str::<Genome>(genome_json) {
+        Ok(g) => serde_json::to_string(&evo_core::plant::decode_plant(&g, gravity)).unwrap_or_default(),
+        Err(e) => format!("{{\"error\":\"{e}\"}}"),
+    }
 }
 
 #[derive(Serialize)]

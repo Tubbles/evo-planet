@@ -109,6 +109,30 @@ pub struct Genome {
     pub diet_carn: f32,
     #[serde(default)]
     pub diet_detr: f32,
+    /// Plant genes (ignored by animals). Capsule nodes are stems, Membrane
+    /// nodes are leaves (r1 = leaf thickness), Pad nodes are roots.
+    /// 0 = fully aquatic, 1 = adapted to land. Costs upkeep everywhere.
+    #[serde(default)]
+    pub land_tolerance: f32,
+    /// Seed mass in kg.
+    #[serde(default = "default_seed_mass")]
+    pub seed_mass: f32,
+    /// Seed dispersal distance in patches at zero height.
+    #[serde(default = "default_dispersal")]
+    pub dispersal: f32,
+    /// Lifespan in days.
+    #[serde(default = "default_lifespan")]
+    pub lifespan: f32,
+}
+
+fn default_seed_mass() -> f32 {
+    0.02
+}
+fn default_dispersal() -> f32 {
+    1.5
+}
+fn default_lifespan() -> f32 {
+    400.0
 }
 
 fn gaussian(rng: &mut StdRng) -> f32 {
@@ -346,6 +370,118 @@ impl Genome {
             density: 1000.0,
             diet_carn: if rng.gen_bool(0.25) { rng.gen_range(0.3..0.9) } else { rng.gen_range(0.0..0.15) },
             diet_detr: if rng.gen_bool(0.25) { rng.gen_range(0.3..0.9) } else { rng.gen_range(0.0..0.15) },
+            land_tolerance: 0.0,
+            seed_mass: default_seed_mass(),
+            dispersal: default_dispersal(),
+            lifespan: default_lifespan(),
+        }
+    }
+
+    /// A random plant: a vertical trunk (Capsule), one or two leaf nodes
+    /// (Membrane) and a root node (Pad) pointing down. The same graph and
+    /// mutation operators as animals; only the decoder differs.
+    pub fn random_plant(rng: &mut StdRng) -> Self {
+        let trunk = Node {
+            kind: NodeKind::Capsule,
+            len: rng.gen_range(0.3..1.2),
+            r0: rng.gen_range(0.02..0.05),
+            r1: rng.gen_range(0.02..0.04),
+            joint: JointKind::Rigid,
+            limit: 0.3,
+            recursive_limit: rng.gen_range(1..=3),
+            cpg: Cpg::random(rng),
+            connections: Vec::new(),
+        };
+        let leaf = Node {
+            kind: NodeKind::Membrane,
+            len: rng.gen_range(0.3..1.0),
+            r0: rng.gen_range(0.1..0.5),
+            r1: rng.gen_range(0.02..0.12), // leaf thickness gene (x0.01 m)
+            joint: JointKind::Rigid,
+            limit: 0.3,
+            recursive_limit: rng.gen_range(1..=2),
+            cpg: Cpg::random(rng),
+            connections: Vec::new(),
+        };
+        let root = Node {
+            kind: NodeKind::Pad,
+            len: rng.gen_range(0.1..0.4),
+            r0: rng.gen_range(0.02..0.04),
+            r1: rng.gen_range(0.02..0.03),
+            joint: JointKind::Rigid,
+            limit: 0.3,
+            recursive_limit: rng.gen_range(1..=2),
+            cpg: Cpg::random(rng),
+            connections: Vec::new(),
+        };
+        let mut nodes = vec![trunk, leaf, root];
+        // Trunk grows upward by self-reference; leaves on the upper part;
+        // roots at the base pointing down.
+        if rng.gen_bool(0.6) {
+            nodes[0].connections.push(Connection {
+                target: 0,
+                along: 1.0,
+                around: 0.0,
+                pitch: 1.45,
+                roll: rng.gen_range(-PI..PI),
+                scale: rng.gen_range(0.6..0.95),
+                reflect: false,
+                terminal_only: false,
+                phase_flip: false,
+            });
+        }
+        let n_leaf = rng.gen_range(1..=3);
+        for _ in 0..n_leaf {
+            nodes[0].connections.push(Connection {
+                target: 1,
+                along: rng.gen_range(0.4..1.0),
+                around: rng.gen_range(-PI..PI),
+                pitch: rng.gen_range(0.1..0.9),
+                roll: rng.gen_range(-0.6..0.6),
+                scale: rng.gen_range(0.6..1.1),
+                reflect: rng.gen_bool(0.7),
+                terminal_only: rng.gen_bool(0.3),
+                phase_flip: false,
+            });
+        }
+        nodes[0].connections.push(Connection {
+            target: 2,
+            along: 0.0,
+            around: rng.gen_range(-PI..PI),
+            pitch: -1.3,
+            roll: 0.0,
+            scale: rng.gen_range(0.6..1.2),
+            reflect: rng.gen_bool(0.6),
+            terminal_only: false,
+            phase_flip: false,
+        });
+        if rng.gen_bool(0.5) {
+            nodes[2].connections.push(Connection {
+                target: 2,
+                along: 1.0,
+                around: 0.0,
+                pitch: rng.gen_range(0.6..1.4),
+                roll: rng.gen_range(-PI..PI),
+                scale: rng.gen_range(0.5..0.9),
+                reflect: false,
+                terminal_only: false,
+                phase_flip: false,
+            });
+        }
+        Self {
+            nodes,
+            root: 0,
+            base_freq: 1.0,
+            lung_frac: 0.0,
+            water_store: 0.0,
+            // Dry-mass density of fresh plant tissue (mostly water): herbs ~50, wood ~300.
+            density: rng.gen_range(40.0..200.0),
+            diet_carn: 0.0,
+            diet_detr: 0.0,
+            land_tolerance: rng.gen_range(0.0..0.2),
+            seed_mass: rng.gen_range(0.0005..0.01),
+            dispersal: rng.gen_range(0.5..3.0),
+            lifespan: rng.gen_range(60.0..1200.0),
         }
     }
 
@@ -397,6 +533,24 @@ impl Genome {
         }
         if rng.gen_bool((p * 2.0) as f64) {
             g.diet_detr = nudge(rng, g.diet_detr, 0.3, 0.05, 0.0, 1.0);
+        }
+        // Plant genes (no effect on animals).
+        if rng.gen_bool((p * 2.5) as f64) {
+            g.land_tolerance = (g.land_tolerance + rng.gen_range(-0.12..0.12f32)).clamp(0.0, 1.0);
+            body = true;
+        }
+        if rng.gen_bool((p * 2.0) as f64) {
+            g.seed_mass = nudge(rng, g.seed_mass, 0.3, 0.001, 0.0005, 2.0);
+        }
+        if rng.gen_bool((p * 2.0) as f64) {
+            g.dispersal = nudge(rng, g.dispersal, 0.3, 0.1, 0.1, 12.0);
+        }
+        if rng.gen_bool((p * 2.0) as f64) {
+            g.lifespan = nudge(rng, g.lifespan, 0.2, 5.0, 10.0, 5000.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.density = nudge(rng, g.density, 0.12, 5.0, 20.0, 1200.0);
+            body = true;
         }
 
         // Add a node (initially unconnected unless a pointer mutates to it).

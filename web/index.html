@@ -192,7 +192,7 @@ body.tv .chip { font-size: 15px; }
       <div class="tbl-scroll">
         <table class="lin" id="lineages"><thead><tr><th>Lineage</th><th>n</th><th>mass</th><th>diet / form</th><th>speed</th><th>habitat</th></tr></thead><tbody></tbody></table>
       </div>
-      <p class="note">Tap an animal lineage to replay its most prolific member in the 3D view. Species are lineages: a child with a changed body plan starts a new lineage with some probability, and random immigrants arrive when the world empties.</p>
+      <p class="note">Tap an animal lineage to replay its most prolific member in the 3D view, or a plant lineage to see its largest individual full-grown. Plants and animals share one graph genome: capsule nodes are limbs or stems, membranes are wings or leaves, pads are feet or roots. Species are lineages: a child with a changed body plan starts a new lineage with some probability, and random immigrants arrive when the world empties.</p>
     </div>
 
     <div class="panel">
@@ -374,6 +374,10 @@ function startWorker() {
       if (m.rep) { pendingChampion = { genome: m.rep.genome, result: null, generation_born: 0, planet: activeRun.planet, env: m.rep.env, lineage: m.lineage }; setViewMode('creature'); }
       return;
     }
+    if (m.type === 'eco_plant_rep') {
+      if (m.rep) { showPlant(m.rep, m.lineage); setViewMode('creature'); }
+      return;
+    }
     if (m.type === 'gen') {
       history.push(m.summary.best_fitness);
       if (history.length > 300) history.shift();
@@ -520,11 +524,14 @@ function renderLineages(list) {
       const sel = l.id === selectedLineage ? ' sel' : '';
       return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${fmt(l.mean_mass, 1)} kg</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}%</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)} m/s</td><td>${hab}</td></tr>`;
     }
-    return `<tr class="plant"><td class="name">plant ${l.id}</td><td>${l.count}</td><td>${fmt(l.mean_mass, 1)} kg</td><td>height ${fmt(l.height, 2)} m · SLA ${fmt(l.sla, 0)} · root ${fmt(l.root_frac * 100, 0)}%</td><td>–</td><td>land</td></tr>`;
+    const sel = l.id === selectedLineage ? ' sel' : '';
+    const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
+    return `<tr class="plant animal${sel}" data-lineage="${l.id}" data-kind="plant"><td class="name">plant ${l.id}</td><td>${l.count}</td><td>${fmt(l.mean_mass, 2)} kg</td><td>${fmt(l.height, 2)} m · ${fmt(l.parts, 0)} parts · leaf ${fmt(l.membrane_area, 2)} m² · land tol ${fmt(l.lung_frac * 100, 0)}%</td><td>–</td><td>${hab}</td></tr>`;
   }).join('');
   tb.querySelectorAll('tr.animal').forEach((tr) => tr.addEventListener('click', () => {
     selectedLineage = parseInt(tr.dataset.lineage, 10);
-    worker.postMessage({ type: 'eco_rep', lineage: selectedLineage });
+    if (tr.dataset.kind === 'plant') worker.postMessage({ type: 'eco_plant_rep', lineage: selectedLineage });
+    else worker.postMessage({ type: 'eco_rep', lineage: selectedLineage });
     if (ecoSnap) { drawMap(ecoSnap); renderLineages(ecoSnap.lineages); }
   }));
 }
@@ -603,6 +610,9 @@ const trailGeo = new THREE.BufferGeometry(); const trailPts = [];
 const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })); scene.add(trail);
 
 const MAT = {
+  stem: new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 0.9 }),
+  leaf: new THREE.MeshStandardMaterial({ color: 0x4f9a3f, roughness: 0.7, side: THREE.DoubleSide }),
+  root: new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 1.0 }),
   torso: new THREE.MeshStandardMaterial({ color: 0x2b7f7a, roughness: 0.65 }),
   limb: new THREE.MeshStandardMaterial({ color: 0x8c9a4a, roughness: 0.75 }),
   pad: new THREE.MeshStandardMaterial({ color: 0x3a2f2c, roughness: 0.9 }),
@@ -656,6 +666,39 @@ function buildCreatureMeshes(parts) {
     else m = capsuleMesh(p.radius, p.len, p.kind === 'pad' ? MAT.pad : i === 0 ? MAT.torso : MAT.limb);
     scene.add(m); return m;
   });
+}
+
+// Static display of a plant body (no physics): stems brown, leaves green,
+// roots dark below the ground plane.
+let plantShown = null;
+function showPlant(rep, lineage) {
+  if (replay) { replay.free(); replay = null; }
+  replayMeta = null; pendingChampion = null;
+  for (const m of partMeshes) scene.remove(m);
+  const body = rep.body;
+  partMeshes = body.parts.map((p) => {
+    let m;
+    if (p.kind === 'leaf') m = new THREE.Mesh(new THREE.BoxGeometry(p.r0 * 2, p.len, Math.max(0.004, p.thickness)), MAT.leaf);
+    else m = capsuleMesh(p.radius, p.len, p.kind === 'root' ? MAT.root : MAT.stem);
+    m.castShadow = true;
+    m.position.set(p.x, p.y, p.z); m.quaternion.set(p.qx, p.qy, p.qz, p.qw);
+    scene.add(m); return m;
+  });
+  ground.position.y = 0; gridHelper.position.y = 0.01;
+  startRing.position.set(0, 0.02, 0); trailPts.length = 0; trailGeo.setFromPoints([]);
+  plantShown = { body, lineage, genome: rep.genome };
+  $('champBorn').textContent = `plant lineage ${lineage} · largest living individual, shown full-grown`;
+  const tol = rep.genome.land_tolerance || 0;
+  kv($('champ'), [
+    ['Parts (stems / leaves / roots)', `${body.part_count} (${body.parts.filter((p) => p.kind === 'stem').length} / ${body.parts.filter((p) => p.kind === 'leaf').length} / ${body.parts.filter((p) => p.kind === 'root').length})`],
+    ['Full-grown height', `${fmt(body.height, 2)} m`],
+    ['Full-grown mass', `${fmt(body.target_mass, 2)} kg  (leaf ${fmt(body.leaf_mass, 2)} · stem ${fmt(body.stem_mass, 2)} · root ${fmt(body.root_mass, 2)})`],
+    ['Leaf area', `${fmt(body.leaf_area, 2)} m²  (SLA ${fmt(body.sla, 1)} m²/kg)`],
+    ['Structural growth cap', `${fmt(body.growth_cap * 100, 0)} % of linear size under this gravity`, body.growth_cap < 0.7 ? 'warn' : 'good'],
+    ['Land tolerance', `${fmt(tol * 100, 0)} %`, tol > 0.5 ? 'good' : ''],
+    ['Seed mass / dispersal / lifespan', `${fmt(rep.genome.seed_mass, 3)} kg · ${fmt(rep.genome.dispersal, 1)} patches · ${fmt(rep.genome.lifespan, 0)} days`],
+  ]);
+  $('hud').innerHTML = `<span class="chip">plant ${lineage}</span><span class="chip">${fmt(body.height, 2)} m tall</span>`;
 }
 
 // Orbit by drag, zoom by wheel/pinch. Camera follows the creature's centre of mass.
@@ -791,7 +834,16 @@ function frame(now) {
         $('hud').innerHTML = chips.map((c) => `<span class="chip${c === 'exploded' ? ' warn' : ''}">${c}</span>`).join('');
       }
     }
-  } else if (pendingChampion) { const c = pendingChampion; pendingChampion = null; startReplay(c); }
+  } else if (pendingChampion) { const c = pendingChampion; pendingChampion = null; plantShown = null; startReplay(c); }
+  else if (plantShown) {
+    // Orbit around the plant.
+    const h = plantShown.body.height;
+    const target = new THREE.Vector3(0, h * 0.45, 0);
+    const dist = (1.5 + h * 1.4) * zoom;
+    const desired = new THREE.Vector3(Math.cos(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.sin(azimuth) * Math.cos(elevation)).multiplyScalar(dist).add(target);
+    camera.position.lerp(desired, 1 - Math.exp(-4 * dt)); camera.lookAt(target);
+    sun.position.set(18, 30, 10); sun.target.position.set(0, 0, 0);
+  }
   renderer.render(scene, camera);
 }
 let lastDerived = null;

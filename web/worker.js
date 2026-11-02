@@ -47,6 +47,11 @@ onmessage = (e) => {
       const r = eco.representative_json(m.lineage);
       postMessage({ type: 'eco_rep', runId, lineage: m.lineage, rep: r ? JSON.parse(r) : null });
     }
+  } else if (m.type === 'eco_plant_rep') {
+    if (eco) {
+      const r = eco.plant_representative_json(m.lineage);
+      postMessage({ type: 'eco_plant_rep', runId, lineage: m.lineage, rep: r ? JSON.parse(r) : null });
+    }
   } else if (m.type === 'elites') {
     if (world) postMessage({ type: 'elites', runId, elites: JSON.parse(world.elites_json()) });
   } else if (m.type === 'pause') {

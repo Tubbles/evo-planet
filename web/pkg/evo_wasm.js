@@ -64,6 +64,23 @@ export class EcoSim {
         return ret >>> 0;
     }
     /**
+     * Largest plant of a lineage, decoded for display: JSON {genome, body}, or "".
+     * @param {number} lineage
+     * @returns {string}
+     */
+    plant_representative_json(lineage) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.ecosim_plant_representative_json(this.__wbg_ptr, lineage);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Representative genome of an animal lineage as JSON {genome, env}, or "".
      * @param {number} lineage
      * @returns {string}
@@ -464,6 +481,28 @@ export function derive_json(planet_json) {
 export function grid_size() {
     const ret = wasm.grid_size();
     return ret >>> 0;
+}
+
+/**
+ * Decode any genome as a plant body for display.
+ * @param {string} genome_json
+ * @param {number} gravity
+ * @returns {string}
+ */
+export function plant_body_json(genome_json, gravity) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const val2 = +gravity;
+        const ptr0 = passStringToWasm0(genome_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.plant_body_json(ptr0, len0, val2);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
 }
 
 /**

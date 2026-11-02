@@ -18,6 +18,7 @@
 use crate::decode::decode;
 use crate::genome::Genome;
 use crate::planet::{Derived, PlanetParams};
+use crate::plant::{decode_plant, PlantBody};
 use crate::sim::{fatigue_factor, CreatureSim, Environment, SimConfig};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -33,99 +34,46 @@ pub const TRAIT_EPISODE_S: f32 = 3.0;
 // Plants
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PlantGenome {
-    /// Target height in metres.
-    pub height: f32,
-    /// Target total biomass, kg.
-    pub target_mass: f32,
-    /// Allocation fractions of biomass (normalised on use).
-    pub leaf_frac: f32,
-    pub stem_frac: f32,
-    pub root_frac: f32,
-    /// Specific leaf area, m^2 per kg of leaf. Thin leaves capture more
-    /// light per kg but transpire more.
-    pub sla: f32,
-    /// Seed mass, kg. Bigger seeds survive longer before paying off.
-    pub seed_mass: f32,
-    /// Dispersal distance in patches at zero height.
-    pub dispersal: f32,
-    /// Lifespan in days.
-    pub lifespan: f32,
-    /// 0 = fully aquatic, 1 = fully adapted to land (cuticle, vascular
-    /// tissue, roots that draw soil water). Costs respiration everywhere.
-    #[serde(default)]
-    pub land_tolerance: f32,
-    pub lineage: u32,
-}
-
-impl PlantGenome {
-    pub fn random(rng: &mut StdRng, lineage: u32) -> Self {
-        Self {
-            height: rng.gen_range(0.2..3.0),
-            target_mass: rng.gen_range(0.5..20.0),
-            leaf_frac: rng.gen_range(0.2..0.6),
-            stem_frac: rng.gen_range(0.1..0.5),
-            root_frac: rng.gen_range(0.1..0.5),
-            sla: rng.gen_range(4.0..25.0),
-            seed_mass: rng.gen_range(0.002..0.08),
-            dispersal: rng.gen_range(0.5..3.0),
-            lifespan: rng.gen_range(60.0..1200.0),
-            land_tolerance: rng.gen_range(0.0..0.2),
-            lineage,
-        }
-    }
-
-    /// Returns (child, big_change).
-    pub fn mutate(&self, rng: &mut StdRng) -> (Self, bool) {
-        let mut g = self.clone();
-        let mut big = false;
-        let mut n = |v: &mut f32, rel: f32, lo: f32, hi: f32, big_flag: &mut bool| {
-            if rng.gen_bool(0.35) {
-                let u: f32 = rng.gen_range(-1.0..1.0);
-                let delta = u * u * u * rel * 3.0; // heavy-tailed
-                *v = (*v * (1.0 + delta)).clamp(lo, hi);
-                if delta.abs() > 0.25 {
-                    *big_flag = true;
-                }
-            }
-        };
-        n(&mut g.height, 0.2, 0.05, 40.0, &mut big);
-        n(&mut g.target_mass, 0.2, 0.05, 2000.0, &mut big);
-        n(&mut g.leaf_frac, 0.2, 0.05, 0.9, &mut big);
-        n(&mut g.stem_frac, 0.2, 0.02, 0.9, &mut big);
-        n(&mut g.root_frac, 0.2, 0.02, 0.9, &mut big);
-        n(&mut g.sla, 0.2, 1.0, 40.0, &mut big);
-        n(&mut g.seed_mass, 0.25, 0.0005, 2.0, &mut big);
-        n(&mut g.dispersal, 0.25, 0.1, 12.0, &mut big);
-        n(&mut g.lifespan, 0.2, 10.0, 5000.0, &mut big);
-        if rng.gen_bool(0.35) {
-            let d: f32 = rng.gen_range(-0.12..0.12);
-            g.land_tolerance = (g.land_tolerance + d).clamp(0.0, 1.0);
-            if d.abs() > 0.08 {
-                big = true;
-            }
-        }
-        (g, big)
-    }
-
-    pub fn fractions(&self) -> (f32, f32, f32) {
-        let s = (self.leaf_frac + self.stem_frac + self.root_frac).max(1e-6);
-        (self.leaf_frac / s, self.stem_frac / s, self.root_frac / s)
-    }
-}
-
+/// A plant is a graph genome decoded as stems, leaves and roots (see
+/// `plant::decode_plant`). The decoded body is cached on the individual.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Plant {
-    pub genome: PlantGenome,
+    pub genome: Genome,
+    #[serde(skip)]
+    pub body: Option<PlantBody>,
+    pub lineage: u32,
     pub patch: usize,
     pub biomass: f32,
     pub energy: f32,
     pub age: f32,
-    /// Realised height after the structural check, metres.
+    /// Realised height at current size, metres.
     pub height: f32,
     pub light_frac: f32,
     pub water_frac: f32,
+}
+
+impl Plant {
+    fn new(genome: Genome, lineage: u32, patch: usize, biomass: f32, energy: f32, gravity: f32) -> Self {
+        let body = decode_plant(&genome, gravity);
+        Self { genome, body: Some(body), lineage, patch, biomass, energy, age: 0.0, height: 0.02, light_frac: 0.0, water_frac: 0.0 }
+    }
+    pub fn body(&self) -> &PlantBody {
+        self.body.as_ref().expect("plant body decoded")
+    }
+    /// Linear growth fraction at the current biomass.
+    pub fn grown(&self) -> f32 {
+        (self.biomass / self.body().target_mass).clamp(0.0, 1.0).powf(1.0 / 3.0)
+    }
+    pub fn leaf_area(&self) -> f32 {
+        let g = self.grown();
+        self.body().leaf_area * g * g
+    }
+    pub fn leaf_mass(&self) -> f32 {
+        self.body().leaf_mass / self.body().target_mass * self.biomass
+    }
+    pub fn root_mass(&self) -> f32 {
+        self.body().root_mass / self.body().target_mass * self.biomass
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -347,23 +295,18 @@ impl EcoWorld {
     fn seed_plants(&mut self, count: usize) {
         for _ in 0..count {
             let lineage = self.new_lineage();
-            let g = PlantGenome::random(&mut self.rng, lineage);
+            let g = Genome::random_plant(&mut self.rng);
             // Life starts in the oceans: seed water patches when there are any.
             let mut pool: Vec<usize> = (0..self.patches.len()).filter(|&i| self.patches[i].water).collect();
             if pool.is_empty() {
                 pool = (0..self.patches.len()).collect();
             }
             let patch = pool[self.rng.gen_range(0..pool.len())];
-            self.plants.push(Plant {
-                biomass: g.target_mass * 0.2,
-                energy: g.target_mass * 0.1,
-                age: 0.0,
-                height: 0.1,
-                light_frac: 0.0,
-                water_frac: 0.0,
-                genome: g,
-                patch,
-            });
+            let gravity = self.planet.gravity;
+            let mut plant = Plant::new(g, lineage, patch, 0.0, 0.0, gravity);
+            plant.biomass = plant.body().target_mass * 0.2;
+            plant.energy = plant.body().target_mass * 0.1;
+            self.plants.push(plant);
         }
     }
 
@@ -493,38 +436,31 @@ impl EcoWorld {
         for (i, p) in self.plants.iter().enumerate() {
             by_patch[p.patch].push(i);
         }
-        let mut seeds: Vec<(PlantGenome, usize, f32)> = Vec::new();
+        let mut seeds: Vec<(Genome, u32, usize, f32)> = Vec::new();
         let mut dead_plants: Vec<usize> = Vec::new();
         for (pi, list) in by_patch.iter().enumerate() {
             if list.is_empty() {
                 continue;
             }
             let is_water = self.patches[pi].water;
-            // Structural check and realised height. Water supports the plant,
-            // so submerged plants skip the stem check but stay near the surface.
+            // Realised height at current size. Water supports the plant, so
+            // submerged plants ignore the stem check but stay near the surface.
             for &i in list {
                 let p = &mut self.plants[i];
-                let (lf, sf, _) = p.genome.fractions();
-                let stem = p.biomass * sf;
-                let above = p.biomass * (lf + sf);
-                let grown = (p.biomass / p.genome.target_mass).clamp(0.0, 1.0).powf(1.0 / 3.0);
-                let want = p.genome.height * grown.max(0.05);
-                // Allowable height: stem strength over weight above, scaled by gravity.
-                let allowed = if is_water { 1.5 } else { 60.0 * stem / (above * g + 1e-6) };
-                p.height = want.min(allowed).max(0.02);
+                let want = p.body().height * p.grown().max(0.05);
+                p.height = if is_water { want.min(1.5) } else { want }.max(0.02);
             }
             let mut order = list.clone();
             order.sort_by(|a, b| self.plants[*b].height.partial_cmp(&self.plants[*a].height).unwrap());
             let patch = self.patches[pi].clone();
             // Light arrives per square metre; `remaining` is in m^2 of full sun.
             // Water attenuates it, which is the pull toward land.
-            let mut remaining = light * PATCH_AREA * if is_water { 0.25 } else { 1.0 };
+            let mut remaining = light * PATCH_AREA * if is_water { 0.3 } else { 1.0 };
             let mut nutrient_demand = 0.0;
             let mut intercepts = Vec::with_capacity(order.len());
             for &i in &order {
                 let p = &self.plants[i];
-                let (lf, _, _) = p.genome.fractions();
-                let leaf_area = p.biomass * lf * p.genome.sla;
+                let leaf_area = p.leaf_area();
                 let frac = 1.0 - (-0.5 * leaf_area / PATCH_AREA).exp();
                 let got = remaining * frac;
                 remaining -= got;
@@ -535,43 +471,48 @@ impl EcoWorld {
             let mut nutrient_used = 0.0;
             for (i, got, leaf_area) in intercepts {
                 let p = &mut self.plants[i];
-                let (_, _, rf) = p.genome.fractions();
-                let root = p.biomass * rf;
+                let root = p.root_mass();
                 let tol = p.genome.land_tolerance;
+                let sla = p.body().sla;
                 // Water: submerged plants are never water-limited; on land,
                 // uptake needs land-adapted roots against transpiration demand.
+                // Thin leaves (high SLA) transpire more per area.
                 let water_frac = if patch.water {
                     1.0
                 } else {
                     let uptake = root * patch.moisture * 0.6 * (0.3 + 0.7 * tol);
-                    let demand = leaf_area * (0.002 + 0.015 * aridity) * (0.5 + tf);
+                    let demand = leaf_area * (0.002 + 0.015 * aridity) * (0.5 + tf) * (0.5 + (sla / 20.0).min(2.0));
                     if demand > 0.0 { (uptake / demand).min(1.0) } else { 1.0 }
                 };
                 // Unadapted tissue desiccates in air; adaptation costs upkeep.
                 let habitat_eff = if patch.water { 1.0 } else { 0.25 + 0.75 * tol };
-                // 0.008 kg dry mass per m^2 of full sun per day (~3 kg/m^2/yr).
-                let photo = got * 0.008 * cf * tf * water_frac * habitat_eff * (0.3 + 0.7 * nutrient_share);
-                let respiration = p.biomass * 0.004 * (0.3 + tf) * (1.0 + 0.3 * tol);
+                // 0.02 kg dry mass per m^2 of fully lit leaf per day; the patch's
+                // Beer-Lambert light budget caps canopy production at ~2 kg/day.
+                let photo = got * 0.02 * cf * tf * water_frac * habitat_eff * (0.3 + 0.7 * nutrient_share);
+                // Leaves respire fast, woody and root tissue slowly.
+                let leaf_m = p.leaf_mass();
+                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * 0.0005) * (0.3 + tf) * (1.0 + 0.3 * tol);
                 p.energy += photo - respiration;
                 p.light_frac = if light > 0.0 { got / (light * PATCH_AREA) } else { 0.0 };
                 p.water_frac = water_frac;
                 p.age += 1.0;
                 nutrient_used += p.biomass * 0.002 * nutrient_share * 0.3;
-                // Growth then seeds.
+                // Growth up to the structural cap (water lifts the cap), then seeds.
                 if p.energy > 0.0 {
-                    if p.biomass < p.genome.target_mass {
-                        let grow = p.energy.min(p.biomass * 0.05 + 0.01);
+                    let cap = p.body().target_mass * if is_water { 1.0 } else { p.body().growth_cap.powi(3) };
+                    if p.biomass < cap {
+                        let grow = p.energy.min(p.biomass * 0.05 + 0.01).min(cap - p.biomass);
                         p.biomass += grow;
                         p.energy -= grow;
                     }
                     let seed_cost = p.genome.seed_mass * 1.5;
-                    if p.biomass >= p.genome.target_mass * 0.5 && p.energy > seed_cost * 3.0 {
+                    if p.biomass >= cap * 0.5 && p.energy > seed_cost * 1.5 {
                         let count = ((p.energy / seed_cost) as usize).min(6);
                         for _ in 0..count {
                             p.energy -= seed_cost;
-                            let (child, _big) = p.genome.mutate(&mut self.rng);
+                            let (child, _body_changed) = p.genome.mutate(&mut self.rng);
                             let reach = p.genome.dispersal * (1.0 + 0.3 * p.height * (self.derived.air_density / 1.225).sqrt());
-                            seeds.push((child, p.patch, reach));
+                            seeds.push((child, p.lineage, p.patch, reach));
                         }
                     }
                 }
@@ -582,12 +523,13 @@ impl EcoWorld {
             let pt = &mut self.patches[pi];
             pt.nutrient = (pt.nutrient - nutrient_used).max(0.0);
         }
-        // Seeds land within reach on land patches that have room.
+        // Seeds land within reach on patches that have room.
         let mut counts: Vec<usize> = vec![0; n_patches];
         for p in &self.plants {
             counts[p.patch] += 1;
         }
-        for (child, from, reach) in seeds {
+        let gravity = self.planet.gravity;
+        for (child, parent_lineage, from, reach) in seeds {
             let n = self.n as i32;
             let dx = (self.rng.gen_range(-reach..=reach)).round() as i32;
             let dy = (self.rng.gen_range(-reach..=reach)).round() as i32;
@@ -599,19 +541,9 @@ impl EcoWorld {
                 continue;
             }
             counts[target] += 1;
-            let lineage = if self.rng.gen_bool(0.03) { self.new_lineage() } else { child.lineage };
-            let mut child = child;
-            child.lineage = lineage;
-            self.plants.push(Plant {
-                biomass: child.seed_mass,
-                energy: child.seed_mass * 0.8,
-                age: 0.0,
-                height: 0.02,
-                light_frac: 0.0,
-                water_frac: 0.0,
-                genome: child,
-                patch: target,
-            });
+            let lineage = if self.rng.gen_bool(0.03) { self.new_lineage() } else { parent_lineage };
+            let seed_mass = child.seed_mass;
+            self.plants.push(Plant::new(child, lineage, target, seed_mass, seed_mass * 0.8, gravity));
         }
         // Remove dead plants (descending index order).
         dead_plants.sort_unstable();
@@ -683,7 +615,7 @@ impl EcoWorld {
                     if p.biomass < 0.05 {
                         continue; // seedlings are too small to find
                     }
-                    let (lf, _, _) = p.genome.fractions();
+                    let lf = p.body().leaf_mass / p.body().target_mass;
                     let edible = (p.biomass - 0.05) * lf * 0.5;
                     let bite = want.min(edible);
                     p.biomass -= bite;
@@ -841,7 +773,7 @@ impl EcoWorld {
                 s.aquatic += 1;
             }
         }
-        let mut pl: Vec<u32> = self.plants.iter().map(|p| p.genome.lineage).collect();
+        let mut pl: Vec<u32> = self.plants.iter().map(|p| p.lineage).collect();
         pl.sort_unstable();
         pl.dedup();
         s.plant_lineages = pl.len();
@@ -915,7 +847,7 @@ impl EcoWorld {
             .collect();
         let mut pmap: HashMap<u32, Vec<usize>> = HashMap::new();
         for (i, p) in self.plants.iter().enumerate() {
-            pmap.entry(p.genome.lineage).or_default().push(i);
+            pmap.entry(p.lineage).or_default().push(i);
         }
         let mut plants: Vec<LineageSummary> = pmap
             .into_iter()
@@ -943,10 +875,12 @@ impl EcoWorld {
                     let p = &self.plants[i];
                     s.mean_mass += p.biomass / c;
                     s.height += p.height / c;
-                    s.sla += p.genome.sla / c;
-                    s.root_frac += p.genome.fractions().2 / c;
+                    s.sla += p.body().sla / c;
+                    s.root_frac += p.body().root_mass / p.body().target_mass / c;
                     s.aquatic_share += if self.patches[p.patch].water { 1.0 / c } else { 0.0 };
                     s.lung_frac += p.genome.land_tolerance / c; // reused field: land tolerance for plants
+                    s.parts += p.body().part_count as f32 / c;
+                    s.membrane_area += p.body().leaf_area / c; // reused field: full-grown leaf area
                 }
                 s
             })
@@ -966,6 +900,15 @@ impl EcoWorld {
             .filter(|a| a.lineage == lineage)
             .max_by_key(|a| (a.offspring, (a.energy * 100.0) as i64))
             .map(|a| (a.genome.clone(), if self.patches[a.patch].water { Environment::Water } else { Environment::Land }))
+    }
+
+    /// Largest living plant of a lineage, as its genome.
+    pub fn plant_representative(&self, lineage: u32) -> Option<Genome> {
+        self.plants
+            .iter()
+            .filter(|p| p.lineage == lineage)
+            .max_by(|a, b| a.biomass.partial_cmp(&b.biomass).unwrap())
+            .map(|p| p.genome.clone())
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -1024,16 +967,12 @@ mod tests {
     }
 
     #[test]
-    fn gravity_limits_plant_height() {
-        let mut earth = EcoWorld::new(PlanetParams::earth(), 12, 5);
-        let mut heavy = PlanetParams::earth();
-        heavy.gravity = 25.0;
-        let mut big = EcoWorld::new(heavy, 12, 5);
-        for _ in 0..300 {
-            earth.tick();
-            big.tick();
+    fn plants_colonise_land_from_the_sea() {
+        let mut w = EcoWorld::new(PlanetParams::earth(), 16, 5);
+        for _ in 0..1500 {
+            w.tick();
         }
-        let h = |w: &EcoWorld| w.plants.iter().map(|p| p.height).fold(0.0f32, f32::max);
-        assert!(h(&earth) > h(&big), "earth {} heavy {}", h(&earth), h(&big));
+        assert!(w.stats.plants > 0);
+        assert!(w.stats.land_plants > 0, "no land plants after 1500 days: {:?}", w.stats);
     }
 }
