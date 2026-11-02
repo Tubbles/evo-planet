@@ -40,6 +40,8 @@ use std::collections::HashMap;
 
 pub const PATCH_AREA: f32 = 100.0;
 pub const MAX_PLANTS_PER_PATCH: usize = 8;
+/// Algae are small; the sea can hold more individuals per patch.
+pub const MAX_PLANTS_PER_WATER_PATCH: usize = 16;
 pub const MAX_ANIMALS: usize = 260;
 pub const TRAIT_EPISODE_S: f32 = 3.0;
 pub const NEIGHBOURS: usize = 6;
@@ -170,6 +172,9 @@ pub struct EcoStats {
     pub immigrants: u64,
     pub trait_evals: u64,
     pub pending_evals: usize,
+    /// Plant lineages whose offspring were born motile, and the reverse.
+    pub plant_to_animal: u64,
+    pub animal_to_plant: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -311,7 +316,9 @@ impl EcoWorld {
             stats: EcoStats::default(),
             history: Vec::new(),
         };
-        world.seed_plants(n / 3);
+        // Two algae per water patch on average, half grown: a sea worth grazing.
+        let water_n = world.patches.iter().filter(|p| p.water).count().max(1);
+        world.seed_plants(water_n * 2);
         world.immigrate(60);
         world
     }
@@ -339,7 +346,7 @@ impl EcoWorld {
             let patch = pool[self.rng.gen_range(0..pool.len())];
             let gravity = self.planet.gravity;
             let mut plant = Plant::new(g, lineage, patch, 0.0, 0.0, gravity);
-            plant.biomass = plant.body().target_mass * 0.2;
+            plant.biomass = plant.body().target_mass * 0.5;
             plant.energy = plant.body().target_mass * 0.1;
             self.plants.push(plant);
         }
@@ -353,9 +360,15 @@ impl EcoWorld {
                 return;
             }
             let mut genome = Genome::random_with(&mut self.rng);
-            // Everyone starts as an algae grazer; predation and scavenging evolve.
+            // Everyone starts as a small algae grazer; predation, scavenging
+            // and body size evolve from there.
             genome.diet_carn = 0.0;
             genome.diet_detr = 0.0;
+            for node in genome.nodes.iter_mut() {
+                node.len *= 0.45;
+                node.r0 *= 0.45;
+                node.r1 *= 0.45;
+            }
             let lineage = self.new_lineage();
             let patch = pool[self.rng.gen_range(0..pool.len())];
             let traits = self.lookup_traits(&genome);
@@ -545,8 +558,8 @@ impl EcoWorld {
                         p.energy -= grow;
                     }
                     let seed_cost = p.genome.seed_mass * 1.5;
-                    if p.biomass >= cap * 0.5 && p.energy > seed_cost * 1.5 {
-                        let count = ((p.energy / seed_cost) as usize).min(6);
+                    if p.biomass >= cap * p.genome.repro_frac && p.energy > seed_cost * 1.5 {
+                        let count = ((p.energy / seed_cost) as usize).min(3);
                         for _ in 0..count {
                             p.energy -= seed_cost;
                             let (child, _body_changed) = p.genome.mutate(&mut self.rng);
@@ -570,13 +583,28 @@ impl EcoWorld {
         let gravity = self.planet.gravity;
         for (child, parent_lineage, from, reach) in seeds {
             let target = self.disperse(from, reach);
-            if counts[target] >= MAX_PLANTS_PER_PATCH {
+            let cap = if self.patches[target].water { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
+            if counts[target] >= cap {
                 self.patches[target].dead_matter += child.seed_mass;
                 continue;
             }
-            counts[target] += 1;
             let lineage = if self.rng.gen_bool(0.03) { self.new_lineage() } else { parent_lineage };
             let seed_mass = child.seed_mass;
+            if child.motility >= 0.5 {
+                // A seed that moves: born as an animal, grazing from day one.
+                if self.animals.len() < MAX_ANIMALS {
+                    let traits = self.lookup_traits(&child);
+                    let key = hash_genome(&child);
+                    let energy = (traits.mass * 0.5 + 0.2).max(seed_mass);
+                    self.animals.push(Animal { genome: child, key, traits, patch: target, energy, age: 0.0, lineage, kills: 0, offspring: 0 });
+                    let idx = self.animals.len() - 1;
+                    self.request_traits(idx);
+                    self.stats.plant_to_animal += 1;
+                    self.stats.births += 1;
+                }
+                continue;
+            }
+            counts[target] += 1;
             self.plants.push(Plant::new(child, lineage, target, seed_mass, seed_mass * 0.8, gravity));
         }
         // Remove dead plants (descending index order).
@@ -613,23 +641,33 @@ impl EcoWorld {
             if killed.contains(&ai) {
                 continue;
             }
-            let (patch, mass, herb, carn, detr, speed, land_speed, in_water, activity, section, freq) = {
+            let (patch, mass, herb, carn, detr, speed, land_speed, in_water, activity, section, freq, motility, membrane_area) = {
                 let a = &self.animals[ai];
                 let (h, c, d) = a.genome.diet();
                 let in_water = self.patches[a.patch].water;
-                let speed = if in_water { a.traits.water_speed } else { a.traits.land_speed };
-                (a.patch, a.traits.mass.max(0.05), h, c, d, speed, a.traits.land_speed, in_water, a.traits.activity, a.traits.section_area, a.traits.base_freq)
+                let mot = a.genome.motility.clamp(0.0, 1.0);
+                // Muscle use scales with motility: a half-sessile body moves at half speed.
+                let speed = if in_water { a.traits.water_speed } else { a.traits.land_speed } * mot;
+                (a.patch, a.traits.mass.max(0.05), h, c, d, speed, a.traits.land_speed * mot, in_water, a.traits.activity, a.traits.section_area, a.traits.base_freq, mot, a.traits.membrane_area)
             };
             let tf = temp_factor(self.patches[patch].temp_c);
             let m34 = mass.powf(0.75);
-            // Costs: basal + activity (muscle section x frequency) + travel.
+            // Costs: basal + activity (muscle section x frequency x motility) + travel.
             let basal = 0.006 * m34 * (0.4 + tf) / o2.min(1.0).max(0.3);
-            let activity_cost = 0.004 * section * freq * 50.0 * activity;
+            let activity_cost = 0.004 * section * freq * 50.0 * activity * motility;
             let mut energy_delta = -(basal + activity_cost);
+            // Photosynthetic membranes: a mostly sessile animal with panels gains
+            // from sunlight, at half a leaf's efficiency (they are wings, not leaves).
+            if membrane_area > 0.0 && motility < 1.0 {
+                let light_here = light * if in_water { 0.3 } else { 1.0 };
+                energy_delta += membrane_area * light_here * 0.02 * cf * tf * 0.5 * (1.0 - motility);
+            }
+            // Land plants assimilate better than watery algae: the incentive to go ashore.
+            let assim = if in_water { 0.6 } else { 0.75 };
 
             // Foraging: search rate grows with speed. Drifting food in water
             // reaches a still animal; on land it has to walk to the plants.
-            let search = (if in_water { 0.3 } else { 0.05 } + speed).min(4.0) * m34;
+            let search = (if in_water { 0.3 } else { 0.1 } + speed).min(4.0) * m34;
             let mut food = 0.0;
             if herb > 0.05 {
                 let mut want = herb * search * 0.08;
@@ -642,11 +680,11 @@ impl EcoWorld {
                         continue; // seedlings are too small to find
                     }
                     let lf = p.body().leaf_mass / p.body().target_mass;
-                    let edible = (p.biomass - 0.004) * lf * 0.5;
+                    let edible = (p.biomass - 0.004) * lf * 0.15;
                     let bite = want.min(edible);
                     p.biomass -= bite;
                     want -= bite;
-                    food += bite * 0.6;
+                    food += bite * assim;
                 }
                 // Shore grazing: from the water, reach plants on adjacent land.
                 // Works a little for any body and better for one that crawls.
@@ -664,11 +702,11 @@ impl EcoWorld {
                                 continue;
                             }
                             let lf = p.body().leaf_mass / p.body().target_mass;
-                            let edible = (p.biomass - 0.004) * lf * 0.5;
+                            let edible = (p.biomass - 0.004) * lf * 0.15;
                             let bite = shore_want.min(edible);
                             p.biomass -= bite;
                             shore_want -= bite;
-                            food += bite * 0.6;
+                            food += bite * 0.75; // land plants, reached from the water
                         }
                     }
                 }
@@ -685,7 +723,7 @@ impl EcoWorld {
                 if !candidates.is_empty() && self.rng.gen_bool((carn * 0.25) as f64) {
                     let j = candidates[self.rng.gen_range(0..candidates.len())];
                     let prey = &self.animals[j];
-                    let prey_speed = if in_water { prey.traits.water_speed } else { prey.traits.land_speed };
+                    let prey_speed = if in_water { prey.traits.water_speed } else { prey.traits.land_speed } * prey.genome.motility.clamp(0.0, 1.0);
                     let size_ok = prey.traits.mass < mass * 2.5;
                     let p_catch = 1.0 / (1.0 + (-(speed - prey_speed) * 2.0).exp());
                     if size_ok && self.rng.gen_bool((p_catch * 0.6) as f64) {
@@ -709,11 +747,12 @@ impl EcoWorld {
                 let target = nb[self.rng.gen_range(0..nb.len())];
                 let target_water = self.patches[target].water;
                 let a = &self.animals[ai];
-                let can = if target_water { a.traits.water_speed > 0.02 || !a.traits.measured_water } else { a.traits.land_speed > 0.02 || !a.traits.measured_land };
+                let mot = a.genome.motility.clamp(0.0, 1.0);
+                let can = if target_water { a.traits.water_speed * mot > 0.005 || !a.traits.measured_water } else { a.traits.land_speed * mot > 0.005 || !a.traits.measured_land };
                 if can {
                     // Travel cost: weight times distance over efficiency.
                     // ~10 J per kg per metre, in biomass units (17 MJ/kg).
-                    let use_speed = if target_water { a.traits.water_speed } else { a.traits.land_speed };
+                    let use_speed = if target_water { a.traits.water_speed } else { a.traits.land_speed } * mot;
                     energy_delta -= 0.00001 * mass * (g / 9.81) * 10.0 / (0.3 + use_speed).min(3.0);
                     self.animals[ai].patch = target;
                 }
@@ -749,12 +788,32 @@ impl EcoWorld {
             self.request_traits(i);
         }
         // Births.
+        let mut plant_counts: Vec<usize> = vec![0; n_patches];
+        for p in &self.plants {
+            plant_counts[p.patch] += 1;
+        }
         for (genome, patch, energy, lineage, body_changed) in births {
+            let lineage = if body_changed == 1 && self.rng.gen_bool(0.2) { self.new_lineage() } else { lineage };
+            if genome.motility < 0.5 {
+                // A sessile child: settles where it was born and lives as a plant.
+                let cap = if self.patches[patch].water { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
+                if plant_counts[patch] < cap {
+                    plant_counts[patch] += 1;
+                    let mut plant = Plant::new(genome, lineage, patch, 0.0, 0.0, self.planet.gravity);
+                    plant.biomass = (energy * 0.5).min(plant.body().target_mass).max(0.002);
+                    plant.energy = energy * 0.5;
+                    self.plants.push(plant);
+                    self.stats.animal_to_plant += 1;
+                    self.stats.births += 1;
+                } else {
+                    self.patches[patch].dead_matter += energy;
+                }
+                continue;
+            }
             if self.animals.len() >= MAX_ANIMALS {
                 self.patches[patch].dead_matter += energy;
                 continue;
             }
-            let lineage = if body_changed == 1 && self.rng.gen_bool(0.2) { self.new_lineage() } else { lineage };
             let traits = self.lookup_traits(&genome);
             let key = hash_genome(&genome);
             self.animals.push(Animal { genome, key, traits, patch, energy, age: 0.0, lineage, kills: 0, offspring: 0 });

@@ -154,8 +154,14 @@ day. Life starts in the oceans as floating algae sheets (a one-membrane plant
 genome) and animals that can only graze them: the carnivory and detritivory
 genes start at zero, and stems, roots, branching, land tolerance, predation
 and scavenging all have to arise by mutation. There is no seeding from
-archive mode. Plants reach land through a land-tolerance gene and the wet
-shore band. Animals reach land by normal selection: shore-dwelling
+archive mode. A `motility` gene decides kingdom: offspring at or above 0.5 are
+born as animals, below it as sessile plants, so a lineage can cross over in
+either direction. Motility scales muscle use, speed and activity cost, and
+animals with membranes photosynthesise at half a leaf's efficiency in
+proportion to how sessile they are. Herbivores assimilate land plants at 75%
+against 60% for algae, a deliberate incentive to go ashore (real lignin cuts
+the other way; algae being mostly water and salt is the excuse). Plants reach
+land through a land-tolerance gene and the wet shore band. Animals reach land by normal selection: shore-dwelling
 herbivores can graze adjacent land plants from the water, better the more
 they can crawl, and every new body is measured on land as well as in water,
 so a mutation that improves crawling pays off before the lineage ever hauls
@@ -170,7 +176,9 @@ but foraging on land scales with speed, so poor crawlers go hungry there.
   runs a static cantilever check over every stem (weight above × lever over
   section × strength, scaled by gravity) and returns a growth cap: the
   fraction of full size the stems can carry. Plant genes added to the genome:
-  land tolerance, seed mass, dispersal, lifespan, and tissue dry-mass density.
+  land tolerance, seed mass, dispersal, lifespan, reproduction threshold
+  (fraction of full size before seeding) and tissue dry-mass density.
+  Grazing removes at most 15% of a plant's leaf per visit.
   Water attenuates light to 30%, which is the pull toward land; on land,
   photosynthesis and root water uptake scale with land tolerance, which costs
   upkeep everywhere, so aquatic lineages stay aquatic until a seed lands on
@@ -185,7 +193,9 @@ but foraging on land scales with speed, so poor crawlers go hungry there.
   plants join the patch's dead-matter pool.
 - **Animals** use the same Sims-style genomes as archive mode plus two diet
   genes (carnivory, detritivory; herbivory is the remainder), both zero at
-  the start of an ecology run so food preference is emergent. Each new body is
+  the start of an ecology run so food preference is emergent. Founders are
+  scaled to a few kilograms, the size the sea's algae production can carry;
+  body size then evolves with the food supply. Each new body is
   measured once in a 3 s rapier episode on land or in water to get its speed;
   results are cached per genome, so physics cost tracks new body plans, not
   population. Per day an animal pays basal (mass^0.75, temperature, oxygen),

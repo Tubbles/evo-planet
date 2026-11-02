@@ -123,6 +123,15 @@ pub struct Genome {
     /// Lifespan in days.
     #[serde(default = "default_lifespan")]
     pub lifespan: f32,
+    /// Fraction of full size a plant reaches before it starts seeding.
+    #[serde(default = "default_repro_frac")]
+    pub repro_frac: f32,
+    /// 0 = sessile autotroph (lives as a plant), 1 = fully motile heterotroph
+    /// (lives as an animal). Offspring at or above 0.5 are born animals.
+    /// Scales muscle use, speed and activity cost; animals with membranes
+    /// photosynthesise in proportion to (1 - motility).
+    #[serde(default = "default_motility")]
+    pub motility: f32,
 }
 
 fn default_seed_mass() -> f32 {
@@ -133,6 +142,12 @@ fn default_dispersal() -> f32 {
 }
 fn default_lifespan() -> f32 {
     400.0
+}
+fn default_repro_frac() -> f32 {
+    0.6
+}
+fn default_motility() -> f32 {
+    1.0
 }
 
 fn gaussian(rng: &mut StdRng) -> f32 {
@@ -374,6 +389,8 @@ impl Genome {
             seed_mass: default_seed_mass(),
             dispersal: default_dispersal(),
             lifespan: default_lifespan(),
+            repro_frac: default_repro_frac(),
+            motility: 1.0,
         }
     }
 
@@ -383,9 +400,9 @@ impl Genome {
     pub fn random_alga(rng: &mut StdRng) -> Self {
         let sheet = Node {
             kind: NodeKind::Membrane,
-            len: rng.gen_range(0.1..0.4),
-            r0: rng.gen_range(0.05..0.25),
-            r1: rng.gen_range(0.02..0.08), // thickness gene (x0.01 m)
+            len: rng.gen_range(0.5..1.5),
+            r0: rng.gen_range(0.2..0.6),
+            r1: rng.gen_range(0.1..0.4), // thickness gene (x0.01 m)
             joint: JointKind::Rigid,
             limit: 0.3,
             recursive_limit: 1,
@@ -398,13 +415,15 @@ impl Genome {
             base_freq: 1.0,
             lung_frac: 0.0,
             water_store: 0.0,
-            density: rng.gen_range(40.0..120.0),
+            density: rng.gen_range(100.0..200.0),
             diet_carn: 0.0,
             diet_detr: 0.0,
             land_tolerance: 0.0,
-            seed_mass: rng.gen_range(0.0005..0.004),
+            seed_mass: rng.gen_range(0.001..0.01),
             dispersal: rng.gen_range(0.5..2.5),
             lifespan: rng.gen_range(40.0..400.0),
+            repro_frac: rng.gen_range(0.4..0.9),
+            motility: 0.0,
         }
     }
 
@@ -514,6 +533,8 @@ impl Genome {
             seed_mass: rng.gen_range(0.0005..0.01),
             dispersal: rng.gen_range(0.5..3.0),
             lifespan: rng.gen_range(60.0..1200.0),
+            repro_frac: rng.gen_range(0.4..0.9),
+            motility: 0.0,
         }
     }
 
@@ -579,6 +600,13 @@ impl Genome {
         }
         if rng.gen_bool((p * 2.0) as f64) {
             g.lifespan = nudge(rng, g.lifespan, 0.2, 5.0, 10.0, 5000.0);
+        }
+        if rng.gen_bool((p * 2.0) as f64) {
+            g.repro_frac = nudge(rng, g.repro_frac, 0.15, 0.03, 0.1, 1.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.motility = (g.motility + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
+            body = true;
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.density = nudge(rng, g.density, 0.12, 5.0, 20.0, 1200.0);

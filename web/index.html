@@ -185,13 +185,13 @@ body.tv .chip { font-size: 15px; }
       <div class="row">
         <button type="button" class="ghost" id="immBtn">Add 10 random sea immigrants</button>
         <label class="row" style="gap:6px">Patches
-          <select id="gridSel" aria-label="Patch count"><option value="600">600</option><option value="1200" selected>1200</option><option value="2400">2400</option></select>
+          <select id="gridSel" aria-label="Patch count"><option value="400">400</option><option value="800" selected>800</option><option value="1600">1600</option></select>
         </label>
       </div>
       <div class="tbl-scroll">
         <table class="lin" id="lineages"><thead><tr><th>Lineage</th><th>n</th><th>mass</th><th>diet / form</th><th>speed</th><th>habitat</th></tr></thead><tbody></tbody></table>
       </div>
-      <p class="note">Tap an animal lineage to replay its most prolific member in the 3D view, or a plant lineage to see its largest individual full-grown. Plants and animals share one graph genome: capsule nodes are limbs or stems, membranes are wings or leaves, pads are feet or roots. Life starts in the sea as floating algae sheets and animals that can only graze them; predation, scavenging, stems, roots and land tolerance all evolve. Plants reach land through a land-tolerance gene and the wet shore; herbivores follow because shore-dwellers can graze adjacent land plants from the water, better the more they can crawl, and every new body is measured on land as well as in water. Species are lineages: a child with a changed body plan starts a new lineage with some probability.</p>
+      <p class="note">Tap an animal lineage to replay its most prolific member in the 3D view, or a plant lineage to see its largest individual full-grown. Plants and animals share one graph genome: capsule nodes are limbs or stems, membranes are wings or leaves, pads are feet or roots. Life starts in the sea as floating algae sheets and animals that can only graze them; predation, scavenging, stems, roots and land tolerance all evolve. A motility gene decides kingdom: offspring above 0.5 are born motile (animals), below it sessile (plants), so lineages can cross over in either direction. Plants reach land through a land-tolerance gene and the wet shore; herbivores follow because shore-dwellers can graze adjacent land plants from the water, better the more they can crawl, and every new body is measured on land as well as in water. Species are lineages: a child with a changed body plan starts a new lineage with some probability.</p>
     </div>
 
     <div class="panel">
@@ -450,6 +450,7 @@ function renderEco(dps) {
     ['Births / deaths / kills', `${st.births} / ${st.deaths} / ${st.kills}`],
     ['Land colonised', `${st.land_patches ? Math.round(100 * st.vegetated_land / st.land_patches) : 0} % of land green · ${st.land_plants} land plants`, st.vegetated_land > 0 ? 'good' : ''],
     ['Animals on land', `${st.land_animals} (${st.land_herbivores} herbivores) · best land speed ${fmt(st.best_land_speed, 2)} m/s`, st.land_herbivores > 0 ? 'good' : ''],
+    ['Kingdom transitions', `plant → animal ${st.plant_to_animal} · animal → plant ${st.animal_to_plant}`, (st.plant_to_animal + st.animal_to_plant) > 0 ? 'good' : ''],
     ['Immigrants', `${st.immigrants}`],
     ['Body measurements', `${st.trait_evals} physics episodes · ${st.pending_evals} queued`, st.pending_evals > 60 ? 'warn' : ''],
   ]);
