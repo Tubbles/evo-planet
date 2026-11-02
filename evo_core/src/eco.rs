@@ -237,6 +237,11 @@ pub struct Patch {
     /// Tallest plant in the patch, metres: the launch height for gliders.
     #[serde(default)]
     pub canopy: f32,
+    /// Fraction of the day the patch is under water: 1 at sea, 0.5 on the
+    /// intertidal shore (waves and tides), 0 inland. Breathing, light, water
+    /// supply and locomotion all blend on it instead of switching.
+    #[serde(default)]
+    pub submersion: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -344,6 +349,12 @@ pub struct LineageSummary {
     pub shore: f32,
     #[serde(default)]
     pub breathing: f32,
+    /// Share of members on intertidal shore patches.
+    #[serde(default)]
+    pub shore_share: f32,
+    /// Speed in body lengths per second (length ~ 2 x reach), main habitat.
+    #[serde(default)]
+    pub speed_bl: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -435,7 +446,7 @@ impl EcoWorld {
                 } else {
                     (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: 2.0, dead_matter: 1.0, carrion: 0.0, canopy: 0.0 }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: 2.0, dead_matter: 1.0, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 } }
             })
             .collect();
         // Shore band: land patches touching water stay wet, the first foothold for plants.
@@ -445,6 +456,7 @@ impl EcoWorld {
             }
             if neighbours[i].iter().any(|&j| patches[j].water) {
                 patches[i].shore = true;
+                patches[i].submersion = 0.5;
                 patches[i].moisture = patches[i].moisture.max(0.85);
             }
         }
@@ -605,10 +617,12 @@ impl EcoWorld {
                 (self.planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
             };
             p.shore = false;
+            p.submersion = if water { 1.0 } else { 0.0 };
         }
         for i in 0..n {
             if !self.patches[i].water && self.neighbours[i].iter().any(|&j| self.patches[j].water) {
                 self.patches[i].shore = true;
+                self.patches[i].submersion = 0.5;
                 self.patches[i].moisture = self.patches[i].moisture.max(0.85);
             }
         }
@@ -807,14 +821,14 @@ impl EcoWorld {
     /// Larval drift: a random walk that stays in the birth patch's medium
     /// (water larvae drift through water, land young stay on land).
     fn disperse_same_habitat(&mut self, from: usize, reach: f32) -> usize {
-        let water = self.patches[from].water;
+        let wet = self.patches[from].submersion > 0.0;
         let mut p = from;
         let mut hops = reach.floor() as usize;
         if self.rng.gen_bool((reach.fract()) as f64) {
             hops += 1;
         }
         for _ in 0..hops {
-            let nb: Vec<usize> = self.neighbours[p].iter().copied().filter(|&k| self.patches[k].water == water).collect();
+            let nb: Vec<usize> = self.neighbours[p].iter().copied().filter(|&k| (self.patches[k].submersion > 0.0) == wet).collect();
             if nb.is_empty() {
                 break;
             }
@@ -859,6 +873,7 @@ impl EcoWorld {
             }
             let patch = self.patches[pi].clone();
             let is_water = patch.water;
+            let sub = patch.submersion;
             let tf = temp_factor(patch.temp_c);
             // Realised height at current size. Water supports the plant, so
             // submerged plants ignore the stem check but stay near the surface.
@@ -871,7 +886,7 @@ impl EcoWorld {
             order.sort_by(|a, b| self.plants[*b].height.partial_cmp(&self.plants[*a].height).unwrap());
             // Light arrives per square metre; `remaining` is in m^2 of full sun.
             // Water attenuates it, which is the pull toward land.
-            let mut remaining = light * PATCH_AREA * if is_water { 0.3 } else { 1.0 };
+            let mut remaining = light * PATCH_AREA * (0.3 * sub + (1.0 - sub));
             let mut nutrient_demand = 0.0;
             let mut intercepts = Vec::with_capacity(order.len());
             for &i in &order {
@@ -894,15 +909,16 @@ impl EcoWorld {
                 // Water: submerged plants are never water-limited; on land,
                 // uptake needs land-adapted roots against transpiration demand.
                 // Thin leaves (high SLA) transpire more per area.
-                let water_frac = if is_water {
+                let water_frac = if sub >= 1.0 {
                     1.0
                 } else {
                     let uptake = root * patch.moisture * 0.6 * (0.3 + 0.7 * tol);
                     let demand = leaf_area * (0.002 + 0.015 * aridity) * (0.5 + tf) * (0.5 + (sla / 20.0).min(2.0));
-                    if demand > 0.0 { (uptake / demand).min(1.0) } else { 1.0 }
+                    let dry = if demand > 0.0 { (uptake / demand).min(1.0) } else { 1.0 };
+                    sub + (1.0 - sub) * dry
                 };
                 // Unadapted tissue desiccates in air; adaptation costs upkeep.
-                let habitat_eff = if is_water { 1.0 } else { 0.25 + 0.75 * tol };
+                let habitat_eff = sub + (1.0 - sub) * (0.25 + 0.75 * tol);
                 // 0.02 kg dry mass per m^2 of fully lit leaf per day; the patch's
                 // Beer-Lambert light budget caps canopy production at ~2 kg/day.
                 // Tough, long-lived leaves photosynthesise slower per area (leaf economics).
@@ -931,7 +947,7 @@ impl EcoWorld {
                 nutrient_used += p.biomass * 0.002 * nutrient_share * 0.3;
                 // Growth up to the structural cap (water lifts the cap), then seeds.
                 if p.energy > 0.0 {
-                    let cap = p.body().target_mass * if is_water { 1.0 } else { p.body().growth_cap.powi(3) };
+                    let cap = p.body().target_mass * (sub + (1.0 - sub) * p.body().growth_cap.powi(3));
                     if p.biomass < cap {
                         let grow = p.energy.min(p.biomass * 0.05 + 0.01).min(cap - p.biomass);
                         p.biomass += grow;
@@ -966,7 +982,7 @@ impl EcoWorld {
         let gravity = self.planet.gravity;
         for (child, parent_lineage, from, reach, body) in seeds {
             let target = self.disperse(from, reach);
-            let cap = if self.patches[target].water { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
+            let cap = if self.patches[target].submersion >= 0.5 { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
             if counts[target] >= cap {
                 self.patches[target].dead_matter += child.seed_mass;
                 continue;
@@ -1075,7 +1091,8 @@ impl EcoWorld {
             };
             let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air, glide_ratio, measured_shore, shore_progress) = {
                 let t = &self.animals[ai].traits;
-                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, if self.patches[patch].water { 1.0 } else { t.upright }, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT, t.measured_shore, t.shore)
+                let sb = self.patches[patch].submersion;
+                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, sb + (1.0 - sb) * t.upright, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT, t.measured_shore, t.shore)
             };
             // Launch height here: the canopy plus the drop to the lowest neighbour.
             let launch_h = {
@@ -1085,9 +1102,12 @@ impl EcoWorld {
             };
             // Metres a glider covers in a day from about twenty launches.
             let glide_day = if in_water { 0.0 } else { 20.0 * glide_ratio * launch_h };
-            // Gas exchange: gills work in water, lungs in air; halfway is poor in both.
+            // Gas exchange: gills work in water, lungs in air; halfway is poor in
+            // both. On the intertidal shore the animal is under water half the
+            // day, so a gill-breather lives there while lungs slowly pay.
+            let sub = self.patches[patch].submersion;
             let breathing = self.animals[ai].genome.breathing.clamp(0.0, 1.0);
-            let resp_eff = if in_water { 1.0 - 0.9 * breathing } else { 0.1 + 0.9 * breathing };
+            let resp_eff = sub * (1.0 - 0.9 * breathing) + (1.0 - sub) * (0.1 + 0.9 * breathing);
             let temp = self.patches[patch].temp_c;
             // Ectotherm: body temperature is patch temperature; Q10 = 2 around 20 C.
             let q = 2f32.powf((temp - 20.0) / 10.0).clamp(0.15, 3.0);
@@ -1095,7 +1115,8 @@ impl EcoWorld {
             let lin_f = size_f.powf(1.0 / 3.0); // juvenile linear scale
             let m34 = mass.powf(0.75);
             // Plating slows: rigid mass is dead weight for the muscles.
-            let speed_here = (if in_water { water_speed_raw } else { land_speed_raw }) * motility * lin_f * (1.0 - 0.3 * plating);
+            // On the shore the day is part swum, part crawled.
+            let speed_here = (water_speed_raw * sub + land_speed_raw * (1.0 - sub)) * motility * lin_f * (1.0 - 0.3 * plating);
             let land_speed = land_speed_raw * motility * lin_f * (1.0 - 0.3 * plating);
             // Flight: over land a flier covers ground at its air speed (plating
             // is dead weight here too). It lands to eat, so bite and reach are unchanged.
@@ -1198,7 +1219,7 @@ impl EcoWorld {
             let carrion_here = self.patches[patch].carrion;
             // Carrion is smelt from afar: the detection strip is three times wider.
             // A flier surveys from height: a far wider strip (vultures find carcasses from kilometres up).
-            let strip = if !in_water && air_speed > 0.0 { 40.0 } else { 6.0 };
+            let strip = if sub < 1.0 && air_speed > 0.0 { 40.0 } else { 6.0 };
             let carrion_search = ((PI * reach_now * reach_now + strip * reach_now * path) / PATCH_AREA).min(1.0);
             let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here + interference);
             // Energy value per kg eaten, by gut.
@@ -1219,12 +1240,13 @@ impl EcoWorld {
                     let prey = &self.animals[j];
                     let pm = prey.mass.max(0.001);
                     let p_in_water = self.patches[prey.patch].water;
+                    let p_sub = self.patches[prey.patch].submersion;
                     let p_lin = (pm / prey.traits.mass.max(0.001)).clamp(0.01, 1.0).powf(1.0 / 3.0);
-                    let prey_speed = (if p_in_water { prey.traits.water_speed } else { prey.traits.land_speed.max(prey.traits.air_speed) }) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.3 * prey.traits.plating);
+                    let prey_speed = (prey.traits.water_speed * p_sub + prey.traits.land_speed.max(prey.traits.air_speed) * (1.0 - p_sub)) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.3 * prey.traits.plating);
                     // Manoeuvrability decides chases as much as speed (Howland 1974):
                     // a turn rate of about 1.5 rad/s doubles either side's term.
-                    let my_turn = if in_water { self.animals[ai].traits.turn_water } else { self.animals[ai].traits.turn_land.max(self.animals[ai].traits.turn_air) };
-                    let prey_turn = if p_in_water { prey.traits.turn_water } else { prey.traits.turn_land.max(prey.traits.turn_air) };
+                    let my_turn = self.animals[ai].traits.turn_water * sub + self.animals[ai].traits.turn_land.max(self.animals[ai].traits.turn_air) * (1.0 - sub);
+                    let prey_turn = prey.traits.turn_water * p_sub + prey.traits.turn_land.max(prey.traits.turn_air) * (1.0 - p_sub);
                     let attack = m34 * (0.5 + speed_here) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright) * (0.5 + 0.5 * (my_turn / 1.5).min(1.0));
                     // Taking off is the escape a ground predator cannot follow: a glider
                     // needs a perch (its patch's launch height), a flier needs nothing.
@@ -1362,18 +1384,25 @@ impl EcoWorld {
                 };
                 for cand in candidates {
                     let cand_water = self.patches[cand].water;
+                    let cand_sub = self.patches[cand].submersion;
                     // Entry needs demonstrated ability in that habitat; unmeasured
                     // young stay where they are until their body has been tested.
-                    let can = if cand_water {
-                        measured_water && water_speed_raw * motility > 0.005
-                    } else if in_water {
-                        // Out of the sea only by climbing a beach in the physics.
-                        if !measured_shore && measured_water && water_speed_raw * motility > 0.005 {
+                    let swims = measured_water && water_speed_raw * motility > 0.005;
+                    let crawls = measured_land && land_speed_raw * motility > 0.005;
+                    let can = if cand_sub >= 1.0 {
+                        swims || (sub > 0.0 && cand_sub >= sub) // drift back out with the tide
+                    } else if cand_sub > 0.0 {
+                        // The intertidal shore: reached by swimming in with the tide or crawling.
+                        swims || crawls || flier
+                    } else if sub > 0.0 {
+                        // Dry land from the water or the shore: only by climbing a beach
+                        // in the physics, or by flying.
+                        if !measured_shore && (swims || crawls) {
                             shore_requests.push(ai);
                         }
                         (measured_shore && shore_progress * lin_f > 0.5) || flier
                     } else {
-                        (measured_land && land_speed_raw * motility > 0.005) || flier || can_glide_over
+                        crawls || flier || can_glide_over
                     };
                     if !can {
                         continue;
@@ -1475,7 +1504,7 @@ impl EcoWorld {
             let lineage = if b.body_changed && self.rng.gen_bool(0.2) { self.new_lineage() } else { b.lineage };
             if b.genome.motility < 0.5 {
                 // A sessile child: settles where it was born and lives as a plant.
-                let cap = if self.patches[b.patch].water { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
+                let cap = if self.patches[b.patch].submersion >= 0.5 { MAX_PLANTS_PER_WATER_PATCH } else { MAX_PLANTS_PER_PATCH };
                 if plant_counts[b.patch] < cap {
                     plant_counts[b.patch] += 1;
                     let mut plant = Plant::new(b.genome, lineage, b.patch, 0.0, 0.0, self.planet.gravity);
@@ -1678,6 +1707,8 @@ impl EcoWorld {
             climb: 0.0,
             shore: 0.0,
             breathing: 0.0,
+            shore_share: 0.0,
+            speed_bl: 0.0,
         }
     }
 
@@ -1691,7 +1722,8 @@ impl EcoWorld {
     pub fn lineages_filtered(&self, kind: &str, habitat: &str, sort: &str, max: usize) -> Vec<LineageSummary> {
         let (mut out, mut plants) = self.all_lineages();
         let keep = |l: &LineageSummary| match habitat {
-            "land" => l.aquatic_share < 0.5,
+            "land" => l.aquatic_share < 0.5 && l.shore_share < 0.5,
+            "shore" => l.shore_share >= 0.5,
             "water" => l.aquatic_share >= 0.5,
             "air" => l.air_speed > 0.0 || l.glide > 0.5,
             _ => true,
@@ -1705,6 +1737,7 @@ impl EcoWorld {
                 "height" => l.height,
                 "parts" => l.parts,
                 "land" => 1.0 - l.aquatic_share,
+                "bl" => l.speed_bl,
                 _ => l.count as f32,
             }
         };
@@ -1753,6 +1786,10 @@ impl EcoWorld {
                     s.climb += a.traits.climb_water.max(a.traits.climb_air) / c;
                     s.shore += a.traits.shore / c;
                     s.breathing += a.genome.breathing / c;
+                    s.shore_share += if self.patches[a.patch].shore { 1.0 / c } else { 0.0 };
+                    let sb = self.patches[a.patch].submersion;
+                    let sp = a.traits.water_speed * sb + a.traits.land_speed * (1.0 - sb);
+                    s.speed_bl += sp / (2.0 * a.traits.reach).max(0.01) / c;
                     s.parts += decode(&a.genome).part_count() as f32 / c;
                     s.membrane_area += a.traits.membrane_area / c;
                     s.lung_frac += a.genome.lung_frac / c;
@@ -1796,7 +1833,8 @@ impl EcoWorld {
     pub fn representative_in(&self, lineage: u32, habitat: &str) -> Option<(Genome, Environment)> {
         let members: Vec<&Animal> = self.animals.iter().filter(|a| a.lineage == lineage).collect();
         let fits = |a: &&Animal| match habitat {
-            "land" => !self.patches[a.patch].water,
+            "land" => !self.patches[a.patch].water && !self.patches[a.patch].shore,
+            "shore" => self.patches[a.patch].shore,
             "water" => self.patches[a.patch].water,
             "air" => a.traits.air_speed > 0.0 || a.traits.glide_distance > 0.5,
             _ => true,

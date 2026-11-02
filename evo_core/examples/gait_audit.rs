@@ -42,7 +42,7 @@ fn main() {
             }
             let measured = if env == Environment::Land { a.traits.land_speed } else { a.traits.water_speed };
             let (turn, climb) = if env == Environment::Land { (a.traits.turn_land, 0.0) } else { (a.traits.turn_water, a.traits.climb_water) };
-            println!("{label} #{k}: lineage {} parts {} mass {:.3} kg membranes {:.3} m2 lung {:.2} measured {:.3} m/s turn {:.2} rad/s climb {:.2} m/s{}", a.lineage, ph.parts.len(), ph.total_mass, ph.membrane_area, a.genome.lung_frac, measured, turn, climb, row);
+            println!("{label} #{k}: lineage {} parts {} mass {:.3} kg membranes {:.3} m2 lung {:.2} measured {:.3} m/s ({:.1} BL/s) turn {:.2} rad/s climb {:.2} m/s{}", a.lineage, ph.parts.len(), ph.total_mass, ph.membrane_area, a.genome.lung_frac, measured, measured / (2.0 * a.traits.reach).max(0.01), turn, climb, row);
             std::fs::write(format!("{out}/gait_{label}_{k}.json"), a.genome.to_json()).unwrap();
         }
     }

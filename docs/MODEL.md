@@ -261,10 +261,27 @@ off the genome:
 - **Posture:** mean centre-of-mass height on land (uprightness) and the
   geometric reach, mouth, claws and plating from the decoded body.
 
+### The intertidal shore
+Land patches touching the sea are the intertidal band: under water half
+the day (submersion 0.5, against 1 at sea and 0 inland). Nothing switches
+on water-or-land any more; everything blends on submersion. A plant there
+gets 0.3·0.5 + 0.5 of full light (algae do better than at sea), is never
+short of water for the submerged half, and needs land tolerance only for
+the dry half, so algae mats cover the shoreline without any new gene. An
+animal there breathes with gills half the day and lungs the other half,
+swims half the day and crawls the other half, and is reached by swimming
+in with the tide or crawling. Dry land beyond the band still needs the
+beach climb. Larvae drift through water and shore alike, never onto dry
+land. Speed is also reported in body lengths per second (length taken as
+twice the reach), so a centimetre-long grazer at 2 cm/s reads as the
+mover it is; the ecology keeps absolute speed for area swept, which is
+physical.
+
 ### Breathing
 A breathing gene runs from gills (0) to lungs (1). Gas exchange efficiency
-is 1 − 0.9·b in water and 0.1 + 0.9·b in air, so halfway breathes poorly
-in both: the amphibian's bargain. Efficiency scales the day's activity and
+is 1 − 0.9·b under water and 0.1 + 0.9·b in air, blended on the patch's
+submersion, so a gill-breather on the intertidal shore gets about 0.55 and
+lives, and lungs pay off gradually as a lineage moves up the beach. Efficiency scales the day's activity and
 the bite rate; below 0.2 the animal suffocates with probability one half
 per day. A sea lineage that climbs the beach still dies on land unless its
 breathing has moved toward lungs, and a lung-breather drowns. Deaths by

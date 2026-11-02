@@ -189,8 +189,9 @@ progress after settling, minus the same body's drift with its motors off
 starting where they would rest, so toppling, sliding and floating do not
 count as locomotion. Nimbleness is measured too: turn rate from
 asymmetric drive and climb speed from a posture shift, used in chases.
-A sea lineage reaches land only by climbing a sloping beach in its own
-shore test, and then survives there only if its breathing gene has moved
+The shore is an intertidal band, under water half the day, where gills
+still work, algae mats grow and slow grazers can live; dry land beyond it
+is reached only by climbing a sloping beach in the body's own shore test, and then survives there only if its breathing gene has moved
 from gills toward lungs. As of this writing no walkers or fish-like
 swimmers have evolved in the ecology; `docs/MODEL.md` records what the
 replays actually show and what higher fidelity would cost.
