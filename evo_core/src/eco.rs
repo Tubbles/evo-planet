@@ -118,6 +118,8 @@ pub struct Traits {
     pub measured_land: bool,
     pub measured_water: bool,
     pub measured_air: bool,
+    /// Sustained horizontal speed in the air-drop episode, m/s (0 unless airborne).
+    pub air_speed: f32,
     /// Geometry-derived function (see decode::body_metrics).
     pub reach: f32,
     pub mouth_area: f32,
@@ -231,6 +233,9 @@ pub struct EcoStats {
     pub herbivores: usize,
     pub carnivores: usize,
     pub detritivores: usize,
+    /// Animals with a measured sustained air speed.
+    #[serde(default)]
+    pub fliers: usize,
     /// Animals with carnivory above 0.15 (counted in whichever class dominates).
     pub omnivores: usize,
     /// Realised diet means: fraction of lifetime intake from kills and from carrion.
@@ -307,6 +312,8 @@ pub struct LineageSummary {
     pub reach: f32,
     #[serde(default)]
     pub upright: f32,
+    #[serde(default)]
+    pub air_speed: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -626,6 +633,12 @@ impl EcoWorld {
         // Measure the current habitat first (popped last-in-first-out).
         let in_water = self.patches[self.animals[idx].patch].water;
         let order = if in_water { [Environment::Land, Environment::Water] } else { [Environment::Water, Environment::Land] };
+        // Wings are only worth testing on a body light enough to be lifted:
+        // wing loading below 50 kg/m^2 (bats and birds span 1-20).
+        let winged = t.membrane_area > 0.0 && t.membrane_area / t.mass.max(1e-3) >= 0.02;
+        if winged && !t.measured_air && !self.pending.iter().any(|(i, e)| *i == idx && *e == Environment::Air) {
+            self.pending.push((idx, Environment::Air));
+        }
         for env in order {
             let done = match env {
                 Environment::Water => t.measured_water,
@@ -671,6 +684,7 @@ impl EcoWorld {
             let mut traits = self.trait_cache.get(&key).copied().unwrap_or(self.animals[idx].traits);
             let already = match env {
                 Environment::Water => traits.measured_water,
+                Environment::Air => traits.measured_air,
                 _ => traits.measured_land,
             };
             if !already {
@@ -681,6 +695,16 @@ impl EcoWorld {
                     Environment::Water => {
                         traits.water_speed = speed;
                         traits.measured_water = true;
+                    }
+                    Environment::Air => {
+                        // Dropped from 10 m: a body still aloft for most of the episode
+                        // and moving forward is flying or gliding, not falling.
+                        // How far the body gets through the air in the episode from a
+                        // 10 m launch: a brick scores nothing, a parachuter little, a glider
+                        // metres per second, a flapper more. Continuous, so wings can grow.
+                        traits.glide_distance = if r.exploded { 0.0 } else { r.air_distance };
+                        traits.air_speed = if traits.glide_distance > 0.5 { traits.glide_distance / TRAIT_EPISODE_S } else { 0.0 };
+                        traits.measured_air = true;
                     }
                     _ => {
                         traits.land_speed = speed;
@@ -944,9 +968,9 @@ impl EcoWorld {
                     a.intake_rate,
                 )
             };
-            let (reach_adult, mouth_area, claws, plating, upright) = {
+            let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air) = {
                 let t = &self.animals[ai].traits;
-                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, if self.patches[patch].water { 1.0 } else { t.upright })
+                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, if self.patches[patch].water { 1.0 } else { t.upright }, t.air_speed, t.measured_air)
             };
             let temp = self.patches[patch].temp_c;
             // Ectotherm: body temperature is patch temperature; Q10 = 2 around 20 C.
@@ -957,6 +981,10 @@ impl EcoWorld {
             // Plating slows: rigid mass is dead weight for the muscles.
             let speed_here = (if in_water { water_speed_raw } else { land_speed_raw }) * motility * lin_f * (1.0 - 0.3 * plating);
             let land_speed = land_speed_raw * motility * lin_f * (1.0 - 0.3 * plating);
+            // Flight: over land a flier covers ground at its air speed (plating
+            // is dead weight here too). It lands to eat, so bite and reach are unchanged.
+            let air_speed = air_speed_raw * motility * lin_f * (1.0 - 0.3 * plating);
+            let travel = if in_water { speed_here } else { speed_here.max(air_speed) };
 
             // --- costs -------------------------------------------------------
             // Field metabolic rate: Kleiber exponent, ectotherm anchor, oxygen limit.
@@ -1001,7 +1029,7 @@ impl EcoWorld {
             // a detection strip two reaches wide along the day's path (8 h of
             // foraging, cut by fatigue), plus the circle a still body can reach.
             let reach_now = reach_adult * lin_f;
-            let path = speed_here * 28800.0 * activity;
+            let path = travel * 28800.0 * activity;
             let search = ((PI * reach_now * reach_now + 2.0 * reach_now * path) / PATCH_AREA).min(1.0);
 
             // Plants here (accessible leaf mass), plus shore plants reachable from the water.
@@ -1072,7 +1100,7 @@ impl EcoWorld {
                     let pm = prey.mass.max(0.001);
                     let p_in_water = self.patches[prey.patch].water;
                     let p_lin = (pm / prey.traits.mass.max(0.001)).clamp(0.01, 1.0).powf(1.0 / 3.0);
-                    let prey_speed = (if p_in_water { prey.traits.water_speed } else { prey.traits.land_speed }) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.3 * prey.traits.plating);
+                    let prey_speed = (if p_in_water { prey.traits.water_speed } else { prey.traits.land_speed.max(prey.traits.air_speed) }) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.3 * prey.traits.plating);
                     let attack = m34 * (0.5 + speed_here) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright);
                     let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 2.0 * prey.traits.plating);
                     let scale = 0.25 * (attack + defence) + 1e-6;
@@ -1176,7 +1204,11 @@ impl EcoWorld {
                     let cand_water = self.patches[cand].water;
                     // Entry needs demonstrated ability in that habitat; unmeasured
                     // young stay where they are until their body has been tested.
-                    let can = if cand_water { measured_water && water_speed_raw * motility > 0.005 } else { measured_land && land_speed_raw * motility > 0.005 };
+                    let can = if cand_water {
+                        measured_water && water_speed_raw * motility > 0.005
+                    } else {
+                        (measured_land && land_speed_raw * motility > 0.005) || (measured_air && air_speed_raw * motility > 0.005)
+                    };
                     if !can {
                         continue;
                     }
@@ -1194,7 +1226,7 @@ impl EcoWorld {
                 }
                 if let Some((target, _)) = best {
                     let target_water = self.patches[target].water;
-                    let use_speed = (if target_water { water_speed_raw } else { land_speed_raw }) * motility * lin_f;
+                    let use_speed = (if target_water { water_speed_raw } else { land_speed_raw.max(air_speed_raw) }) * motility * lin_f;
                     // Cost of transport ~ M^-0.3 per kg per metre (Tucker), 10 m per patch.
                     delta -= 0.00001 * mass.powf(0.7) * (g / 9.81) * 10.0 / (0.3 + use_speed).min(3.0);
                     self.animals[ai].patch = target;
@@ -1348,6 +1380,7 @@ impl EcoWorld {
         s.carnivores = 0;
         s.detritivores = 0;
         s.aquatic = 0;
+        s.fliers = 0;
         s.land_herbivores = 0;
         s.best_land_speed = 0.0;
         s.omnivores = 0;
@@ -1397,6 +1430,9 @@ impl EcoWorld {
                 s.aquatic += 1;
             }
             s.best_land_speed = s.best_land_speed.max(a.traits.land_speed);
+            if a.traits.air_speed > 1.0 {
+                s.fliers += 1; // gliders and fliers: metres per second through the air
+            }
             {
                 let mut v = [h, c, d];
                 v.sort_by(|x, y| y.partial_cmp(x).unwrap());
@@ -1461,15 +1497,57 @@ impl EcoWorld {
             armour: 0.0,
             reach: 0.0,
             upright: 0.0,
+            air_speed: 0.0,
         }
     }
 
     pub fn lineages(&self, max: usize) -> Vec<LineageSummary> {
+        self.lineages_filtered("both", "all", "count", max)
+    }
+
+    /// Lineage table with a filter. `kind`: both | animal | plant. `habitat`:
+    /// all | land | water | air (majority habitat; air = lineage can fly).
+    /// `sort`: count | mass | speed | height | parts | land (share of members on land). `max` per kind.
+    pub fn lineages_filtered(&self, kind: &str, habitat: &str, sort: &str, max: usize) -> Vec<LineageSummary> {
+        let (mut out, mut plants) = self.all_lineages();
+        let keep = |l: &LineageSummary| match habitat {
+            "land" => l.aquatic_share < 0.5,
+            "water" => l.aquatic_share >= 0.5,
+            "air" => l.air_speed > 0.0,
+            _ => true,
+        };
+        out.retain(|l| keep(l));
+        plants.retain(|l| keep(l));
+        let key = |l: &LineageSummary| -> f32 {
+            match sort {
+                "mass" => l.mean_mass,
+                "speed" => l.land_speed.max(l.water_speed).max(l.air_speed),
+                "height" => l.height,
+                "parts" => l.parts,
+                "land" => 1.0 - l.aquatic_share,
+                _ => l.count as f32,
+            }
+        };
+        out.sort_by(|a, b| key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal));
+        plants.sort_by(|a, b| key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal));
+        out.truncate(max);
+        plants.truncate(max);
+        match kind {
+            "animal" => out,
+            "plant" => plants,
+            _ => {
+                out.extend(plants);
+                out
+            }
+        }
+    }
+
+    fn all_lineages(&self) -> (Vec<LineageSummary>, Vec<LineageSummary>) {
         let mut map: HashMap<u32, Vec<usize>> = HashMap::new();
         for (i, a) in self.animals.iter().enumerate() {
             map.entry(a.lineage).or_default().push(i);
         }
-        let mut out: Vec<LineageSummary> = map
+        let out: Vec<LineageSummary> = map
             .into_iter()
             .map(|(id, idx)| {
                 let c = idx.len() as f32;
@@ -1489,6 +1567,7 @@ impl EcoWorld {
                     s.aquatic_share += if self.patches[a.patch].water { 1.0 / c } else { 0.0 };
                     s.land_speed += a.traits.land_speed / c;
                     s.water_speed += a.traits.water_speed / c;
+                    s.air_speed += a.traits.air_speed / c;
                     s.parts += decode(&a.genome).part_count() as f32 / c;
                     s.membrane_area += a.traits.membrane_area / c;
                     s.lung_frac += a.genome.lung_frac / c;
@@ -1500,7 +1579,7 @@ impl EcoWorld {
         for (i, p) in self.plants.iter().enumerate() {
             pmap.entry(p.lineage).or_default().push(i);
         }
-        let mut plants: Vec<LineageSummary> = pmap
+        let plants: Vec<LineageSummary> = pmap
             .into_iter()
             .map(|(id, idx)| {
                 let c = idx.len() as f32;
@@ -1519,21 +1598,35 @@ impl EcoWorld {
                 s
             })
             .collect();
-        out.sort_by(|a, b| b.count.cmp(&a.count));
-        plants.sort_by(|a, b| b.count.cmp(&a.count));
-        out.truncate(max);
-        plants.truncate(max);
-        out.extend(plants);
-        out
+        (out, plants)
     }
 
     /// Representative animal genome of a lineage (most offspring), with habitat.
     pub fn representative(&self, lineage: u32) -> Option<(Genome, Environment)> {
-        self.animals
-            .iter()
-            .filter(|a| a.lineage == lineage)
-            .max_by_key(|a| (a.offspring, (a.reserve * 100.0) as i64))
-            .map(|a| (a.genome.clone(), if self.patches[a.patch].water { Environment::Water } else { Environment::Land }))
+        self.representative_in(lineage, "all")
+    }
+
+    /// Most prolific member, preferring those in `habitat` (land | water | air)
+    /// when any live there; the returned environment is where to replay it.
+    pub fn representative_in(&self, lineage: u32, habitat: &str) -> Option<(Genome, Environment)> {
+        let members: Vec<&Animal> = self.animals.iter().filter(|a| a.lineage == lineage).collect();
+        let fits = |a: &&Animal| match habitat {
+            "land" => !self.patches[a.patch].water,
+            "water" => self.patches[a.patch].water,
+            "air" => a.traits.air_speed > 0.0,
+            _ => true,
+        };
+        let pool: Vec<&Animal> = if members.iter().any(fits) { members.iter().copied().filter(fits).collect() } else { members };
+        pool.into_iter().max_by_key(|a| (a.offspring, (a.reserve * 100.0) as i64)).map(|a| {
+            let env = if habitat == "air" && a.traits.air_speed > 0.0 {
+                Environment::Air
+            } else if self.patches[a.patch].water {
+                Environment::Water
+            } else {
+                Environment::Land
+            };
+            (a.genome.clone(), env)
+        })
     }
 
     /// Largest living plant of a lineage, as its genome.

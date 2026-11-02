@@ -80,6 +80,8 @@ pub struct EpisodeResult {
     pub total_mass: f32,
     /// Mean centre-of-mass height above ground after settling (uprightness).
     pub mean_height: f32,
+    /// Horizontal distance covered before first touching the ground (air drops).
+    pub air_distance: f32,
 }
 
 pub struct CreatureSim {
@@ -583,6 +585,7 @@ impl CreatureSim {
             hydration: self.hydration,
             total_mass: self.pheno.total_mass,
             mean_height: if self.total_steps > 0 { self.com_height_sum / self.total_steps as f32 } else { 0.0 },
+            air_distance: self.landing_distance.unwrap_or(distance),
         }
     }
 

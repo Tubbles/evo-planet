@@ -38,6 +38,41 @@ export class EcoSim {
         wasm.ecosim_immigrate(this.__wbg_ptr, count);
     }
     /**
+     * Filtered, sorted lineage table (see EcoWorld::lineages_filtered).
+     * @param {string} kind
+     * @param {string} habitat
+     * @param {string} sort
+     * @param {number} max
+     * @returns {string}
+     */
+    lineages_json(kind, habitat, sort, max) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const val4 = +max;
+            let ptr0, len0, ptr1, len1, ptr2, len2;
+            try {
+                ptr0 = passStringToWasm0(kind, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                len0 = WASM_VECTOR_LEN;
+                ptr1 = passStringToWasm0(habitat, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                len1 = WASM_VECTOR_LEN;
+                ptr2 = passStringToWasm0(sort, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                len2 = WASM_VECTOR_LEN;
+            } catch (e) {
+                if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+                if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+                if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+                throw e;
+            }
+            const ret = wasm.ecosim_lineages_json(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, val4);
+            deferred5_0 = ret[0];
+            deferred5_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
      * @param {string} planet_json
      * @param {number} patches
      * @param {bigint} seed
@@ -82,18 +117,22 @@ export class EcoSim {
     /**
      * Representative genome of an animal lineage as JSON {genome, env}, or "".
      * @param {number} lineage
+     * @param {string} habitat
      * @returns {string}
      */
-    representative_json(lineage) {
-        let deferred1_0;
-        let deferred1_1;
+    representative_json(lineage, habitat) {
+        let deferred3_0;
+        let deferred3_1;
         try {
-            const ret = wasm.ecosim_representative_json(this.__wbg_ptr, lineage);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
+            const val2 = +lineage;
+            const ptr0 = passStringToWasm0(habitat, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.ecosim_representative_json(this.__wbg_ptr, val2, ptr0, len0);
+            deferred3_0 = ret[0];
+            deferred3_1 = ret[1];
             return getStringFromWasm0(ret[0], ret[1]);
         } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
     }
     /**

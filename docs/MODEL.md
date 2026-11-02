@@ -78,6 +78,16 @@ unlikely per attempt, and handling a large carcass takes days during which
 it is also carrion for everyone else. Replaces "prey must be under 2.5×"
 and "under 0.2× is engulfed".
 
+### Flight as measured function
+Any body whose membranes give a wing loading under 50 kg/m² is also dropped
+from 10 m in the physics. The horizontal distance it covers before touching
+the ground, over the episode, is its air speed: a brick scores nothing, a
+parachuter a little, a glider metres per second, a flapper more. It is
+continuous so wings can grow by degrees. Over land the day's foraging path
+uses the larger of crawl and air speed (the flier lands to eat), prey
+escape uses it, and a flier may enter land patches it cannot crawl in.
+Lift scales with the planet's air density, so dense atmospheres favour it.
+
 ### Decision by profitability
 An animal attacks or eats an item when the expected energy per unit
 handling time exceeds its current intake rate from alternatives (Charnov's

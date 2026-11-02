@@ -160,18 +160,24 @@ impl EcoSim {
         serde_json::to_string(&self.world.snapshot()).unwrap_or_default()
     }
 
+    /// Filtered, sorted lineage table (see EcoWorld::lineages_filtered).
+    pub fn lineages_json(&self, kind: &str, habitat: &str, sort: &str, max: usize) -> String {
+        serde_json::to_string(&self.world.lineages_filtered(kind, habitat, sort, max)).unwrap_or_default()
+    }
+
     pub fn history_json(&self) -> String {
         serde_json::to_string(&self.world.history).unwrap_or_default()
     }
 
     /// Representative genome of an animal lineage as JSON {genome, env}, or "".
-    pub fn representative_json(&self, lineage: u32) -> String {
-        match self.world.representative(lineage) {
+    pub fn representative_json(&self, lineage: u32, habitat: &str) -> String {
+        match self.world.representative_in(lineage, habitat) {
             Some((g, env)) => format!(
                 "{{\"genome\":{},\"env\":\"{}\"}}",
                 serde_json::to_string(&g).unwrap_or_default(),
                 match env {
                     Environment::Water => "water",
+                    Environment::Air => "air",
                     _ => "land",
                 }
             ),

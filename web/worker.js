@@ -19,6 +19,8 @@ let daysSince = 0;
 await init();
 postMessage({ type: 'ready' });
 
+let linFilter = { kind: 'both', habitat: 'all', sort: 'count', max: 10 };
+
 onmessage = (e) => {
   const m = e.data;
   if (m.type === 'start') {
@@ -43,11 +45,14 @@ onmessage = (e) => {
       eco.set_planet(JSON.stringify(m.planet));
       postMessage({ type: 'eco_terrain', runId, terrain: JSON.parse(eco.terrain_json(m.detail || 5)) });
     }
+  } else if (m.type === 'eco_filter') {
+    linFilter = Object.assign(linFilter, m.filter);
+    if (eco) postMessage({ type: 'eco_lineages', runId, lineages: JSON.parse(eco.lineages_json(linFilter.kind, linFilter.habitat, linFilter.sort, linFilter.max)) });
   } else if (m.type === 'eco_immigrate') {
     if (eco) eco.immigrate(m.count || 10);
   } else if (m.type === 'eco_rep') {
     if (eco) {
-      const r = eco.representative_json(m.lineage);
+      const r = eco.representative_json(m.lineage, m.habitat || 'all');
       postMessage({ type: 'eco_rep', runId, lineage: m.lineage, rep: r ? JSON.parse(r) : null });
     }
   } else if (m.type === 'eco_plant_rep') {
@@ -91,7 +96,9 @@ function loop() {
     if (now - lastSnap > 400) {
       const dps = daysSince / ((now - dayStart) / 1000);
       dayStart = now; daysSince = 0; lastSnap = now;
-      postMessage({ type: 'eco_snap', runId, snap: JSON.parse(eco.snapshot_json()), history: JSON.parse(eco.history_json()), dps });
+      const snap = JSON.parse(eco.snapshot_json());
+      snap.lineages = JSON.parse(eco.lineages_json(linFilter.kind, linFilter.habitat, linFilter.sort, linFilter.max));
+      postMessage({ type: 'eco_snap', runId, snap, history: JSON.parse(eco.history_json()), dps });
     }
   }
   setTimeout(loop, 0);

@@ -175,6 +175,13 @@ climate, gravity rescales every plant's structural cap and, with pressure
 and oxygen, queues every living body for a fresh physics measurement.
 "Apply & restart" starts a new planet instead.
 
+The lineage table can be filtered by kind (animals, plants, both) and
+habitat (all, land, sea, fliers) and sorted by count, mass, speed, height,
+parts or land share; tapping a lineage replays a member from the filtered
+habitat. Flight is measured for any winged body light enough for it to
+matter and gives a real function: a wider foraging sweep over land, escape
+from predators, and access to land patches.
+
 - **Plants** use the same graph genome as animals, read by a different
   decoder (`evo_core/src/plant.rs`): capsule nodes are stems and branches,
   membrane nodes are leaves (the membrane's spare radius gene is leaf

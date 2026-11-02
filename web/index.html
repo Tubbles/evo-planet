@@ -190,9 +190,14 @@ body.tv .chip { font-size: 15px; }
         </label>
       </div>
       <div class="tbl-scroll">
-        <table class="lin" id="lineages"><thead><tr><th>Lineage</th><th>n</th><th>mass</th><th>diet (P plant, M kills, C carrion) / anatomy / form</th><th>speed</th><th>habitat</th></tr></thead><tbody></tbody></table>
+        <div class="row" id="linFilter" style="margin-bottom:6px">
+          <span class="seg" role="group" aria-label="Kind" data-filter="kind"><button type="button" data-v="both" aria-pressed="true">Both</button><button type="button" data-v="animal" aria-pressed="false">Animals</button><button type="button" data-v="plant" aria-pressed="false">Plants</button></span>
+          <span class="seg" role="group" aria-label="Habitat" data-filter="habitat"><button type="button" data-v="all" aria-pressed="true">All</button><button type="button" data-v="land" aria-pressed="false">Land</button><button type="button" data-v="water" aria-pressed="false">Sea</button><button type="button" data-v="air" aria-pressed="false">Fliers</button></span>
+          <label class="note">sort <select id="linSort" aria-label="Sort lineages"><option value="count">by count</option><option value="mass">by mass</option><option value="speed">by speed</option><option value="height">by height</option><option value="parts">by parts</option><option value="land">by land share</option></select></label>
+        </div>
+        <table class="lin" id="lineages"><thead><tr><th>Lineage</th><th>n</th><th>mass</th><th>diet (P plant, M kills, C carrion) / anatomy / form</th><th>speed land / sea / air</th><th>habitat</th></tr></thead><tbody></tbody></table>
       </div>
-      <p class="note">Tap an animal lineage to replay its most prolific member in the 3D view, or a plant lineage to see its largest individual full-grown. Plants and animals share one graph genome: capsule nodes are limbs or stems, membranes are wings or leaves, pads are feet or roots. Life starts in the sea as floating algae sheets and small grazers with herbivore guts and no weapons; gut type, weapons, armour, body size, fat reserves, offspring size, predation, scavenging, stems, roots and land tolerance all evolve. Diet labels are what an animal actually ate, not a gene. A motility gene decides kingdom: offspring above 0.5 are born motile (animals), below it sessile (plants), so lineages can cross over in either direction. Plants reach land through a land-tolerance gene and the wet shore; herbivores follow because shore-dwellers can graze adjacent land plants from the water, better the more they can crawl, and every new body is measured on land as well as in water. Species are lineages: a child with a changed body plan starts a new lineage with some probability.</p>
+      <p class="note">Tap an animal lineage to replay its most prolific member in the 3D view, or a plant lineage to see its largest individual full-grown. Plants and animals share one graph genome: capsule nodes are limbs or stems, membranes are wings or leaves, pads are feet or roots. Life starts in the sea as floating algae sheets and small grazers with herbivore guts and no weapons; gut type, weapons, armour, body size, fat reserves, offspring size, predation, scavenging, stems, roots and land tolerance all evolve. Diet labels are what an animal actually ate, not a gene. A motility gene decides kingdom: offspring above 0.5 are born motile (animals), below it sessile (plants), so lineages can cross over in either direction. Plants reach land through a land-tolerance gene and the wet shore; herbivores follow because shore-dwellers can graze adjacent land plants from the water, better the more they can crawl, and every new body is measured on land as well as in water. Species are lineages: a child with a changed body plan starts a new lineage with some probability. The table shows the top ten per kind under the filter above it: habitat is where most of a lineage's members live, "Fliers" are lineages whose bodies get through the air in the drop test, and the replay picks a member from the filtered habitat. Wings are tested on any body light enough for them to matter (wing loading under 50 kg/m²): distance through the air from a 10 m launch becomes an air speed that widens the search over land, helps escape predators and opens land patches to fliers.</p>
     </div>
 
     <div class="panel">
@@ -369,6 +374,7 @@ function startWorker() {
     if (m.runId !== runId) return;
     if (m.type === 'eco_terrain') { buildTerrain(m.terrain); return; }
     if (m.type === 'eco_snap') { ecoSnap = m.snap; ecoHistory = m.history; renderEco(m.dps); return; }
+    if (m.type === 'eco_lineages') { if (ecoSnap) { ecoSnap.lineages = m.lineages; renderLineages(m.lineages); } return; }
     if (m.type === 'eco_rep') {
       if (m.rep) { pendingChampion = { genome: m.rep.genome, result: null, generation_born: 0, planet: activeRun.planet, env: m.rep.env, lineage: m.lineage }; setViewMode('creature'); }
       return;
@@ -460,7 +466,7 @@ function renderEco(dps) {
   kv($('ecoStats'), [
     ['Day', `${st.day}  (${fmt(dps, 0)} days/s)`],
     ['Plants', `${st.plants} · ${fmt(st.plant_biomass, 0)} kg · ${st.plant_lineages} lineages`],
-    ['Animals', `${st.animals} · H ${st.herbivores} C ${st.carnivores} D ${st.detritivores} · aquatic ${st.aquatic}`],
+    ['Animals', `${st.animals} · H ${st.herbivores} C ${st.carnivores} D ${st.detritivores} · aquatic ${st.aquatic}${st.fliers ? ` · fliers ${st.fliers}` : ''}`],
     ['Animal lineages', `${st.animal_lineages}`],
     ['Realised diet', `omnivores ${st.omnivores} · intake from kills ${fmt(st.mean_carn * 100, 0)} % · from carrion ${fmt(st.mean_detr * 100, 0)} %`, st.omnivores > 0 ? 'good' : ''],
     ['Anatomy (means)', `gut type ${fmt(st.mean_gut, 2)} (0 herbivore, 1 carnivore) · claws ${fmt(st.mean_weapon, 2)} · plating ${fmt(st.mean_armour, 2)}`],
@@ -578,6 +584,7 @@ function drawPop() {
   ctx.fillStyle = cssVar('--fg-muted'); ctx.font = '11px ' + cssVar('--mono');
   ctx.fillText(`plants ${fmt(H[H.length - 1][0], 0)} kg`, 0, 10);
 }
+const kg = (m) => (m < 0.1 ? `${fmt(m * 1000, m < 0.01 ? 1 : 0)} g` : `${fmt(m, m < 10 ? 2 : 1)} kg`);
 function renderLineages(list) {
   const tb = $('lineages').querySelector('tbody');
   tb.innerHTML = list.map((l) => {
@@ -585,19 +592,34 @@ function renderLineages(list) {
       const diet = `ate P${fmt(l.herb, 1)} M${fmt(l.carn, 1)} C${fmt(l.detr, 1)} · gut ${fmt(l.gut, 1)} · reach ${fmt(l.reach, 2)} m${l.weapon > 0.05 ? ` · claws ${fmt(l.weapon, 1)}` : ''}${l.armour > 0.05 ? ` · plating ${fmt(l.armour, 1)}` : ''}`;
       const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
       const sel = l.id === selectedLineage ? ' sel' : '';
-      return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${fmt(l.mean_mass, 1)} kg</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}%</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)} m/s</td><td>${hab}</td></tr>`;
+      return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${kg(l.mean_mass)}</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}%</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)}${l.air_speed > 0 ? ` / <b>${fmt(l.air_speed, 2)} air</b>` : ''} m/s</td><td>${hab}</td></tr>`;
     }
     const sel = l.id === selectedLineage ? ' sel' : '';
     const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
-    return `<tr class="plant animal${sel}" data-lineage="${l.id}" data-kind="plant"><td class="name">plant ${l.id}</td><td>${l.count}</td><td>${fmt(l.mean_mass, 2)} kg</td><td>${fmt(l.height, 2)} m · ${fmt(l.parts, 0)} parts · leaf ${fmt(l.membrane_area, 2)} m² · land tol ${fmt(l.lung_frac * 100, 0)}%</td><td>–</td><td>${hab}</td></tr>`;
+    return `<tr class="plant animal${sel}" data-lineage="${l.id}" data-kind="plant"><td class="name">plant ${l.id}</td><td>${l.count}</td><td>${kg(l.mean_mass)}</td><td>${fmt(l.height, 2)} m · ${fmt(l.parts, 0)} parts · leaf ${fmt(l.membrane_area, 2)} m² · land tol ${fmt(l.lung_frac * 100, 0)}%</td><td>–</td><td>${hab}</td></tr>`;
   }).join('');
   tb.querySelectorAll('tr.animal').forEach((tr) => tr.addEventListener('click', () => {
     selectedLineage = parseInt(tr.dataset.lineage, 10);
     if (tr.dataset.kind === 'plant') worker.postMessage({ type: 'eco_plant_rep', lineage: selectedLineage });
-    else worker.postMessage({ type: 'eco_rep', lineage: selectedLineage });
+    else worker.postMessage({ type: 'eco_rep', lineage: selectedLineage, habitat: linFilter.habitat });
     if (ecoSnap) { paintGlobe(ecoSnap); renderLineages(ecoSnap.lineages); }
   }));
+  if (!list.length) tb.innerHTML = '<tr><td colspan="6" class="note">No lineage matches this filter yet.</td></tr>';
 }
+// Lineage table filter: which kind, which habitat (majority of members, or
+// fliers = lineage has measured air speed), and the ranking key.
+const linFilter = { kind: 'both', habitat: 'all', sort: 'count', max: 10 };
+function setLinFilter(patch) {
+  Object.assign(linFilter, patch);
+  document.querySelectorAll('#linFilter .seg').forEach((seg) => {
+    const k = seg.dataset.filter;
+    seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === linFilter[k])));
+  });
+  $('linSort').value = linFilter.sort;
+  if (worker) worker.postMessage({ type: 'eco_filter', filter: linFilter });
+}
+document.querySelectorAll('#linFilter .seg button').forEach((b) => b.addEventListener('click', () => setLinFilter({ [b.closest('.seg').dataset.filter]: b.dataset.v })));
+$('linSort').addEventListener('change', () => setLinFilter({ sort: $('linSort').value }));
 function setStatus(html) { $('status').innerHTML = `<span class="stat">${html}</span>`; }
 
 function renderEvo(s, grid) {
