@@ -13,6 +13,7 @@ pub mod genome;
 pub mod planet;
 pub mod plant;
 pub mod sim;
+pub mod terrain;
 
 pub use decode::{decode, Part, Phenotype};
 pub use evolve::{EvolveConfig, Evolver, GenSummary};

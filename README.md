@@ -43,7 +43,7 @@ cargo run -p evo_core --bin evo_headless -- --planet earth --env water --gens 20
 Headless planet ecology (implicit fitness, prints populations every tenth of the run):
 
 ```bash
-cargo run -p evo_core --bin evo_headless -- --eco --planet earth --days 2000 --grid 24
+cargo run -p evo_core --bin evo_headless -- --eco --planet earth --days 4000 --grid 1000
 ```
 
 Desktop Bevy viewer (archive mode):
@@ -142,11 +142,25 @@ Overrides: `PORT`, `PROGRESS_PORT`, `BROWSER="flatpak run org.mozilla.firefox --
 
 ## Planet ecology mode (implicit fitness)
 
-`evo_core/src/eco.rs`. No score. A grid of 10 m patches; water patches set
-by the water-coverage dial. Each tick is a day. Life starts in the oceans:
-plants and animals are seeded only in water, and the globe view shows the
-planet start blue and brown and green up as plants colonise the shores and
-then the interior.
+`evo_core/src/eco.rs`. No score. The world is a set of uniform patches on a
+Fibonacci sphere (`evo_core/src/terrain.rs`): no poles, no wrap seams, six
+neighbours each. Elevation comes from layered value noise with ridged
+mountain belts; sea level is the elevation quantile matching the
+water-coverage dial; each patch's temperature falls with latitude and by
+6.5 °C per kilometre of altitude, so peaks and poles are cold and barren.
+The viewer renders a displaced icosphere with vertex colours (sand, rock,
+vegetation, snow below 0 °C) under a translucent sea sphere. Each tick is a
+day. Life starts in the oceans as floating algae sheets (a one-membrane plant
+genome) and animals that can only graze them: the carnivory and detritivory
+genes start at zero, and stems, roots, branching, land tolerance, predation
+and scavenging all have to arise by mutation. There is no seeding from
+archive mode. Plants reach land through a land-tolerance gene and the wet
+shore band. Animals reach land by normal selection: shore-dwelling
+herbivores can graze adjacent land plants from the water, better the more
+they can crawl, and every new body is measured on land as well as in water,
+so a mutation that improves crawling pays off before the lineage ever hauls
+out. Land entry is continuous (any body with measurable land speed can try),
+but foraging on land scales with speed, so poor crawlers go hungry there.
 
 - **Plants** use the same graph genome as animals, read by a different
   decoder (`evo_core/src/plant.rs`): capsule nodes are stems and branches,
@@ -170,7 +184,8 @@ then the interior.
   plant, then makes seeds that disperse by height and air density. Dead
   plants join the patch's dead-matter pool.
 - **Animals** use the same Sims-style genomes as archive mode plus two diet
-  genes (carnivory, detritivory; herbivory is the remainder). Each new body is
+  genes (carnivory, detritivory; herbivory is the remainder), both zero at
+  the start of an ecology run so food preference is emergent. Each new body is
   measured once in a 3 s rapier episode on land or in water to get its speed;
   results are cached per genome, so physics cost tracks new body plans, not
   population. Per day an animal pays basal (mass^0.75, temperature, oxygen),
@@ -182,20 +197,20 @@ then the interior.
 - **Decomposition** returns dead matter to nutrient at a rate set by
   temperature and moisture; algae grow logistically in water patches.
 - **Species** are lineages. A child with a changed body plan starts a new
-  lineage with probability 0.2 (plants 0.03 per seed). Random immigrants
-  arrive when the world empties; archive elites can be injected as seed stock.
-  Caps: 8 plants per patch, 260 animals.
+  lineage with probability 0.2 (plants 0.03 per seed). Random sea immigrants
+  arrive only when the world empties. Caps: 8 plants per patch, 260 animals.
 
-Observed on Earth over 3000 days (24² grid, ocean start): land goes from 0
-to 143 of 167 patches vegetated, shore first, with taller plants appearing
-on land; swimmers evolve from 0 to about 1 m/s; carnivores boom then crash
-as herbivores recover; detritivores wax when the dead-matter pool is large.
-Land walkers rarely arise from random immigrants, which matches the
-literature; the archive elites injected on mode switch supply them.
+Observed on Earth over 4000 days (1000 patches, ocean start): three quarters
+of the land greens from the shores inward; land plants grow taller than the
+1.5 m aquatic cap, up to 7.7 m; swimmers evolve to about 1 m/s; the best
+crawling speed among sea animals rises from 0.05 to about 0.3 m/s through
+shore grazing, and herbivores start appearing on land. Carnivores boom then
+crash as herbivores recover; detritivores wax when the dead-matter pool is
+large.
 
 Species are not evolved one at a time. Everything lives in the same world
-at once; speciation is tracked as lineages, fresh random immigrants arrive
-when the world empties, and archive champions can be injected as seed stock.
+at once; speciation is tracked as lineages, and fresh random immigrants
+arrive in the sea only when the world empties.
 
 ## Results from the headless runs used to validate this
 

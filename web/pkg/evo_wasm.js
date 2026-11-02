@@ -32,7 +32,7 @@ export class EcoSim {
         }
     }
     /**
-     * Inject `count` immigrants now (from seeds if set, else random).
+     * Inject `count` random immigrants into the sea now.
      * @param {number} count
      */
     immigrate(count) {
@@ -40,11 +40,11 @@ export class EcoSim {
     }
     /**
      * @param {string} planet_json
-     * @param {number} grid
+     * @param {number} patches
      * @param {bigint} seed
      */
-    constructor(planet_json, grid, seed) {
-        const val2 = +grid;
+    constructor(planet_json, patches, seed) {
+        const val2 = +patches;
         const val3 = BigInt.asIntN(64, seed);
         const ptr0 = passStringToWasm0(planet_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
@@ -98,18 +98,6 @@ export class EcoSim {
         }
     }
     /**
-     * Add archive champions (JSON array of genomes) as immigrant seed stock.
-     * @param {string} genomes_json
-     */
-    set_seeds(genomes_json) {
-        const ptr0 = passStringToWasm0(genomes_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.ecosim_set_seeds(this.__wbg_ptr, ptr0, len0);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
      * @returns {string}
      */
     snapshot_json() {
@@ -117,6 +105,24 @@ export class EcoSim {
         let deferred1_1;
         try {
             const ret = wasm.ecosim_snapshot_json(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Static render geometry as JSON (positions, indices, per-vertex patch,
+     * elevation and temperature, patch centres). Fetch once per run.
+     * @param {number} detail
+     * @returns {string}
+     */
+    terrain_json(detail) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.ecosim_terrain_json(this.__wbg_ptr, detail);
             deferred1_0 = ret[0];
             deferred1_1 = ret[1];
             return getStringFromWasm0(ret[0], ret[1]);

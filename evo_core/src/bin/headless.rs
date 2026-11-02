@@ -3,7 +3,7 @@
 //! Usage: evo_headless [--planet N|name] [--env land|water|air] [--gens N]
 //!        [--batch N] [--seed N] [--episode SECONDS] [--out champion.json]
 //!        [--list-planets]
-//!        evo_headless --eco [--planet N|name] [--days N] [--grid N] [--seed N]
+//!        evo_headless --eco [--planet N|name] [--days N] [--grid PATCHES] [--seed N]
 //!        [--evals-per-day N]   (implicit-fitness planet ecology)
 
 use evo_core::decode::decode;
@@ -11,13 +11,16 @@ use evo_core::evolve::{EvolveConfig, Evolver};
 use evo_core::planet::PlanetParams;
 use evo_core::sim::{Environment, SimConfig};
 
-fn run_eco(planet: PlanetParams, days: u64, grid: usize, seed: u64, evals_per_day: usize) {
+fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize) {
     use evo_core::eco::EcoWorld;
-    let mut w = EcoWorld::new(planet.clone(), grid, seed);
+    let mut w = EcoWorld::new(planet.clone(), patches, seed);
     let d = planet.derive();
     println!(
-        "Ecology on {} | grid {}x{} | g={:.1} | pO2 x{:.2} | NPP x{:.2} | aridity {:.2}",
-        planet.name, grid, grid, planet.gravity, d.o2_rel, d.npp_rel, d.aridity
+        "Ecology on {} | {} patches on a sphere | g={:.1} | pO2 x{:.2} | NPP x{:.2} | aridity {:.2} | sea {:.0}% | highest peak {:.0} m ({:.0} C)",
+        planet.name, patches, planet.gravity, d.o2_rel, d.npp_rel, d.aridity,
+        100.0 * w.patches.iter().filter(|p| p.water).count() as f32 / patches as f32,
+        w.patches.iter().map(|p| p.elevation).fold(f32::MIN, f32::max),
+        w.patches.iter().max_by(|a, b| a.elevation.partial_cmp(&b.elevation).unwrap()).map(|p| p.temp_c).unwrap_or(0.0)
     );
     let start = std::time::Instant::now();
     for day in 1..=days {
@@ -27,8 +30,8 @@ fn run_eco(planet: PlanetParams, days: u64, grid: usize, seed: u64, evals_per_da
             let s = &w.stats;
             let max_h = w.plants.iter().map(|p| p.height).fold(0.0f32, f32::max);
             println!(
-                "day {:>5} | plants {:>5} ({:>8.1} kg, on land {:>4} / {:>3} patches green, tallest {:>4.1} m, {:>3} lin) | animals {:>3} (H {:>3} C {:>3} D {:>3}, aquatic {:>3}, {:>3} lin) | dead {:>7.1} nutr {:>7.1} | births {:>5} deaths {:>5} kills {:>4} | evals {} pending {}",
-                day, s.plants, s.plant_biomass, s.land_plants, s.vegetated_land, max_h, s.plant_lineages, s.animals, s.herbivores, s.carnivores, s.detritivores, s.aquatic, s.animal_lineages,
+                "day {:>5} | plants {:>5} ({:>8.1} kg, on land {:>4} / {:>3} patches green, tallest {:>4.1} m, {:>3} lin) | animals {:>3} (H {:>3} C {:>3} D {:>3}, aquatic {:>3}, on land {:>3} [{:>3} herb], best land speed {:.2} m/s, {:>3} lin) | dead {:>7.1} nutr {:>7.1} | births {:>5} deaths {:>5} kills {:>4} | evals {} pending {}",
+                day, s.plants, s.plant_biomass, s.land_plants, s.vegetated_land, max_h, s.plant_lineages, s.animals, s.herbivores, s.carnivores, s.detritivores, s.aquatic, s.land_animals, s.land_herbivores, s.best_land_speed, s.animal_lineages,
                 s.dead_matter, s.nutrient, s.births, s.deaths, s.kills, s.trait_evals, s.pending_evals
             );
         }
@@ -54,7 +57,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut eco = false;
     let mut days = 1500u64;
-    let mut grid = 24usize;
+    let mut grid = 1500usize;
     let mut evals_per_day = 3usize;
     let mut planet_sel = "0".to_string();
     let mut env = Environment::Land;

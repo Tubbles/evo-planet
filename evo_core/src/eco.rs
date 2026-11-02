@@ -1,25 +1,38 @@
-//! Planet-scale ecology with implicit fitness.
+//! Planet-scale ecology with implicit fitness on a spherical world.
 //!
 //! No score. Plants capture light, draw water and nutrients, pay respiration
 //! and structural cost, and seed when they have surplus energy. Animals eat
-//! plants, dead matter or each other, pay basal and locomotion costs, and
-//! reproduce when energy crosses a threshold. Dead things feed a detritus
+//! plants, algae, dead matter or each other, pay basal and locomotion costs,
+//! and reproduce when energy crosses a threshold. Dead things feed a detritus
 //! pool that decomposers return to the nutrient pool. Whatever persists is
 //! fit by definition.
 //!
-//! Animal bodies are the Sims-style genomes from `genome`. Their movement
-//! traits (speed on land, in water, oxygen-limited activity) are measured
-//! once per genome with a short rapier episode and cached, so physics cost
-//! scales with the number of new body plans, not with population.
+//! The world is a set of uniform patches on a Fibonacci sphere with a noise
+//! elevation field. Sea level is the elevation quantile matching the planet's
+//! water coverage. Each patch has a local temperature from latitude and
+//! altitude, so peaks and poles are cold and barren.
 //!
-//! Units are abstract but consistent: one tick is one "day"; energy is in
-//! kilograms of dry biomass equivalent; patches are 10 m squares.
+//! Life starts in the sea as floating algae sheets (one-membrane plant genomes)
+//! and animals that can only graze them: carnivory, detritivory, stems, roots
+//! and land tolerance all have to evolve. Plants reach land through a
+//! land-tolerance gene and the wet shore band. Animals reach land because shore-dwelling herbivores
+//! can graze adjacent land plants from the water, better the more they can
+//! crawl, so any body that moves on land at all is rewarded before it ever
+//! leaves the sea. Every new body is measured in both water and on land.
+//!
+//! Plants and animals share the graph genome in `genome`; plants are decoded
+//! by `plant::decode_plant`, animals by `decode` plus a short rapier episode
+//! per environment whose result is cached per genome.
+//!
+//! Units: one tick is one day; energy is kilograms of dry biomass
+//! equivalent; a patch is roughly a 10 m square.
 
 use crate::decode::decode;
 use crate::genome::Genome;
 use crate::planet::{Derived, PlanetParams};
 use crate::plant::{decode_plant, PlantBody};
 use crate::sim::{fatigue_factor, CreatureSim, Environment, SimConfig};
+use crate::terrain;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -29,6 +42,7 @@ pub const PATCH_AREA: f32 = 100.0;
 pub const MAX_PLANTS_PER_PATCH: usize = 8;
 pub const MAX_ANIMALS: usize = 260;
 pub const TRAIT_EPISODE_S: f32 = 3.0;
+pub const NEIGHBOURS: usize = 6;
 
 // ---------------------------------------------------------------------------
 // Plants
@@ -109,14 +123,24 @@ pub struct Animal {
     pub offspring: u32,
 }
 
+// ---------------------------------------------------------------------------
+// World
+// ---------------------------------------------------------------------------
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Patch {
+    /// Unit direction of the patch centre.
+    pub pos: [f32; 3],
+    /// Metres above sea level (negative is seabed).
+    pub elevation: f32,
+    /// Local mean temperature, C.
+    pub temp_c: f32,
     pub water: bool,
+    /// Land patch touching water.
+    pub shore: bool,
     pub moisture: f32,
     pub nutrient: f32,
     pub dead_matter: f32,
-    /// Standing algae in water patches, kg. Grows with light, grazed by aquatic herbivores.
-    pub algae: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -131,8 +155,11 @@ pub struct EcoStats {
     pub aquatic: usize,
     pub land_plants: usize,
     pub land_animals: usize,
+    pub land_herbivores: usize,
     pub land_patches: usize,
     pub vegetated_land: usize,
+    /// Fastest land speed among living animals, m/s.
+    pub best_land_speed: f32,
     pub plant_lineages: usize,
     pub animal_lineages: usize,
     pub dead_matter: f32,
@@ -167,32 +194,49 @@ pub struct LineageSummary {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snapshot {
-    pub n: usize,
+    pub n_patches: usize,
     pub day: u64,
     pub water: Vec<u8>,
     pub vegetation: Vec<u8>,
     pub dead: Vec<u8>,
     pub canopy_height: Vec<u8>,
-    /// x, y, lineage, mass, diet class (0 herb 1 carn 2 detr), aquatic
+    /// patch, lineage, mass, diet class (0 herb 1 carn 2 detr), aquatic
     pub animals: Vec<f32>,
     pub stats: EcoStats,
     pub lineages: Vec<LineageSummary>,
 }
 
+/// Static render geometry: a displaced icosphere whose vertices know their
+/// patch, plus the patch centres.
+#[derive(Clone, Debug, Serialize)]
+pub struct TerrainMesh {
+    /// Unit directions, 3 per vertex (displacement is applied by the renderer).
+    pub positions: Vec<f32>,
+    pub indices: Vec<u32>,
+    pub vertex_patch: Vec<u32>,
+    /// Metres above sea level per vertex.
+    pub vertex_elevation: Vec<f32>,
+    pub vertex_temp: Vec<f32>,
+    pub patch_positions: Vec<f32>,
+    pub patch_elevation: Vec<f32>,
+    pub patch_temp: Vec<f32>,
+    pub patch_water: Vec<u8>,
+}
+
 pub struct EcoWorld {
-    pub n: usize,
     pub planet: PlanetParams,
     pub derived: Derived,
     pub patches: Vec<Patch>,
+    pub neighbours: Vec<Vec<usize>>,
     pub plants: Vec<Plant>,
     pub animals: Vec<Animal>,
     pub day: u64,
+    pub terrain_seed: u32,
     rng: StdRng,
     next_lineage: u32,
     trait_cache: HashMap<String, Traits>,
     pending: Vec<(usize, Environment)>,
     pub stats: EcoStats,
-    pub seeds: Vec<Genome>,
     pub history: Vec<[f32; 7]>,
 }
 
@@ -210,78 +254,64 @@ fn hash_genome(g: &Genome) -> String {
 }
 
 impl EcoWorld {
-    pub fn new(planet: PlanetParams, n: usize, seed: u64) -> Self {
+    /// `n_patches` uniform patches on the sphere (clamped to 200..6000).
+    pub fn new(planet: PlanetParams, n_patches: usize, seed: u64) -> Self {
         let derived = planet.derive();
-        let mut rng = StdRng::seed_from_u64(seed);
-        let n = n.clamp(8, 96);
-        // Water mask from smoothed noise thresholded at water coverage.
-        let mut noise: Vec<f32> = (0..n * n).map(|_| rng.gen_range(0.0..1.0)).collect();
-        for _ in 0..3 {
-            let mut out = noise.clone();
-            for y in 0..n {
-                for x in 0..n {
-                    let mut s = 0.0;
-                    let mut c = 0.0;
-                    for dy in -2i32..=2 {
-                        for dx in -2i32..=2 {
-                            let xx = (x as i32 + dx).rem_euclid(n as i32) as usize;
-                            let yy = (y as i32 + dy).rem_euclid(n as i32) as usize;
-                            s += noise[yy * n + xx];
-                            c += 1.0;
-                        }
-                    }
-                    out[y * n + x] = s / c;
-                }
-            }
-            noise = out;
-        }
-        let mut sorted = noise.clone();
+        let rng = StdRng::seed_from_u64(seed);
+        let n = n_patches.clamp(200, 6000);
+        let terrain_seed = (seed as u32) ^ 0xA5A5_5A5A;
+        let positions = terrain::fibonacci_sphere(n);
+        let neighbours = terrain::nearest_neighbours(&positions, NEIGHBOURS);
+
+        // Elevation, then sea level from the water-coverage quantile.
+        let raw: Vec<f32> = positions.iter().map(|p| terrain::elevation_at(*p, terrain_seed)).collect();
+        let mut sorted = raw.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let k = ((planet.water_coverage.clamp(0.0, 1.0)) * (n * n) as f32) as usize;
-        let thr = if k == 0 { -1.0 } else { sorted[(k - 1).min(n * n - 1)] };
-        let patches: Vec<Patch> = (0..n * n)
+        let k = (planet.water_coverage.clamp(0.0, 1.0) * n as f32) as usize;
+        let sea_level = if k == 0 { f32::MIN } else { sorted[(k - 1).min(n - 1)] };
+
+        let mut patches: Vec<Patch> = (0..n)
             .map(|i| {
-                let water = noise[i] <= thr;
-                // Land moisture: humidity plus a wetness gradient toward low ground.
+                let elevation = raw[i] - sea_level;
+                let water = elevation <= 0.0;
+                let temp_c = terrain::local_temperature(planet.temp_c, positions[i], elevation);
+                // Land moisture: humidity, drier with altitude.
                 let moisture = if water {
                     1.0
                 } else {
-                    (planet.humidity * 0.7 + 0.5 * (thr.max(0.0) + 0.15 - noise[i]).clamp(0.0, 0.3) * 2.0).clamp(0.02, 1.0)
+                    (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { water, moisture, nutrient: 2.0, dead_matter: 1.0, algae: if water { 5.0 } else { 0.0 } }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: 2.0, dead_matter: 1.0 }
             })
             .collect();
-
         // Shore band: land patches touching water stay wet, the first foothold for plants.
-        let mut patches = patches;
-        for i in 0..n * n {
+        for i in 0..n {
             if patches[i].water {
                 continue;
             }
-            let x = i % n;
-            let y = i / n;
-            let nb = [y * n + (x + 1) % n, y * n + (x + n - 1) % n, ((y + 1) % n) * n + x, ((y + n - 1) % n) * n + x];
-            if nb.iter().any(|&j| patches[j].water) {
+            if neighbours[i].iter().any(|&j| patches[j].water) {
+                patches[i].shore = true;
                 patches[i].moisture = patches[i].moisture.max(0.85);
             }
         }
+
         let mut world = Self {
-            n,
             planet,
             derived,
             patches,
+            neighbours,
             plants: Vec::new(),
             animals: Vec::new(),
             day: 0,
+            terrain_seed,
             rng,
             next_lineage: 1,
             trait_cache: HashMap::new(),
             pending: Vec::new(),
             stats: EcoStats::default(),
-            seeds: Vec::new(),
             history: Vec::new(),
         };
-        world.seed_plants(n * n / 3);
+        world.seed_plants(n / 3);
         world.immigrate(60);
         world
     }
@@ -292,15 +322,20 @@ impl EcoWorld {
         id
     }
 
+    fn water_patches(&self) -> Vec<usize> {
+        let mut v: Vec<usize> = (0..self.patches.len()).filter(|&i| self.patches[i].water).collect();
+        if v.is_empty() {
+            v = (0..self.patches.len()).collect();
+        }
+        v
+    }
+
     fn seed_plants(&mut self, count: usize) {
+        let pool = self.water_patches();
         for _ in 0..count {
             let lineage = self.new_lineage();
-            let g = Genome::random_plant(&mut self.rng);
-            // Life starts in the oceans: seed water patches when there are any.
-            let mut pool: Vec<usize> = (0..self.patches.len()).filter(|&i| self.patches[i].water).collect();
-            if pool.is_empty() {
-                pool = (0..self.patches.len()).collect();
-            }
+            let g = Genome::random_alga(&mut self.rng);
+            // Life starts in the oceans as floating algae.
             let patch = pool[self.rng.gen_range(0..pool.len())];
             let gravity = self.planet.gravity;
             let mut plant = Plant::new(g, lineage, patch, 0.0, 0.0, gravity);
@@ -310,22 +345,19 @@ impl EcoWorld {
         }
     }
 
-    /// Add fresh animals: from the seed stock if any, else random genomes.
+    /// Add fresh random animals to the sea.
     pub fn immigrate(&mut self, count: usize) {
+        let pool = self.water_patches();
         for _ in 0..count {
             if self.animals.len() >= MAX_ANIMALS {
                 return;
             }
-            let genome = if !self.seeds.is_empty() && self.rng.gen_bool(0.6) {
-                let i = self.rng.gen_range(0..self.seeds.len());
-                let (g, _) = self.seeds[i].mutate(&mut self.rng);
-                g
-            } else {
-                Genome::random_with(&mut self.rng)
-            };
+            let mut genome = Genome::random_with(&mut self.rng);
+            // Everyone starts as an algae grazer; predation and scavenging evolve.
+            genome.diet_carn = 0.0;
+            genome.diet_detr = 0.0;
             let lineage = self.new_lineage();
-            let water: Vec<usize> = (0..self.patches.len()).filter(|&i| self.patches[i].water).collect();
-            let patch = if water.is_empty() { self.rng.gen_range(0..self.patches.len()) } else { water[self.rng.gen_range(0..water.len())] };
+            let patch = pool[self.rng.gen_range(0..pool.len())];
             let traits = self.lookup_traits(&genome);
             let mass = traits.mass;
             let key = hash_genome(&genome);
@@ -354,15 +386,21 @@ impl EcoWorld {
         t
     }
 
+    /// Queue physics measurements in both environments, so a sea creature's
+    /// ability to crawl is visible to selection before it ever leaves the sea.
     fn request_traits(&mut self, idx: usize) {
-        let env = if self.patches[self.animals[idx].patch].water { Environment::Water } else { Environment::Land };
-        let t = &self.animals[idx].traits;
-        let done = match env {
-            Environment::Water => t.measured_water,
-            _ => t.measured_land,
-        };
-        if !done && !self.pending.iter().any(|(i, e)| *i == idx && *e == env) {
-            self.pending.push((idx, env));
+        let t = self.animals[idx].traits;
+        // Measure the current habitat first (popped last-in-first-out).
+        let in_water = self.patches[self.animals[idx].patch].water;
+        let order = if in_water { [Environment::Land, Environment::Water] } else { [Environment::Water, Environment::Land] };
+        for env in order {
+            let done = match env {
+                Environment::Water => t.measured_water,
+                _ => t.measured_land,
+            };
+            if !done && !self.pending.iter().any(|(i, e)| *i == idx && *e == env) {
+                self.pending.push((idx, env));
+            }
         }
     }
 
@@ -399,7 +437,6 @@ impl EcoWorld {
                 done += 1;
                 self.trait_cache.insert(key.clone(), traits);
             }
-            // Apply to every animal sharing the genome.
             for a in self.animals.iter_mut() {
                 if a.key == key {
                     a.traits = traits;
@@ -410,22 +447,23 @@ impl EcoWorld {
         done
     }
 
-    fn neighbours(&self, p: usize) -> [usize; 4] {
-        let n = self.n;
-        let x = p % n;
-        let y = p / n;
-        [
-            y * n + (x + 1) % n,
-            y * n + (x + n - 1) % n,
-            ((y + 1) % n) * n + x,
-            ((y + n - 1) % n) * n + x,
-        ]
+    /// Random walk of `hops` steps over the neighbour graph.
+    fn disperse(&mut self, from: usize, reach: f32) -> usize {
+        let mut p = from;
+        let mut hops = reach.floor() as usize;
+        if self.rng.gen_bool((reach.fract()) as f64) {
+            hops += 1;
+        }
+        for _ in 0..hops {
+            let nb = &self.neighbours[p];
+            p = nb[self.rng.gen_range(0..nb.len())];
+        }
+        p
     }
 
     pub fn tick(&mut self) {
         self.day += 1;
         let g = self.planet.gravity;
-        let tf = temp_factor(self.planet.temp_c);
         let cf = co2_factor(self.planet.co2_frac);
         let light = self.planet.insolation;
         let aridity = self.derived.aridity;
@@ -442,7 +480,9 @@ impl EcoWorld {
             if list.is_empty() {
                 continue;
             }
-            let is_water = self.patches[pi].water;
+            let patch = self.patches[pi].clone();
+            let is_water = patch.water;
+            let tf = temp_factor(patch.temp_c);
             // Realised height at current size. Water supports the plant, so
             // submerged plants ignore the stem check but stay near the surface.
             for &i in list {
@@ -452,7 +492,6 @@ impl EcoWorld {
             }
             let mut order = list.clone();
             order.sort_by(|a, b| self.plants[*b].height.partial_cmp(&self.plants[*a].height).unwrap());
-            let patch = self.patches[pi].clone();
             // Light arrives per square metre; `remaining` is in m^2 of full sun.
             // Water attenuates it, which is the pull toward land.
             let mut remaining = light * PATCH_AREA * if is_water { 0.3 } else { 1.0 };
@@ -477,7 +516,7 @@ impl EcoWorld {
                 // Water: submerged plants are never water-limited; on land,
                 // uptake needs land-adapted roots against transpiration demand.
                 // Thin leaves (high SLA) transpire more per area.
-                let water_frac = if patch.water {
+                let water_frac = if is_water {
                     1.0
                 } else {
                     let uptake = root * patch.moisture * 0.6 * (0.3 + 0.7 * tol);
@@ -485,7 +524,7 @@ impl EcoWorld {
                     if demand > 0.0 { (uptake / demand).min(1.0) } else { 1.0 }
                 };
                 // Unadapted tissue desiccates in air; adaptation costs upkeep.
-                let habitat_eff = if patch.water { 1.0 } else { 0.25 + 0.75 * tol };
+                let habitat_eff = if is_water { 1.0 } else { 0.25 + 0.75 * tol };
                 // 0.02 kg dry mass per m^2 of fully lit leaf per day; the patch's
                 // Beer-Lambert light budget caps canopy production at ~2 kg/day.
                 let photo = got * 0.02 * cf * tf * water_frac * habitat_eff * (0.3 + 0.7 * nutrient_share);
@@ -523,19 +562,14 @@ impl EcoWorld {
             let pt = &mut self.patches[pi];
             pt.nutrient = (pt.nutrient - nutrient_used).max(0.0);
         }
-        // Seeds land within reach on patches that have room.
+        // Seeds hop over the neighbour graph and land where there is room.
         let mut counts: Vec<usize> = vec![0; n_patches];
         for p in &self.plants {
             counts[p.patch] += 1;
         }
         let gravity = self.planet.gravity;
         for (child, parent_lineage, from, reach) in seeds {
-            let n = self.n as i32;
-            let dx = (self.rng.gen_range(-reach..=reach)).round() as i32;
-            let dy = (self.rng.gen_range(-reach..=reach)).round() as i32;
-            let x = ((from % self.n) as i32 + dx).rem_euclid(n) as usize;
-            let y = ((from / self.n) as i32 + dy).rem_euclid(n) as usize;
-            let target = y * self.n + x;
+            let target = self.disperse(from, reach);
             if counts[target] >= MAX_PLANTS_PER_PATCH {
                 self.patches[target].dead_matter += child.seed_mass;
                 continue;
@@ -559,7 +593,6 @@ impl EcoWorld {
         let mut births: Vec<(Genome, usize, f32, u32, usize)> = Vec::new();
         let mut killed: Vec<usize> = Vec::new();
         let n_animals = self.animals.len();
-        // Animals per patch for predation lookups.
         let mut animals_in: Vec<Vec<usize>> = vec![Vec::new(); n_patches];
         for (i, a) in self.animals.iter().enumerate() {
             animals_in[a.patch].push(i);
@@ -580,13 +613,14 @@ impl EcoWorld {
             if killed.contains(&ai) {
                 continue;
             }
-            let (patch, mass, herb, carn, detr, speed, in_water, activity, section, freq) = {
+            let (patch, mass, herb, carn, detr, speed, land_speed, in_water, activity, section, freq) = {
                 let a = &self.animals[ai];
                 let (h, c, d) = a.genome.diet();
                 let in_water = self.patches[a.patch].water;
                 let speed = if in_water { a.traits.water_speed } else { a.traits.land_speed };
-                (a.patch, a.traits.mass.max(0.05), h, c, d, speed, in_water, a.traits.activity, a.traits.section_area, a.traits.base_freq)
+                (a.patch, a.traits.mass.max(0.05), h, c, d, speed, a.traits.land_speed, in_water, a.traits.activity, a.traits.section_area, a.traits.base_freq)
             };
+            let tf = temp_factor(self.patches[patch].temp_c);
             let m34 = mass.powf(0.75);
             // Costs: basal + activity (muscle section x frequency) + travel.
             let basal = 0.006 * m34 * (0.4 + tf) / o2.min(1.0).max(0.3);
@@ -595,32 +629,48 @@ impl EcoWorld {
 
             // Foraging: search rate grows with speed. Drifting food in water
             // reaches a still animal; on land it has to walk to the plants.
-            let search = (if in_water { 0.3 } else { 0.1 } + speed).min(4.0) * m34;
+            let search = (if in_water { 0.3 } else { 0.05 } + speed).min(4.0) * m34;
             let mut food = 0.0;
             if herb > 0.05 {
                 let mut want = herb * search * 0.08;
-                if in_water {
-                    // Aquatic herbivores graze algae first; it regrows fastest.
-                    let pt = &mut self.patches[patch];
-                    let bite = want.min(pt.algae * 0.5);
-                    pt.algae -= bite;
-                    want -= bite;
-                    food += bite * 0.6;
-                }
                 for &pi in &plants_in[patch] {
                     if want <= 0.0 {
                         break;
                     }
                     let p = &mut self.plants[pi];
-                    if p.biomass < 0.05 {
+                    if p.biomass < 0.004 {
                         continue; // seedlings are too small to find
                     }
                     let lf = p.body().leaf_mass / p.body().target_mass;
-                    let edible = (p.biomass - 0.05) * lf * 0.5;
+                    let edible = (p.biomass - 0.004) * lf * 0.5;
                     let bite = want.min(edible);
                     p.biomass -= bite;
                     want -= bite;
                     food += bite * 0.6;
+                }
+                // Shore grazing: from the water, reach plants on adjacent land.
+                // Works a little for any body and better for one that crawls.
+                if in_water && want > 0.0 {
+                    let amph = 0.5 * (0.2 + 2.0 * land_speed).min(1.0);
+                    let mut shore_want = want * amph;
+                    let nbs: Vec<usize> = self.neighbours[patch].iter().copied().filter(|&j| !self.patches[j].water).collect();
+                    'outer: for j in nbs {
+                        for &pi in &plants_in[j] {
+                            if shore_want <= 0.0 {
+                                break 'outer;
+                            }
+                            let p = &mut self.plants[pi];
+                            if p.biomass < 0.004 {
+                                continue;
+                            }
+                            let lf = p.body().leaf_mass / p.body().target_mass;
+                            let edible = (p.biomass - 0.004) * lf * 0.5;
+                            let bite = shore_want.min(edible);
+                            p.biomass -= bite;
+                            shore_want -= bite;
+                            food += bite * 0.6;
+                        }
+                    }
                 }
             }
             if detr > 0.05 {
@@ -650,18 +700,21 @@ impl EcoWorld {
             }
             energy_delta += food;
 
-            // Movement: leave if hungry, toward a random neighbour the body can use.
+            // Movement: leave if hungry, toward a random neighbour the body can
+            // use at all. Entry is continuous: a crawler can haul out, it just
+            // forages badly until it walks.
             let hungry = food < basal;
             if hungry && self.rng.gen_bool(0.6) {
-                let nb = self.neighbours(patch);
-                let target = nb[self.rng.gen_range(0..4)];
+                let nb = &self.neighbours[patch];
+                let target = nb[self.rng.gen_range(0..nb.len())];
                 let target_water = self.patches[target].water;
                 let a = &self.animals[ai];
-                let can = if target_water { a.traits.water_speed > 0.05 || !a.traits.measured_water } else { a.traits.land_speed > 0.05 || !a.traits.measured_land };
+                let can = if target_water { a.traits.water_speed > 0.02 || !a.traits.measured_water } else { a.traits.land_speed > 0.02 || !a.traits.measured_land };
                 if can {
                     // Travel cost: weight times distance over efficiency.
                     // ~10 J per kg per metre, in biomass units (17 MJ/kg).
-                    energy_delta -= 0.00001 * mass * (g / 9.81) * 10.0 / (0.3 + speed).min(3.0);
+                    let use_speed = if target_water { a.traits.water_speed } else { a.traits.land_speed };
+                    energy_delta -= 0.00001 * mass * (g / 9.81) * 10.0 / (0.3 + use_speed).min(3.0);
                     self.animals[ai].patch = target;
                 }
             }
@@ -712,23 +765,16 @@ impl EcoWorld {
 
         // ---------------- Decomposition and nutrient return ------------------
         for pt in self.patches.iter_mut() {
+            let tf = temp_factor(pt.temp_c);
             let rate = 0.03 * (0.2 + tf) * (0.3 + 0.7 * pt.moisture);
             let dec = pt.dead_matter * rate;
             pt.dead_matter -= dec;
             pt.nutrient += dec * 0.8;
             // Slow weathering input and leaching.
             pt.nutrient = (pt.nutrient + 0.002 - pt.nutrient * 0.001).max(0.0);
-            if pt.water {
-                // Logistic algae growth driven by light, CO2 and temperature, fed by nutrient.
-                let cap = 25.0 * (0.2 + (pt.nutrient / (pt.nutrient + 5.0)));
-                let r = 0.12 * light * cf * tf;
-                let growth = r * pt.algae * (1.0 - pt.algae / cap.max(0.1));
-                pt.algae = (pt.algae + growth).max(0.05);
-                pt.nutrient = (pt.nutrient - growth.max(0.0) * 0.02).max(0.0);
-            }
         }
 
-        // ---------------- Immigration keeps the world from emptying ----------
+        // ---------------- Immigration keeps the sea from emptying ------------
         if self.day % 60 == 0 && self.animals.len() < 40 {
             self.immigrate(8);
         }
@@ -748,6 +794,8 @@ impl EcoWorld {
         s.carnivores = 0;
         s.detritivores = 0;
         s.aquatic = 0;
+        s.land_herbivores = 0;
+        s.best_land_speed = 0.0;
         s.land_plants = self.plants.iter().filter(|p| !self.patches[p.patch].water).count();
         s.land_patches = self.patches.iter().filter(|p| !p.water).count();
         {
@@ -759,19 +807,26 @@ impl EcoWorld {
             }
             s.vegetated_land = veg.iter().filter(|v| **v).count();
         }
-        s.land_animals = self.animals.iter().filter(|a| !self.patches[a.patch].water).count();
+        s.land_animals = 0;
         for a in &self.animals {
             let (h, c, d) = a.genome.diet();
+            let on_land = !self.patches[a.patch].water;
             if c >= h && c >= d {
                 s.carnivores += 1;
             } else if d >= h {
                 s.detritivores += 1;
             } else {
                 s.herbivores += 1;
+                if on_land {
+                    s.land_herbivores += 1;
+                }
             }
-            if self.patches[a.patch].water {
+            if on_land {
+                s.land_animals += 1;
+            } else {
                 s.aquatic += 1;
             }
+            s.best_land_speed = s.best_land_speed.max(a.traits.land_speed);
         }
         let mut pl: Vec<u32> = self.plants.iter().map(|p| p.lineage).collect();
         pl.sort_unstable();
@@ -801,6 +856,27 @@ impl EcoWorld {
         }
     }
 
+    fn empty_summary(id: u32, kind: &str, count: usize) -> LineageSummary {
+        LineageSummary {
+            id,
+            kind: kind.to_string(),
+            count,
+            mean_mass: 0.0,
+            herb: 0.0,
+            carn: 0.0,
+            detr: 0.0,
+            aquatic_share: 0.0,
+            land_speed: 0.0,
+            water_speed: 0.0,
+            parts: 0.0,
+            membrane_area: 0.0,
+            lung_frac: 0.0,
+            height: 0.0,
+            sla: 0.0,
+            root_frac: 0.0,
+        }
+    }
+
     pub fn lineages(&self, max: usize) -> Vec<LineageSummary> {
         let mut map: HashMap<u32, Vec<usize>> = HashMap::new();
         for (i, a) in self.animals.iter().enumerate() {
@@ -810,24 +886,7 @@ impl EcoWorld {
             .into_iter()
             .map(|(id, idx)| {
                 let c = idx.len() as f32;
-                let mut s = LineageSummary {
-                    id,
-                    kind: "animal".to_string(),
-                    count: idx.len(),
-                    mean_mass: 0.0,
-                    herb: 0.0,
-                    carn: 0.0,
-                    detr: 0.0,
-                    aquatic_share: 0.0,
-                    land_speed: 0.0,
-                    water_speed: 0.0,
-                    parts: 0.0,
-                    membrane_area: 0.0,
-                    lung_frac: 0.0,
-                    height: 0.0,
-                    sla: 0.0,
-                    root_frac: 0.0,
-                };
+                let mut s = Self::empty_summary(id, "animal", idx.len());
                 for &i in &idx {
                     let a = &self.animals[i];
                     let (h, ca, d) = a.genome.diet();
@@ -853,24 +912,7 @@ impl EcoWorld {
             .into_iter()
             .map(|(id, idx)| {
                 let c = idx.len() as f32;
-                let mut s = LineageSummary {
-                    id,
-                    kind: "plant".to_string(),
-                    count: idx.len(),
-                    mean_mass: 0.0,
-                    herb: 0.0,
-                    carn: 0.0,
-                    detr: 0.0,
-                    aquatic_share: 0.0,
-                    land_speed: 0.0,
-                    water_speed: 0.0,
-                    parts: 0.0,
-                    membrane_area: 0.0,
-                    lung_frac: 0.0,
-                    height: 0.0,
-                    sla: 0.0,
-                    root_frac: 0.0,
-                };
+                let mut s = Self::empty_summary(id, "plant", idx.len());
                 for &i in &idx {
                     let p = &self.plants[i];
                     s.mean_mass += p.biomass / c;
@@ -912,9 +954,9 @@ impl EcoWorld {
     }
 
     pub fn snapshot(&self) -> Snapshot {
-        let n = self.n;
-        let mut veg = vec![0.0f32; n * n];
-        let mut canopy = vec![0.0f32; n * n];
+        let n = self.patches.len();
+        let mut veg = vec![0.0f32; n];
+        let mut canopy = vec![0.0f32; n];
         for p in &self.plants {
             veg[p.patch] += p.biomass;
             canopy[p.patch] = canopy[p.patch].max(p.height);
@@ -924,27 +966,54 @@ impl EcoWorld {
             .enumerate()
             .map(|(i, v)| {
                 let p = &self.patches[i];
-                let x = if p.water { p.algae / 25.0 } else { v / 40.0 };
+                let x = if p.water { v / 2.0 } else { v / 8.0 };
                 (x.min(1.0) * 255.0) as u8
             })
             .collect();
         let canopy_height = canopy.iter().map(|h| ((h / 15.0).min(1.0) * 255.0) as u8).collect();
         let dead = self.patches.iter().map(|p| ((p.dead_matter / 20.0).min(1.0) * 255.0) as u8).collect();
         let water = self.patches.iter().map(|p| if p.water { 1 } else { 0 }).collect();
-        let mut animals = Vec::with_capacity(self.animals.len() * 6);
+        let mut animals = Vec::with_capacity(self.animals.len() * 5);
         for a in &self.animals {
             let (h, c, d) = a.genome.diet();
             let class = if c >= h && c >= d { 1.0 } else if d >= h { 2.0 } else { 0.0 };
-            animals.extend_from_slice(&[
-                (a.patch % n) as f32,
-                (a.patch / n) as f32,
-                a.lineage as f32,
-                a.traits.mass,
-                class,
-                if self.patches[a.patch].water { 1.0 } else { 0.0 },
-            ]);
+            animals.extend_from_slice(&[a.patch as f32, a.lineage as f32, a.traits.mass, class, if self.patches[a.patch].water { 1.0 } else { 0.0 }]);
         }
-        Snapshot { n, day: self.day, water, vegetation, dead, canopy_height, animals, stats: self.stats.clone(), lineages: self.lineages(8) }
+        Snapshot { n_patches: n, day: self.day, water, vegetation, dead, canopy_height, animals, stats: self.stats.clone(), lineages: self.lineages(8) }
+    }
+
+    /// Render geometry at the given icosphere detail (5 = 10k vertices, 6 = 41k).
+    pub fn terrain_mesh(&self, detail: u32) -> TerrainMesh {
+        let ico = terrain::icosphere(detail.clamp(2, 7));
+        let centres: Vec<[f32; 3]> = self.patches.iter().map(|p| p.pos).collect();
+        let sea_level_raw = {
+            // Recover raw sea level from any patch: raw = elevation + sea_level.
+            let p = &self.patches[0];
+            terrain::elevation_at(p.pos, self.terrain_seed) - p.elevation
+        };
+        let mut positions = Vec::with_capacity(ico.positions.len() * 3);
+        let mut vertex_patch = Vec::with_capacity(ico.positions.len());
+        let mut vertex_elevation = Vec::with_capacity(ico.positions.len());
+        let mut vertex_temp = Vec::with_capacity(ico.positions.len());
+        for v in &ico.positions {
+            positions.extend_from_slice(v);
+            let patch = terrain::nearest_patch(&centres, *v);
+            vertex_patch.push(patch as u32);
+            let e = terrain::elevation_at(*v, self.terrain_seed) - sea_level_raw;
+            vertex_elevation.push(e);
+            vertex_temp.push(terrain::local_temperature(self.planet.temp_c, *v, e));
+        }
+        TerrainMesh {
+            positions,
+            indices: ico.indices,
+            vertex_patch,
+            vertex_elevation,
+            vertex_temp,
+            patch_positions: self.patches.iter().flat_map(|p| p.pos.iter().copied()).collect(),
+            patch_elevation: self.patches.iter().map(|p| p.elevation).collect(),
+            patch_temp: self.patches.iter().map(|p| p.temp_c).collect(),
+            patch_water: self.patches.iter().map(|p| if p.water { 1 } else { 0 }).collect(),
+        }
     }
 }
 
@@ -954,7 +1023,7 @@ mod tests {
 
     #[test]
     fn ecology_runs_and_plants_persist() {
-        let mut w = EcoWorld::new(PlanetParams::earth(), 16, 3);
+        let mut w = EcoWorld::new(PlanetParams::earth(), 300, 3);
         for _ in 0..200 {
             w.measure_pending(2);
             w.tick();
@@ -963,12 +1032,24 @@ mod tests {
         assert!(w.stats.plant_biomass.is_finite());
         assert!(w.stats.trait_evals > 0);
         let snap = w.snapshot();
-        assert_eq!(snap.vegetation.len(), 256);
+        assert_eq!(snap.vegetation.len(), 300);
+        let mesh = w.terrain_mesh(3);
+        assert_eq!(mesh.vertex_patch.len(), 642);
+    }
+
+    #[test]
+    fn sea_level_matches_water_coverage_and_peaks_are_cold() {
+        let w = EcoWorld::new(PlanetParams::earth(), 1000, 11);
+        let water = w.patches.iter().filter(|p| p.water).count();
+        assert!((water as f32 / 1000.0 - 0.71).abs() < 0.03, "{water}");
+        let highest = w.patches.iter().max_by(|a, b| a.elevation.partial_cmp(&b.elevation).unwrap()).unwrap();
+        let shore = w.patches.iter().filter(|p| p.shore).map(|p| p.temp_c).sum::<f32>() / w.patches.iter().filter(|p| p.shore).count().max(1) as f32;
+        assert!(highest.temp_c < shore, "peak {} shore {}", highest.temp_c, shore);
     }
 
     #[test]
     fn plants_colonise_land_from_the_sea() {
-        let mut w = EcoWorld::new(PlanetParams::earth(), 16, 5);
+        let mut w = EcoWorld::new(PlanetParams::earth(), 400, 5);
         for _ in 0..1500 {
             w.tick();
         }

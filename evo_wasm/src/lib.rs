@@ -122,21 +122,20 @@ pub struct EcoSim {
 #[wasm_bindgen]
 impl EcoSim {
     #[wasm_bindgen(constructor)]
-    pub fn new(planet_json: &str, grid: usize, seed: u64) -> Result<EcoSim, JsValue> {
+    pub fn new(planet_json: &str, patches: usize, seed: u64) -> Result<EcoSim, JsValue> {
         let planet: PlanetParams = serde_json::from_str(planet_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(EcoSim { world: evo_core::eco::EcoWorld::new(planet, grid, seed) })
+        Ok(EcoSim { world: evo_core::eco::EcoWorld::new(planet, patches, seed) })
     }
 
-    /// Add archive champions (JSON array of genomes) as immigrant seed stock.
-    pub fn set_seeds(&mut self, genomes_json: &str) -> Result<(), JsValue> {
-        let seeds: Vec<Genome> = serde_json::from_str(genomes_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        self.world.seeds = seeds;
-        Ok(())
-    }
-
-    /// Inject `count` immigrants now (from seeds if set, else random).
+    /// Inject `count` random immigrants into the sea now.
     pub fn immigrate(&mut self, count: usize) {
         self.world.immigrate(count);
+    }
+
+    /// Static render geometry as JSON (positions, indices, per-vertex patch,
+    /// elevation and temperature, patch centres). Fetch once per run.
+    pub fn terrain_json(&self, detail: u32) -> String {
+        serde_json::to_string(&self.world.terrain_mesh(detail)).unwrap_or_default()
     }
 
     /// Advance `days` ticks, running at most `evals` physics trait measurements first.

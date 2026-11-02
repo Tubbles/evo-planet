@@ -1,6 +1,6 @@
 // Simulation worker. Two modes:
 //  * archive: one EvoWorld (explicit fitness, MAP-Elites), one creature per pump
-//  * ecology: one EcoSim (implicit fitness), ticks as fast as it can
+//  * ecology: one EcoSim (implicit fitness on a spherical world), as fast as it can
 // Both run on the same wasm module. Messages carry a runId so stale results
 // from a previous run are ignored by the page.
 import init, { EvoWorld, EcoSim } from './pkg/evo_wasm.js';
@@ -33,13 +33,11 @@ onmessage = (e) => {
     stopAll();
     mode = 'ecology';
     runId = m.runId;
-    eco = new EcoSim(JSON.stringify(m.planet), m.grid, BigInt(m.seed));
-    if (m.seeds && m.seeds.length) { eco.set_seeds(JSON.stringify(m.seeds)); eco.immigrate(Math.min(30, m.seeds.length * 3)); }
+    eco = new EcoSim(JSON.stringify(m.planet), m.patches, BigInt(m.seed));
+    postMessage({ type: 'eco_terrain', runId, terrain: JSON.parse(eco.terrain_json(m.detail || 5)) });
     paused = false;
     lastSnap = 0; dayStart = performance.now(); daysSince = 0;
     kick();
-  } else if (m.type === 'eco_seeds') {
-    if (eco) { eco.set_seeds(JSON.stringify(m.seeds)); eco.immigrate(m.count || 20); }
   } else if (m.type === 'eco_immigrate') {
     if (eco) eco.immigrate(m.count || 10);
   } else if (m.type === 'eco_rep') {
@@ -52,8 +50,6 @@ onmessage = (e) => {
       const r = eco.plant_representative_json(m.lineage);
       postMessage({ type: 'eco_plant_rep', runId, lineage: m.lineage, rep: r ? JSON.parse(r) : null });
     }
-  } else if (m.type === 'elites') {
-    if (world) postMessage({ type: 'elites', runId, elites: JSON.parse(world.elites_json()) });
   } else if (m.type === 'pause') {
     paused = !!m.paused;
   }
@@ -81,7 +77,7 @@ function loop() {
     }
   } else if (mode === 'ecology' && eco) {
     // A few days per slice, with a physics measurement budget that grows
-    // when the queue backs up.
+    // when the queue backs up (every new body is measured on land and in water).
     const pending = eco.pending_evals();
     const evals = pending === 0 ? 0 : Math.min(8, 1 + Math.floor(pending / 6));
     eco.tick(3, evals);

@@ -2,7 +2,7 @@
 use evo_core::eco::EcoWorld;
 use evo_core::planet::PlanetParams;
 fn main() {
-    let mut w = EcoWorld::new(PlanetParams::earth(), 10, 7);
+    let mut w = EcoWorld::new(PlanetParams::earth(), 300, 7);
     w.animals.clear();
     let mut last_births = 0usize;
     for day in 0..=600u32 {

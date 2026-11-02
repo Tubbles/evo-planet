@@ -377,9 +377,41 @@ impl Genome {
         }
     }
 
+    /// The simplest plant: one thin floating sheet (a Membrane node), no stem,
+    /// no roots, fully aquatic. Everything else (stems, roots, leaves on
+    /// branches, land tolerance) has to evolve from this by mutation.
+    pub fn random_alga(rng: &mut StdRng) -> Self {
+        let sheet = Node {
+            kind: NodeKind::Membrane,
+            len: rng.gen_range(0.1..0.4),
+            r0: rng.gen_range(0.05..0.25),
+            r1: rng.gen_range(0.02..0.08), // thickness gene (x0.01 m)
+            joint: JointKind::Rigid,
+            limit: 0.3,
+            recursive_limit: 1,
+            cpg: Cpg::random(rng),
+            connections: Vec::new(),
+        };
+        Self {
+            nodes: vec![sheet],
+            root: 0,
+            base_freq: 1.0,
+            lung_frac: 0.0,
+            water_store: 0.0,
+            density: rng.gen_range(40.0..120.0),
+            diet_carn: 0.0,
+            diet_detr: 0.0,
+            land_tolerance: 0.0,
+            seed_mass: rng.gen_range(0.0005..0.004),
+            dispersal: rng.gen_range(0.5..2.5),
+            lifespan: rng.gen_range(40.0..400.0),
+        }
+    }
+
     /// A random plant: a vertical trunk (Capsule), one or two leaf nodes
     /// (Membrane) and a root node (Pad) pointing down. The same graph and
-    /// mutation operators as animals; only the decoder differs.
+    /// mutation operators as animals; only the decoder differs. Used by tests
+    /// and tools; the ecology starts from `random_alga`.
     pub fn random_plant(rng: &mut StdRng) -> Self {
         let trunk = Node {
             kind: NodeKind::Capsule,
