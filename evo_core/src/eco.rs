@@ -55,6 +55,8 @@ pub const PLANT_CAP_PER_M2_LAND: f32 = 0.08;
 pub const INTERFERENCE_PER_100M2: f32 = 0.15;
 /// Founding grazers per square metre of sea.
 pub const FOUNDERS_PER_M2: f32 = 1.0 / 1200.0;
+/// Farthest a hungry walker or swimmer relocates in a day, metres.
+pub const RELOCATE_MAX_M: f32 = 50.0;
 /// Larval drift from the birth site, metres.
 pub const LARVAL_DRIFT_M: f32 = 15.0;
 /// The seed dispersal gene is in tens of metres.
@@ -1509,7 +1511,10 @@ impl EcoWorld {
                 // a flier ranges over everything within an hour's flight.
                 let can_glide_over = measured_air && glide_ratio * launch_h >= patch_w;
                 let flier = measured_air && air_speed_raw * motility > 0.5;
-                let range_hops = if flier { ((air_speed_raw * motility * 3600.0 / patch_w) as usize).clamp(1, 8) } else { 1 };
+                // Relocation is a distance: a flier an hour's flight, a crawler or
+                // swimmer up to RELOCATE_MAX_M of its day's path, in cells of this width.
+                let reloc_m = if flier { air_speed_raw * motility * 3600.0 } else { path.min(RELOCATE_MAX_M) };
+                let range_hops = ((reloc_m / patch_w).round() as usize).clamp(1, 12);
                 let candidates: Vec<usize> = if range_hops > 1 {
                     // Breadth-first over the neighbour graph up to range_hops.
                     let mut seen = vec![patch];

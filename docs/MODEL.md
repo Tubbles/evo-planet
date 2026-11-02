@@ -393,9 +393,17 @@ predator meets prey across those cells, so the reachable range is a
 quantity in square metres and not "the six neighbours". Founders are per
 area of sea. The cell size is a run parameter (`evo_headless
 --patch-area`), and the test is to run the same planet at 25, 100 and
-400 m² and compare time-averaged densities per area. First snapshots at
-1500 days differed two- to fourfold, dominated by boom-and-bust timing;
-the time-averaged comparison is in the audit log below.
+400 m² and compare time-averaged densities per area. The first comparison was flawed on
+my side (600 cells of each size, so three planets of 1.5, 6 and 24 ha);
+the fair test holds the planet at 6 ha and cuts it into 2400, 600 or 150
+cells. Time-averaged over days 1200-3000 that gave plants 136, 77 and
+32 kg/ha and animals 37, 167 and 78 per ha at 25, 100 and 400 m² cells:
+not invariant. One leak named and fixed from that: a hungry animal
+relocated one cell a day, 5 m on fine cells and 20 m on coarse ones;
+relocation is now a distance (up to 50 m of the day's path, in cells of
+the current width). The next run of the same test is the measure of what
+remains; candidates are the four-ring cap on a body's range, the
+per-cell sorting of plants for light, and demographic noise.
 
 One rescue remains and is not biology: when the sea's animals fall below
 about one per 1,200 m² (the founder density), a few immigrants arrive. A
