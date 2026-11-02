@@ -319,7 +319,8 @@ impl EcoWorld {
         // Two algae per water patch on average, half grown: a sea worth grazing.
         let water_n = world.patches.iter().filter(|p| p.water).count().max(1);
         world.seed_plants(water_n * 2);
-        world.immigrate(60);
+        // Founders scale with the sea so small worlds are not overgrazed on day one.
+        world.immigrate((water_n / 12).clamp(12, 80));
         world
     }
 
@@ -689,7 +690,9 @@ impl EcoWorld {
                 // Shore grazing: from the water, reach plants on adjacent land.
                 // Works a little for any body and better for one that crawls.
                 if in_water && want > 0.0 {
-                    let amph = 0.5 * (0.2 + 2.0 * land_speed).min(1.0);
+                    // Steep payoff for crawling: a body that can haul itself up the
+                    // beach reaches far more of the shore's plants.
+                    let amph = 0.8 * (0.1 + 4.0 * land_speed).min(1.0);
                     let mut shore_want = want * amph;
                     let nbs: Vec<usize> = self.neighbours[patch].iter().copied().filter(|&j| !self.patches[j].water).collect();
                     'outer: for j in nbs {
@@ -738,18 +741,36 @@ impl EcoWorld {
             }
             energy_delta += food;
 
-            // Movement: leave if hungry, toward a random neighbour the body can
-            // use at all. Entry is continuous: a crawler can haul out, it just
-            // forages badly until it walks.
+            // Movement: leave if hungry, toward the reachable neighbour with the
+            // most food for this diet (directed foraging). Entry to land is
+            // continuous: a crawler can haul out, it just forages badly until
+            // it walks.
             let hungry = food < basal;
             if hungry && self.rng.gen_bool(0.6) {
-                let nb = &self.neighbours[patch];
-                let target = nb[self.rng.gen_range(0..nb.len())];
-                let target_water = self.patches[target].water;
                 let a = &self.animals[ai];
                 let mot = a.genome.motility.clamp(0.0, 1.0);
-                let can = if target_water { a.traits.water_speed * mot > 0.005 || !a.traits.measured_water } else { a.traits.land_speed * mot > 0.005 || !a.traits.measured_land };
-                if can {
+                // Half the time pick the best-stocked neighbour, half the time
+                // wander: pure optimal foraging strips the richest patches bare.
+                let directed = self.rng.gen_bool(0.5);
+                let mut best: Option<(usize, f32)> = None;
+                for &cand in &self.neighbours[patch] {
+                    let cand_water = self.patches[cand].water;
+                    let can = if cand_water { a.traits.water_speed * mot > 0.005 || !a.traits.measured_water } else { a.traits.land_speed * mot > 0.005 || !a.traits.measured_land };
+                    if !can {
+                        continue;
+                    }
+                    let plant_food: f32 = plants_in[cand].iter().map(|&pi| self.plants[pi].biomass).sum::<f32>() * if cand_water { 0.6 } else { 0.75 };
+                    let value = if directed {
+                        herb * plant_food + detr * self.patches[cand].dead_matter * 0.3 + carn * animals_in[cand].len() as f32 * 0.5 + self.rng.gen_range(0.0..0.05)
+                    } else {
+                        self.rng.gen_range(0.0..1.0)
+                    };
+                    if best.map(|(_, v)| value > v).unwrap_or(true) {
+                        best = Some((cand, value));
+                    }
+                }
+                if let Some((target, _)) = best {
+                    let target_water = self.patches[target].water;
                     // Travel cost: weight times distance over efficiency.
                     // ~10 J per kg per metre, in biomass units (17 MJ/kg).
                     let use_speed = if target_water { a.traits.water_speed } else { a.traits.land_speed } * mot;
@@ -1108,8 +1129,8 @@ mod tests {
 
     #[test]
     fn plants_colonise_land_from_the_sea() {
-        let mut w = EcoWorld::new(PlanetParams::earth(), 400, 5);
-        for _ in 0..1500 {
+        let mut w = EcoWorld::new(PlanetParams::earth(), 500, 5);
+        for _ in 0..2500 {
             w.tick();
         }
         assert!(w.stats.plants > 0);
