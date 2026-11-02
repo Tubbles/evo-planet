@@ -925,12 +925,15 @@ impl EcoWorld {
                     let attack = m34 * (0.5 + speed_here) * (0.5 + 1.5 * weapon);
                     let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 1.5 * prey.genome.armour.clamp(0.0, 1.0));
                     let scale = 0.25 * (attack + defence) + 1e-6;
+                    // Encounter: detection distance scales with prey body length, so
+                    // small prey are found at a fraction of the rate of large prey.
+                    let encounter = (pm / mass).powf(1.0 / 3.0).min(1.0);
                     // Capture: attack versus defence, times a hump in log size ratio
                     // (Brose 2006: small ectotherm predators do best on prey 10-100x
                     // smaller; much larger prey is possible but rare).
                     let z = (mass / pm).log10();
                     let hump = (-(z - 1.0).powi(2) / 2.0).exp();
-                    let p_success = hump / (1.0 + (-(attack - defence) / scale).exp());
+                    let p_success = encounter * hump / (1.0 + (-(attack - defence) / scale).exp());
                     // Fritsch et al.: energy gained per kill falls with relative prey
                     // size, to zero for prey ten times larger (subduing cost, waste).
                     let xi = (0.4 + 0.4 * z).clamp(0.0, 1.0);
@@ -1137,7 +1140,10 @@ impl EcoWorld {
                 self.trait_cache.entry(key.clone()).or_insert(b.parent_traits);
             }
             let traits = self.lookup_traits(&b.genome);
-            self.animals.push(Animal::new(b.genome, key, traits, b.patch, lineage, b.mass0, b.reserve0));
+            // Larval dispersal: young drift one or two patches from the parent,
+            // which is what keeps them off the parents' menu in the sea.
+            let born_at = self.disperse(b.patch, 1.5);
+            self.animals.push(Animal::new(b.genome, key, traits, born_at, lineage, b.mass0, b.reserve0));
             let idx = self.animals.len() - 1;
             self.request_traits(idx);
             self.stats.births += 1;

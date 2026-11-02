@@ -3,7 +3,7 @@ use evo_core::eco::EcoWorld;
 use evo_core::planet::PlanetParams;
 fn main() {
     let mut w = EcoWorld::new(PlanetParams::earth(), 600, 4);
-    for _ in 0..300 {
+    for _ in 0..900 {
         w.measure_pending(3);
         w.tick();
     }
@@ -22,5 +22,9 @@ fn main() {
             a.traits.water_speed, a.traits.land_speed, if a.traits.measured_water { "W" } else { "w" }, if a.traits.measured_land { "L" } else { "l" },
             a.patch, plants.len(), pb, acc, water, w.patches[a.patch].temp_c, a.ate_plant, a.ate_meat, a.ate_carrion, ep));
     }
-    for r in rows.iter().take(25) { println!("{r}"); }
+    rows.sort();
+    for r in rows.iter().take(40) { println!("{r}"); }
+    let juv = w.animals.iter().filter(|a| a.mass < 0.7 * a.traits.mass).count();
+    let ages: Vec<f32> = w.animals.iter().map(|a| a.age).collect();
+    println!("juveniles {} / {} | mean age {:.0} | births {} deaths {}", juv, w.animals.len(), ages.iter().sum::<f32>() / ages.len().max(1) as f32, w.stats.births, w.stats.deaths);
 }
