@@ -191,36 +191,39 @@ but foraging on land scales with speed, so poor crawlers go hungry there.
   times gravity, so heavy worlds get squat plants. Surplus energy grows the
   plant, then makes seeds that disperse by height and air density. Dead
   plants join the patch's dead-matter pool.
-- **Animals** use the same Sims-style genomes as archive mode plus two diet
-  genes (carnivory, detritivory; herbivory is the remainder), both zero at
-  the start of an ecology run so food preference is emergent. Founders are
-  scaled to a few kilograms, the size the sea's algae production can carry;
-  body size then evolves with the food supply. Each new body is
-  measured once in a 3 s rapier episode on land or in water to get its speed;
-  results are cached per genome, so physics cost tracks new body plans, not
-  population. Per day an animal pays basal (mass^0.75, temperature, oxygen),
-  muscle activity (section × frequency × fatigue factor) and travel costs,
-  forages with a search rate that grows with speed (plants, algae, detritus,
-  or a predation attempt whose success is a logistic in speed difference),
-  moves to a neighbouring patch when hungry if its body can use that habitat,
-  and reproduces when energy exceeds 0.6 × mass, with 75% of births mutated.
-- **Carrion and scavenging.** Dead animals form a carrion pool separate from
-  plant detritus; it is richer (80% assimilation) and rots faster. Scavenging
-  needs no speed, so detritivory has a smooth gradient, and predation is
-  defined as an extension of scavenging: attack rate uses carnivory plus half
-  the detritivory gene. Prey under a fifth of the attacker's mass is caught
-  by engulfment regardless of speed; otherwise the catch is a logistic in
-  speed difference. Reproduction thresholds are nearly proportional to mass,
-  so tiny lineages turn over generations fast, the microbial route to
-  predation.
-- **Decomposition** returns plant detritus and carrion to nutrient at rates
-  set by temperature and moisture.
-- **Costs and caps.** A kill feeds the killer up to 1.5× its mass regardless
-  of diet gene; diet genes drift in small steps with occasional ±0.3 jumps;
-  limb upkeep is low so body plans can drift in complexity; a grazer can only
-  work a plant up to three times its own mass, so big plants need big
-  grazers; offspring whose body did not change inherit the parent's measured
-  speeds instead of a physics episode. Animal cap 500.
+- **Animals** use the same Sims-style genomes as archive mode. The animal
+  model is mechanistic (see `docs/MODEL.md` and the research report in
+  `reports/`): field metabolic rate ∝ M^0.75 with a Q10 temperature factor
+  (ectotherms); fat reserve capacity ∝ M^1.19 set by a gene; offspring born
+  at a gene-set fraction of adult mass and growing by the West–Brown–Enquist
+  curve, maturing at a gene-set fraction of asymptotic mass; lifespan ∝
+  M^0.25 × a gene. A stomach (gut fraction gene) is filled by foraging and
+  emptied by digestion ∝ M^0.75, with assimilation of plant versus animal
+  tissue set by a continuous gut-type gene (fermenter 50%/45% to carnivore
+  15%/90%). Foraging is a Holling type II response with Beddington–DeAngelis
+  crowding; browsing height limits what small animals reach on land. Predation
+  is attack (M^0.75 × speed × weapon gene) against defence (prey M^0.75 ×
+  speed × armour gene) through a logistic, times a Gaussian hump in
+  log10(predator/prey mass) centred at 10×; the energy returned from a kill
+  falls with relative prey size (zero for prey ten times larger, Fritsch et
+  al.); attacks happen only when expected gain per handling time beats the
+  current alternatives. Carcasses persist as carrion that anyone with the gut
+  for it can scavenge. Each new body is measured once in rapier for its land
+  and water speed. Diet classes (herbivore, carnivore, scavenger, omnivore)
+  are what an individual actually ate, not genes. Founders are a few hundred
+  grams, seeded in warm shallow seas, with herbivore guts and no weapons.
+- **Carrion and detritus.** Dead animals and dung feed a carrion pool and a
+  plant-litter pool that decompose to nutrient at temperature- and
+  moisture-dependent rates. Scavenging needs no speed and is the natural
+  bridge to predation.
+- **Plants** carry a leaf-toughness gene on the leaf-economics axis: tough
+  leaves lose less to grazers and digest worse but photosynthesise slower.
+  Half of tender leaf tissue is takeable in a day; algae density in the sea
+  is limited by light rather than a counter.
+- **Diagnostics** logged every tick: daily energy flows (primary production,
+  grazing, predation, scavenging, metabolic cost), death causes, the realised
+  predator–prey mass ratio of kills (field mean ≈ 10^1.6, 80% of kills by the
+  larger party), and the satiation fraction (≈ 88% in the field).
 - **Species** are lineages. A child with a changed body plan starts a new
   lineage with probability 0.2 (plants 0.03 per seed). Random sea immigrants
   arrive only when the world empties. Caps: 8 plants per patch, 260 animals.

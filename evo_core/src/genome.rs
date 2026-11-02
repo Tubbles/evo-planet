@@ -154,6 +154,10 @@ pub struct Genome {
     /// Lifespan multiplier on the allometric baseline.
     #[serde(default = "default_longevity")]
     pub longevity: f32,
+    /// Fraction of asymptotic adult mass at which reproduction starts. Growth
+    /// continues after maturity (indeterminate growth as the default).
+    #[serde(default = "default_maturity_frac")]
+    pub maturity_frac: f32,
     /// Plant leaf toughness (leaf economics spectrum): tough leaves lose less
     /// to grazers and digest worse, but photosynthesise slower per area.
     #[serde(default)]
@@ -186,6 +190,9 @@ fn default_offspring_frac() -> f32 {
 }
 fn default_longevity() -> f32 {
     1.0
+}
+fn default_maturity_frac() -> f32 {
+    0.7
 }
 
 fn gaussian(rng: &mut StdRng) -> f32 {
@@ -436,6 +443,7 @@ impl Genome {
             weapon: 0.0,
             armour: 0.0,
             longevity: 1.0,
+            maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
         }
     }
@@ -477,6 +485,7 @@ impl Genome {
             weapon: 0.0,
             armour: 0.0,
             longevity: 1.0,
+            maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
         }
     }
@@ -596,6 +605,7 @@ impl Genome {
             weapon: 0.0,
             armour: 0.0,
             longevity: 1.0,
+            maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
         }
     }
@@ -696,6 +706,9 @@ impl Genome {
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.leaf_toughness = (g.leaf_toughness + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.maturity_frac = nudge(rng, g.maturity_frac, 0.1, 0.02, 0.2, 0.98);
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.density = nudge(rng, g.density, 0.12, 5.0, 20.0, 1200.0);

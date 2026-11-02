@@ -1054,14 +1054,18 @@ impl EcoWorld {
             // animals ride out lean spells longer; the gene sets the coefficient.
             let cap = 0.05 * a.mass + fat_frac * a.mass.powf(1.19);
             if a.reserve > cap {
-                let surplus = a.reserve - cap;
+                let mut surplus = a.reserve - cap;
                 if a.mass < adult_mass {
                     // West-Brown-Enquist growth: dm/dt = a m^0.75 (1 - (m/M)^0.25).
+                    // Asymptotic, so maturity is a fraction of adult mass, not all of it.
                     let wbe = 0.08 * m34 * q * (1.0 - (a.mass / adult_mass).powf(0.25)).max(0.02);
                     let grow = surplus.min(wbe).min(adult_mass - a.mass);
                     a.mass += grow * 0.7;
                     a.reserve -= grow;
-                } else {
+                    surplus -= grow;
+                }
+                let mature = a.mass >= a.genome.maturity_frac.clamp(0.2, 0.98) * adult_mass;
+                if mature {
                     let mass0 = (a.genome.offspring_frac.clamp(0.01, 0.5) * adult_mass).max(0.001);
                     let cost = mass0 * 1.3; // body plus a starter reserve
                     if surplus >= cost && self.rng.gen_bool(0.5) {
