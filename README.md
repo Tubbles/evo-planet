@@ -184,8 +184,13 @@ glide, still aloft at the end is flight. Gliders use the canopy and
 hillsides as perches to cross patches, cover ground and escape; fliers
 range over many patches a day, cross water, survey carrion from above and
 are out of reach of ground predators. Land and water speeds are sustained
-progress after settling, with rolling resistance on the ground, so a body
-that topples once does not count as walking.
+progress after settling, minus the same body's drift with its motors off
+(a sham control), with rolling resistance on the ground and bodies
+starting where they would rest, so toppling, sliding and floating do not
+count as locomotion. Nimbleness is measured too: turn rate from
+asymmetric drive and climb speed from a posture shift, used in chases.
+As of this writing no walkers or fish-like swimmers have evolved in the
+ecology; `docs/MODEL.md` records what the replays actually show.
 
 - **Plants** use the same graph genome as animals, read by a different
   decoder (`evo_core/src/plant.rs`): capsule nodes are stems and branches,

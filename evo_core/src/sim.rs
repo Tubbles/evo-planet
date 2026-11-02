@@ -47,11 +47,19 @@ pub struct SimConfig {
     pub dt: f32,
     pub settle_time: f32,
     pub episode_time: f32,
+    /// Drive the joints. False is the sham control: same body, no muscle.
+    pub motors: bool,
+    /// Asymmetric drive, -1..1: mirrored parts get amplitude x(1 - steer),
+    /// the others x(1 + steer). How animals turn.
+    pub steer: f32,
+    /// Added to every joint's bias, radians: the body's posture shift used
+    /// to climb or dive.
+    pub bias_shift: f32,
 }
 
 impl Default for SimConfig {
     fn default() -> Self {
-        Self { dt: 1.0 / 120.0, settle_time: 1.0, episode_time: 8.0 }
+        Self { dt: 1.0 / 120.0, settle_time: 1.0, episode_time: 8.0, motors: true, steer: 0.0, bias_shift: 0.0 }
     }
 }
 
@@ -98,6 +106,10 @@ pub struct EpisodeResult {
     /// half of the episode, after any toppling or sinking has played out. A
     /// body that falls over once and rolls scores zero here.
     pub sustained_speed: f32,
+    /// Mean yaw rate of the trunk over the second half, rad/s (signed).
+    pub yaw_rate: f32,
+    /// Vertical speed of the centre of mass over the second half, m/s (signed).
+    pub climb_speed: f32,
 }
 
 pub struct CreatureSim {
@@ -137,6 +149,8 @@ pub struct CreatureSim {
     com_height_sum: f32,
     /// Centre of mass at the episode's midpoint, for sustained speed.
     mid_com: Option<Vector3<f32>>,
+    yaw_sum: f32,
+    yaw_n: u32,
 }
 
 fn part_bounding_radius(p: &crate::decode::Part) -> f32 {
@@ -211,9 +225,27 @@ impl CreatureSim {
         let min_y = (0..n)
             .map(|i| isos[i].translation.y - part_bounding_radius(&pheno.parts[i]))
             .fold(f32::INFINITY, f32::min);
+        // In water, start where the body would rest: a buoyant body at the
+        // surface, a dense one on the bottom, a neutral one mid-depth. A body
+        // released mid-water would otherwise rise or sink for the whole
+        // episode and a tilted fin would turn that into free travel.
+        let max_y = (0..n)
+            .map(|i| isos[i].translation.y + part_bounding_radius(&pheno.parts[i]))
+            .fold(f32::NEG_INFINITY, f32::max);
+        let volume: f32 = pheno.parts.iter().map(|p| p.mass / p.density.max(1.0)).sum();
+        let mean_density = pheno.total_mass / volume.max(1e-6);
         let lift = match env {
             Environment::Land => ground_y + 0.01 - min_y,
-            Environment::Water => spawn_y - min_y,
+            Environment::Water => {
+                if mean_density < 0.98 * derived.water_density {
+                    // Float: centre of the body at the waterline.
+                    0.0 - 0.5 * (min_y + max_y)
+                } else if mean_density > 1.02 * derived.water_density {
+                    ground_y + 0.01 - min_y
+                } else {
+                    spawn_y - min_y
+                }
+            }
             Environment::Air => spawn_y - min_y,
         };
         for iso in isos.iter_mut() {
@@ -331,6 +363,8 @@ impl CreatureSim {
             landing_distance: None,
             com_height_sum: 0.0,
             mid_com: None,
+            yaw_sum: 0.0,
+            yaw_n: 0,
         };
         sim.start_com = sim.com();
         if !sim.settled {
@@ -376,7 +410,21 @@ impl CreatureSim {
         self.settled
     }
 
-    fn lowest_point(&self) -> f32 {
+    /// Mass-weighted mean angular speed of the parts, rad/s (rolling shows here).
+    pub fn angular_speed(&self) -> f32 {
+        let mut sum = 0.0;
+        let mut m = 0.0;
+        for (i, h) in self.handles.iter().enumerate() {
+            if let Some(rb) = self.bodies.get(*h) {
+                let mass = self.pheno.parts[i].mass;
+                sum += rb.angvel().norm() * mass;
+                m += mass;
+            }
+        }
+        if m > 0.0 { sum / m } else { 0.0 }
+    }
+
+    pub fn lowest_point(&self) -> f32 {
         let mut min_y = f32::INFINITY;
         for (i, h) in self.handles.iter().enumerate() {
             let rb = &self.bodies[*h];
@@ -411,10 +459,11 @@ impl CreatureSim {
             let stiffness = strength * 3.0;
             let damping = strength * 0.3;
             let w = 2.0 * PI * f * p.cpg.freq_mult * t;
+            let gain = 1.0 + if p.reflected { -self.cfg.steer } else { self.cfg.steer };
             let (t1, t2) = if self.motors_active() {
                 (
-                    (p.cpg.bias + p.cpg.amp * (w + p.cpg.phase).sin()).clamp(-p.limit, p.limit),
-                    (p.cpg.amp2 * (w + p.cpg.phase2).sin()).clamp(-p.limit, p.limit),
+                    (p.cpg.bias + self.cfg.bias_shift + p.cpg.amp * gain * (w + p.cpg.phase).sin()).clamp(-p.limit, p.limit),
+                    (p.cpg.amp2 * gain * (w + p.cpg.phase2).sin()).clamp(-p.limit, p.limit),
                 )
             } else {
                 (p.cpg.bias.clamp(-p.limit, p.limit), 0.0)
@@ -532,7 +581,9 @@ impl CreatureSim {
             }
             self.start_com = self.com();
         }
-        self.update_motors();
+        if self.cfg.motors {
+            self.update_motors();
+        }
         self.apply_fluid_forces();
         self.pipeline.step(
             &self.gravity,
@@ -556,6 +607,12 @@ impl CreatureSim {
             self.com_height_sum += self.com().y - self.ground_y;
             if self.mid_com.is_none() && self.time >= self.cfg.settle_time + 0.5 * (self.cfg.episode_time - self.cfg.settle_time) {
                 self.mid_com = Some(self.com());
+            }
+            if self.mid_com.is_some() {
+                if let Some(rb) = self.bodies.get(self.handles[0]) {
+                    self.yaw_sum += rb.angvel().y;
+                    self.yaw_n += 1;
+                }
             }
             let airborne = self.is_airborne();
             if airborne {
@@ -633,6 +690,14 @@ impl CreatureSim {
                     let d = self.com() - m;
                     let half = 0.5 * (self.cfg.episode_time - self.cfg.settle_time);
                     if half > 0.0 { (d.x * d.x + d.z * d.z).sqrt() / half } else { 0.0 }
+                }
+                None => 0.0,
+            },
+            yaw_rate: if self.yaw_n > 0 { self.yaw_sum / self.yaw_n as f32 } else { 0.0 },
+            climb_speed: match self.mid_com {
+                Some(m) => {
+                    let half = 0.5 * (self.cfg.episode_time - self.cfg.settle_time);
+                    if half > 0.0 { (self.com().y - m.y) / half } else { 0.0 }
                 }
                 None => 0.0,
             },

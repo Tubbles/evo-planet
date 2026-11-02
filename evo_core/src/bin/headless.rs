@@ -41,8 +41,8 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
     for l in w.lineages(6) {
         if l.kind == "animal" {
             println!(
-                "  animal lineage {:>4}: n={:>3} mass {:>6.2} kg | ate plant {:.2} meat {:.2} carrion {:.2} | gut {:.2} claws {:.2} plating {:.2} reach {:.2} m upright {:.2} | land {:.2} m/s water {:.2} m/s air {:.2} m/s glide {:.1} m | parts {:.1} | membranes {:.2} m² | aquatic {:.0}%",
-                l.id, l.count, l.mean_mass, l.herb, l.carn, l.detr, l.gut, l.weapon, l.armour, l.reach, l.upright, l.land_speed, l.water_speed, l.air_speed, l.glide, l.parts, l.membrane_area, l.aquatic_share * 100.0
+                "  animal lineage {:>4}: n={:>3} mass {:>6.2} kg | ate plant {:.2} meat {:.2} carrion {:.2} | gut {:.2} claws {:.2} plating {:.2} reach {:.2} m upright {:.2} | land {:.2} m/s water {:.2} m/s air {:.2} m/s glide {:.1} m turn {:.2} rad/s climb {:.2} m/s | parts {:.1} | membranes {:.2} m² | aquatic {:.0}%",
+                l.id, l.count, l.mean_mass, l.herb, l.carn, l.detr, l.gut, l.weapon, l.armour, l.reach, l.upright, l.land_speed, l.water_speed, l.air_speed, l.glide, l.turn, l.climb, l.parts, l.membrane_area, l.aquatic_share * 100.0
             );
         } else {
             println!(

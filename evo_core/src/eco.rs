@@ -121,6 +121,14 @@ pub struct Traits {
     /// Sustained flight speed, m/s: set only when the body is still aloft at
     /// the end of the air-drop episode (powered or very efficient flight).
     pub air_speed: f32,
+    /// Nimbleness: yaw rate gained from asymmetric drive (rad/s) and vertical
+    /// speed gained from a posture shift (m/s), per environment. Zero unless
+    /// the body locomotes at all.
+    pub turn_land: f32,
+    pub turn_water: f32,
+    pub climb_water: f32,
+    pub turn_air: f32,
+    pub climb_air: f32,
     /// Geometry-derived function (see decode::body_metrics).
     pub reach: f32,
     pub mouth_area: f32,
@@ -321,6 +329,11 @@ pub struct LineageSummary {
     /// Mean glide distance beyond a thrown stone from a 10 m launch, metres.
     #[serde(default)]
     pub glide: f32,
+    /// Nimbleness means: turn rate (rad/s) in the lineage's main habitat, climb speed (m/s) in water.
+    #[serde(default)]
+    pub turn: f32,
+    #[serde(default)]
+    pub climb: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -695,13 +708,44 @@ impl EcoWorld {
                 _ => traits.measured_land,
             };
             if !already {
+                let pheno = decode(&genome);
                 let cfg = SimConfig { episode_time: TRAIT_EPISODE_S, ..Default::default() };
-                let r = CreatureSim::run_episode(decode(&genome), &self.planet, env, cfg);
-                // Sustained progress only: a pill that topples and rolls once is not walking.
-                let speed = if r.exploded { 0.0 } else { r.sustained_speed };
+                let r = CreatureSim::run_episode(pheno.clone(), &self.planet, env, cfg);
+                // Sustained progress only, and only what the muscles add: the same
+                // body is run again with its motors off (sham control) and that
+                // passive drift, a buoyant rise with a tilted fin or a slide after
+                // a topple, is subtracted. The air drop has its own control (a stone).
+                let passive = if env == Environment::Air || r.exploded {
+                    0.0
+                } else {
+                    let sham = SimConfig { episode_time: TRAIT_EPISODE_S, motors: false, ..Default::default() };
+                    let c = CreatureSim::run_episode(pheno, &self.planet, env, sham);
+                    if c.exploded { 0.0 } else { c.sustained_speed }
+                };
+                let speed = if r.exploded { 0.0 } else { (r.sustained_speed - passive).max(0.0) };
+                // Nimbleness, only for bodies that locomote: the same body driven
+                // asymmetrically (turning) and with a shifted posture (climb/dive).
+                let (turn, climb) = if speed > 0.01 && !r.exploded {
+                    let pheno2 = decode(&genome);
+                    let st = SimConfig { episode_time: TRAIT_EPISODE_S, steer: 0.6, ..Default::default() };
+                    let rs = CreatureSim::run_episode(pheno2.clone(), &self.planet, env, st);
+                    let turn = if rs.exploded { 0.0 } else { (rs.yaw_rate - r.yaw_rate).abs() };
+                    let climb = if env == Environment::Land {
+                        0.0
+                    } else {
+                        let bc = SimConfig { episode_time: TRAIT_EPISODE_S, bias_shift: 0.4, ..Default::default() };
+                        let rc = CreatureSim::run_episode(pheno2, &self.planet, env, bc);
+                        if rc.exploded { 0.0 } else { (rc.climb_speed - r.climb_speed).abs() }
+                    };
+                    (turn, climb)
+                } else {
+                    (0.0, 0.0)
+                };
                 match env {
                     Environment::Water => {
                         traits.water_speed = speed;
+                        traits.turn_water = turn;
+                        traits.climb_water = climb;
                         traits.measured_water = true;
                     }
                     Environment::Air => {
@@ -716,10 +760,13 @@ impl EcoWorld {
                         let beyond = (r.air_distance - crate::sim::ballistic_distance(self.planet.gravity)).max(0.0);
                         traits.glide_distance = if r.exploded { 0.0 } else { beyond };
                         traits.air_speed = if !r.exploded && r.airborne_frac >= 0.95 && r.distance > 5.0 { r.distance / TRAIT_EPISODE_S } else { 0.0 };
+                        traits.turn_air = turn;
+                        traits.climb_air = climb;
                         traits.measured_air = true;
                     }
                     _ => {
                         traits.land_speed = speed;
+                        traits.turn_land = turn;
                         traits.measured_land = true;
                         traits.upright = (r.mean_height / (0.5 * traits.reach).max(0.01)).clamp(0.0, 1.0);
                     }
@@ -1130,7 +1177,11 @@ impl EcoWorld {
                     let p_in_water = self.patches[prey.patch].water;
                     let p_lin = (pm / prey.traits.mass.max(0.001)).clamp(0.01, 1.0).powf(1.0 / 3.0);
                     let prey_speed = (if p_in_water { prey.traits.water_speed } else { prey.traits.land_speed.max(prey.traits.air_speed) }) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.3 * prey.traits.plating);
-                    let attack = m34 * (0.5 + speed_here) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright);
+                    // Manoeuvrability decides chases as much as speed (Howland 1974):
+                    // a turn rate of about 1.5 rad/s doubles either side's term.
+                    let my_turn = if in_water { self.animals[ai].traits.turn_water } else { self.animals[ai].traits.turn_land.max(self.animals[ai].traits.turn_air) };
+                    let prey_turn = if p_in_water { prey.traits.turn_water } else { prey.traits.turn_land.max(prey.traits.turn_air) };
+                    let attack = m34 * (0.5 + speed_here) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright) * (0.5 + 0.5 * (my_turn / 1.5).min(1.0));
                     // Taking off is the escape a ground predator cannot follow: a glider
                     // needs a perch (its patch's launch height), a flier needs nothing.
                     let takeoff = if p_in_water {
@@ -1142,7 +1193,7 @@ impl EcoWorld {
                         let drop = self.neighbours[prey.patch].iter().map(|&k| e - self.patches[k].elevation).fold(0.0f32, f32::max);
                         (prey.traits.glide_distance / crate::sim::AIR_DROP_HEIGHT * (self.patches[prey.patch].canopy + drop.min(50.0)) / 10.0).clamp(0.0, 1.0)
                     };
-                    let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 2.0 * prey.traits.plating) * (1.0 + 3.0 * takeoff);
+                    let defence = pm.powf(0.75) * (0.5 + prey_speed) * (0.5 + 2.0 * prey.traits.plating) * (1.0 + 3.0 * takeoff) * (0.5 + 0.5 * (prey_turn / 1.5).min(1.0));
                     let scale = 0.25 * (attack + defence) + 1e-6;
                     // Encounter: detection distance scales with prey body length, so
                     // small prey are found at a fraction of the rate of large prey.
@@ -1564,6 +1615,8 @@ impl EcoWorld {
             upright: 0.0,
             air_speed: 0.0,
             glide: 0.0,
+            turn: 0.0,
+            climb: 0.0,
         }
     }
 
@@ -1635,6 +1688,8 @@ impl EcoWorld {
                     s.water_speed += a.traits.water_speed / c;
                     s.air_speed += a.traits.air_speed / c;
                     s.glide += a.traits.glide_distance / c;
+                    s.turn += (if self.patches[a.patch].water { a.traits.turn_water } else { a.traits.turn_land.max(a.traits.turn_air) }) / c;
+                    s.climb += a.traits.climb_water.max(a.traits.climb_air) / c;
                     s.parts += decode(&a.genome).part_count() as f32 / c;
                     s.membrane_area += a.traits.membrane_area / c;
                     s.lung_frac += a.genome.lung_frac / c;

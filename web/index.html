@@ -592,7 +592,7 @@ function renderLineages(list) {
       const diet = `ate P${fmt(l.herb, 1)} M${fmt(l.carn, 1)} C${fmt(l.detr, 1)} · gut ${fmt(l.gut, 1)} · reach ${fmt(l.reach, 2)} m${l.weapon > 0.05 ? ` · claws ${fmt(l.weapon, 1)}` : ''}${l.armour > 0.05 ? ` · plating ${fmt(l.armour, 1)}` : ''}`;
       const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
       const sel = l.id === selectedLineage ? ' sel' : '';
-      return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${kg(l.mean_mass)}</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}%</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)}${l.air_speed > 0 ? ` / <b>${fmt(l.air_speed, 2)} air</b>` : ''} m/s${l.glide > 0.5 ? ` · glides ${fmt(l.glide, 1)} m` : ''}</td><td>${hab}</td></tr>`;
+      return `<tr class="animal${sel}" data-lineage="${l.id}"><td class="name">animal ${l.id}</td><td>${l.count}</td><td>${kg(l.mean_mass)}</td><td>${diet} · ${fmt(l.parts, 0)} parts${l.membrane_area > 0.05 ? ` · ${fmt(l.membrane_area, 2)} m² wing` : ''} · lung ${fmt(l.lung_frac * 100, 0)}%</td><td>${fmt(l.land_speed, 2)} / ${fmt(l.water_speed, 2)}${l.air_speed > 0 ? ` / <b>${fmt(l.air_speed, 2)} air</b>` : ''} m/s${l.glide > 0.5 ? ` · glides ${fmt(l.glide, 1)} m` : ''}${l.turn > 0.05 ? ` · turns ${fmt(l.turn, 1)} rad/s` : ''}${l.climb > 0.02 ? ` · climbs ${fmt(l.climb, 2)} m/s` : ''}</td><td>${hab}</td></tr>`;
     }
     const sel = l.id === selectedLineage ? ' sel' : '';
     const hab = l.aquatic_share > 0.5 ? `water ${fmt(l.aquatic_share * 100, 0)}%` : `land ${fmt((1 - l.aquatic_share) * 100, 0)}%`;
@@ -832,6 +832,17 @@ function resize() {
 }
 
 // ---------------------------------------------------------------- replay
+// Audit hook: replay any genome in the 3D view (used by the screenshot checks).
+window.evoDebug = {
+  replayGenome: (genomeJson, env) => {
+    setMode('archive');
+    setViewMode && setViewMode('creature');
+    startReplay({ genome: JSON.parse(genomeJson), planet, env, result: null, generation_born: 0, lineage: 0 });
+  },
+  replayTime: () => (replay ? replay.time() : -1),
+  setZoom: (z) => { zoom = z; },
+  replayDistance: () => (replay ? replay.distance() : -1),
+};
 function startReplay(c) {
   if (replay) { replay.free(); replay = null; }
   try {

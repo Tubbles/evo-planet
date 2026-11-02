@@ -225,6 +225,34 @@ season. Each is a candidate system, each with a real analogue.
     3000; the plants are 1-2 m tall, so the perch is low. Taller plants are
     the lever, and they need the bending and transport model to pay off.
 
+12. Looked, not inferred. Replaying the fastest bodies of a 2500-day run
+    in the 3D view (zoomed) showed no walkers and no fish-like swimmers:
+    the best land body is a capsule twitching a flap (0.3 m in 6 s), the
+    next a capsule sliding on a plate; the best "swimmers" were floating
+    capsules rising through the water with a tilted fin, 90% as fast with
+    their motors off. Earlier claims of "honest walkers" in these notes
+    were wrong and are withdrawn. Fixes, all physical: a sham control (the
+    same body with motors off, its drift subtracted), water bodies start
+    where they would rest (a buoyant body at the surface, a dense one on
+    the bottom), and land bodies on the ground. What remains is what the
+    physics and open-loop oscillators can actually produce; the next
+    question is why coordinated gaits do not appear in the ecology, which
+    only a replay-and-look audit can answer.
+13. Nimbleness is measured, not only speed. A body that locomotes is run
+    again with asymmetric drive (mirrored parts weaker, the others
+    stronger: how animals turn) and with a shifted posture (climb or dive).
+    The yaw rate and vertical speed gained are its turn rate and climb
+    speed per environment. Chases use turn rate on both sides (Howland
+    1974: manoeuvrability decides as much as speed).
+
+### Audit tooling
+`cargo run --example gait_audit -- <days> <out_dir>` re-runs the fastest
+land and water bodies from an ecology with motors on and off, logs spin,
+height and progress, and writes their genomes. The page exposes
+`window.evoDebug.replayGenome(json, env)` and `setZoom(z)` so a script
+can screenshot any genome in the real replay. The rule from here: no
+claim about what bodies do without a replay looked at.
+
 ## How we will know it works
 Not by reaching a target. By emergent statistics matching ecological
 regularities: body-size distributions spanning orders of magnitude,
