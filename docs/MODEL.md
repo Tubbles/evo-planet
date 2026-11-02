@@ -119,6 +119,38 @@ season. Each is a candidate system, each with a real analogue.
   (field mean ≈ 10^1.6, 80% by the larger), satiation fraction (≈ 88%),
   daily energy flows, death causes.
 
+## Audit log (what the energy flows showed, in order)
+
+1. Founders starved while 95% of production went uneaten: Holling search and
+   bite parameters were an order of magnitude low. Fixed from first
+   principles (a patch is covered in a day; intake tenth of M^0.75).
+2. Still starving: algae covered 16% of patch light at a 16-per-patch cap.
+   Cap raised so light limits production; founders scaled to a few hundred
+   grams and seeded in warm shallow seas.
+3. Population peaked then died of old age: WBE growth is asymptotic, so
+   reproduction gated on full adult mass never triggered. Maturity became a
+   gene (fraction of asymptotic mass).
+4. Births ≈ deaths with few starved or old: adults were eating their own
+   young in the same patch (the cannibalism trap). Larval dispersal and
+   detection scaling with prey length fixed it; the fauna then filled the
+   performance guard.
+5. Runaway miniaturisation to grams: evolution had found the plant tissue
+   density gene in animals (20 kg/m³ bodies). Animal density is now fixed at
+   water density. Unmeasured young could also enter any habitat; entry now
+   needs measured ability.
+6. Current state (Earth, 600 patches, 4000 days): 1,000–2,500 animals
+   limited by food (two thirds of production grazed, starvation the main
+   death cause), realised predator–prey mass ratio 10^0.64 with 96% of kills
+   by the larger party, carnivores and scavengers appearing by realised diet
+   (21 and 385 of 2,174), gut type and weapon genes drifting up, about 300
+   animals on land at a time. Mean body mass still drifts to the size floor
+   (0.05 kg, one or two parts): the Brännström/Loeuille–Loreau runaway. Next
+   systems, not thresholds: predation pressure that falls on small bodies
+   (a detection model that does not shelter the tiny, visual predators),
+   seasonality so fat and size buy survival through lean periods, and plant
+   structure (height, toughness) that only large or specialised grazers can
+   exploit.
+
 ## How we will know it works
 Not by reaching a target. By emergent statistics matching ecological
 regularities: body-size distributions spanning orders of magnitude,
