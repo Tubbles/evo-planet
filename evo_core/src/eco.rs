@@ -81,7 +81,7 @@ pub const CLEARANCE_M3_PER_KG_DAY: f32 = 1.2;
 /// without the cap itself deciding who lives.
 /// Performance guard only. Ecological limits come from food, crowding and
 /// predation (Beddington-DeAngelis interference), not from this number.
-pub const MAX_ANIMALS: usize = 5000;
+pub const MAX_ANIMALS: usize = 15000;
 pub const TRAIT_EPISODE_S: f32 = 4.0;
 pub const NEIGHBOURS: usize = 6;
 
@@ -286,6 +286,9 @@ pub struct Patch {
     /// swimming photosynthesiser gets), set by the plant tick.
     #[serde(default)]
     pub light_left: f32,
+    /// Leaf area of motile sheets floating in the patch, m^2 (set by the plant tick).
+    #[serde(default)]
+    pub motile_area: f32,
     /// Bacterial biomass, kg: grown on dead matter, eaten by filter feeders
     /// and phagotrophs, respired back to nutrient (the microbial loop).
     #[serde(default)]
@@ -502,7 +505,7 @@ impl EcoWorld {
                 } else {
                     (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 }, light_left: 1.0, bacteria: 0.0 }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 }, light_left: 1.0, bacteria: 0.0, motile_area: 0.0 }
             })
             .collect();
         // Shore band: land patches touching water stay wet, the first foothold for plants.
@@ -961,6 +964,14 @@ impl EcoWorld {
         for (i, p) in self.plants.iter().enumerate() {
             by_patch[p.patch].push(i);
         }
+        // Motile sheets float at the surface: they shade each other and the
+        // beds beneath them. Their leaf area per patch sets the light left for
+        // the plants and each sheet's share of the surface light.
+        let mut motile_area: Vec<f32> = vec![0.0; n_patches];
+        for a in &self.animals {
+            let lin = (a.mass / a.traits.mass.max(1e-6)).clamp(0.01, 1.0).powf(1.0 / 3.0);
+            motile_area[a.patch] += a.traits.membrane_area * lin * lin;
+        }
         let mut seeds: Vec<(Genome, u32, usize, f32, Option<PlantBody>)> = Vec::new();
         let mut dead_plants: Vec<usize> = Vec::new();
         let mut production_today = 0.0f32;
@@ -984,7 +995,8 @@ impl EcoWorld {
             // Light arrives per square metre; `remaining` is in m^2 of full sun.
             // Water attenuates it, which is the pull toward land.
             let patch_plant_mass: f32 = order.iter().map(|&i| self.plants[i].biomass).sum();
-            let mut remaining = light * a * (0.3 * sub + (1.0 - sub));
+            let surface_shade = (-0.5 * motile_area[pi] / a).exp();
+            let mut remaining = light * a * (0.3 * sub + (1.0 - sub)) * surface_shade;
             let mut nutrient_demand = 0.0;
             let mut intercepts = Vec::with_capacity(order.len());
             for &i in &order {
@@ -1116,6 +1128,7 @@ impl EcoWorld {
             pt.dead_matter = (pt.dead_matter - dom_used).max(0.0) + litter_today;
             pt.bacteria = (pt.bacteria - bacteria_used).max(0.0);
             pt.light_left = light_left;
+            pt.motile_area = motile_area[pi];
         }
         // Seeds hop over the neighbour graph and land where there is room.
         let mut counts: Vec<usize> = vec![0; n_patches];
@@ -1297,8 +1310,12 @@ impl EcoWorld {
                 let leaf_now = membrane_area * lin_f * lin_f;
                 if leaf_now > 0.0 && het < 1.0 {
                     let tf = temp_factor(temp);
-                    // Under the plant canopy's leftover light, like any understorey.
-                    let photo = (1.0 - 0.6 * het) * leaf_now * light * self.patches[patch].light_left * 0.02 * cf * tf * (0.3 * sub + (1.0 - sub));
+                    // At the surface, sharing with every other floating sheet: the
+                    // mat intercepts 1 - exp(-0.5 A/a) of the light and each sheet gets
+                    // its share by area, so a crowded surface is a dim one.
+                    let mat = self.patches[patch].motile_area.max(leaf_now);
+                    let intercepted = light * a_area * (0.3 * sub + (1.0 - sub)) * (1.0 - (-0.5 * mat / a_area).exp());
+                    let photo = (1.0 - 0.6 * het) * intercepted * (leaf_now / mat) * 0.02 * cf * tf;
                     delta += photo;
                     production_today += photo;
                 }

@@ -576,8 +576,28 @@ thickness gene now sets a sheet's mass in both decoders (0.1-2 mm of
 tissue; a bird's wing with bone is about 1 kg/m², an alga a tenth of
 that). With that, the followed seed grew from 35 g to its 305 g adult
 size in a hundred days and had ten offspring, themselves born motile:
-the first heterotroph lineage to establish from algae. The 5000-day and
-6000-day runs after it are recorded below. The remaining
+the first motile lineage to establish from algae. In the full world it
+arose at day 1000 and filled the sea and the shore to the 5,000-animal
+guard within 250 days: motile photosynthetic sheets, a thousand lineages
+by mutation, grazing nothing, with the guard as their only limit. A guard
+is not a limit the world has, and a population held by a lottery of
+discarded births stops evolving. Their real limit is light: floating
+sheets shade each other and the beds beneath them. The surface mat now
+intercepts 1 − exp(−0.5·A/a) of the light, each sheet taking its share by
+area, and the plants below get what passes. The guard is raised to 15,000
+and is a performance stop only. The 3000-day run after that: the motile
+line arose at day 1000, reached the new guard by day 1500 and held it,
+3,800 lineages, 0.1 kg sheets of 1-2 m² with no swimming speed at all
+(they drift), living on their own photosynthesis, absorbed dead matter
+and bacteria strained from the water (the diet labels call them
+detritivores), seven thousand of them on the shore, a hundred gliding in
+the drop test as paper would. Grazing of plants is half a kilogram a day
+across the planet, predation nil. So: a motile kingdom has come back by
+itself, as floating mixotrophic mats. Grazers and hunters have not, and
+the guard is binding again, which means the mats' real limit (light and
+particles) has not yet been reached at this density. Next: a per-area
+guard so density regulation is the world's, and the ledger again for why
+nothing swims when motility has arisen. The remaining
 switch is in the code, not the biology: an organism is ticked as a plant
 below motility 0.5 and as a mover above it, because the two have different
 data structures. Nothing it pays or earns jumps at that line.
