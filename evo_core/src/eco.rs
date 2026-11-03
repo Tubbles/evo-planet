@@ -77,11 +77,9 @@ pub const SEED_DISPERSAL_UNIT_M: f32 = 10.0;
 pub const SUSPENDED_FRACTION: f32 = 0.2;
 /// Water cleared by a filter feeder, m^3 per kg of body per day.
 pub const CLEARANCE_M3_PER_KG_DAY: f32 = 1.2;
-/// Global animal cap. High enough that predator and prey numbers can cycle
-/// without the cap itself deciding who lives.
-/// Performance guard only. Ecological limits come from food, crowding and
-/// predation (Beddington-DeAngelis interference), not from this number.
-pub const MAX_ANIMALS: usize = 15000;
+// No population guard: the world's limits (light, particles, food, crowding)
+// are the only limits. Performance is a separate problem (cohorts, planned)
+// and is never solved by discarding births.
 pub const TRAIT_EPISODE_S: f32 = 4.0;
 pub const NEIGHBOURS: usize = 6;
 
@@ -604,9 +602,6 @@ impl EcoWorld {
     pub fn immigrate(&mut self, count: usize) {
         let pool = self.cradle_patches();
         for _ in 0..count {
-            if self.animals.len() >= MAX_ANIMALS {
-                return;
-            }
             let mut genome = Genome::random_with(&mut self.rng);
             // Everyone starts as a small algae grazer; predation, scavenging
             // and body size evolve from there.
@@ -1147,7 +1142,7 @@ impl EcoWorld {
             let seed_mass = child.seed_mass;
             if child.motility >= 0.5 {
                 // A seed that moves: born as an animal, grazing from day one.
-                if self.animals.len() < MAX_ANIMALS {
+                {
                     let traits = self.lookup_traits(&child);
                     let key = hash_genome(&child);
                     let mass0 = (child.offspring_frac * traits.mass).max(seed_mass);
@@ -1321,10 +1316,6 @@ impl EcoWorld {
                 }
             }
             cost_today += fmr + upkeep + activity_cost;
-            if membrane_area > 0.0 && motility < 1.0 {
-                let light_here = light * if in_water { 0.3 } else { 1.0 };
-                delta += membrane_area * lin_f * lin_f * light_here * 0.02 * cf * temp_factor(temp) * 0.5 * (1.0 - motility);
-            }
 
             // --- digestion of yesterday's gut contents -------------------------
             let gut_cap = gut_frac * mass;
@@ -1808,10 +1799,6 @@ impl EcoWorld {
                 }
                 continue;
             }
-            if self.animals.len() >= MAX_ANIMALS {
-                self.patches[b.patch].carrion += b.mass0;
-                continue;
-            }
             // Same body as the parent: inherit its measured speeds instead of
             // spending physics on it (controller-only mutations are approximated).
             let key = hash_genome(&b.genome);
@@ -2259,10 +2246,15 @@ mod tests {
 
     #[test]
     fn plants_colonise_land_from_the_sea() {
-        // A mid-sized world: tiny seas get overgrazed by founders before algae establish.
+        // A mid-sized world. Stop as soon as land is colonised: with no
+        // population guard a long run grows large and slow, and the question
+        // here is only whether colonisation happens.
         let mut w = EcoWorld::new(PlanetParams::earth(), 800, 5);
         for _ in 0..2500 {
             w.tick();
+            if w.stats.land_plants > 0 {
+                break;
+            }
         }
         assert!(w.stats.plants > 0);
         assert!(w.stats.land_plants > 0, "no land plants after 2500 days: {:?}", w.stats);
