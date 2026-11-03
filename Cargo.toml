@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["evo_core", "evo_viewer", "evo_wasm"]
+members = ["evo_core", "evo_wasm"]
 
 [workspace.package]
 version = "0.1.0"

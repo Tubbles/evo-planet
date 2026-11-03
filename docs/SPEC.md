@@ -21,33 +21,26 @@ flowchart LR
     T[terrain] --> E
     PL[planet] --> S
     PL --> E
-    D --> EV[evolve: archive mode]
-    S --> EV
   end
   subgraph wasm["evo_wasm (wasm-bindgen)"]
-    W1[EvoWorld] --- EV
     W2[EcoSim] --- E
     W3[ReplaySim] --- S
   end
   subgraph web["web/ (browser)"]
-    WK[worker.js] --> W1
-    WK --> W2
+    WK[worker.js] --> W2
     IX[index.html: three.js globe, creature view, tables, dials] --> WK
     IX --> W3
   end
   H[evo_headless CLI] --> E
-  H --> EV
   SV[evo_serve: embeds web/] --> IX
 ```
 
-Two modes share one genome and one physics:
-
-- **Archive evolution** (`evolve.rs`): one task (land, water or air
-  distance), MAP-Elites archive over (part count, membrane area per mass),
-  innovation protection. A tool for looking at bodies; not the planet.
-- **Planet ecology** (`eco.rs`): no score. Organisms earn energy, pay
-  for tissue and work, grow, breed and die on a sphere of cells under a
-  planet's gravity, atmosphere, light and water.
+There is one mode, the **planet ecology** (`eco.rs`): no score. Organisms
+earn energy, pay for tissue and work, grow, breed and die on a sphere of
+cells under a planet's gravity, atmosphere, light and water. The physics
+(`sim.rs`) only measures what a body can do; nothing is ranked. An earlier
+archive-evolution mode (a scored task with a MAP-Elites archive) was
+removed on 2026-11-03.
 
 ## 2. Data structures
 
@@ -191,7 +184,6 @@ classDiagram
     airborne_frac, time_aloft, air_distance
     mean_height  (uprightness)
     shore_progress, exploded
-    fitness  (archive mode only)
   }
   CreatureSim --> SimConfig
   CreatureSim ..> EpisodeResult
@@ -350,7 +342,6 @@ per-individual ledgers behind the aggregate numbers.
 
 | Object | Purpose |
 |---|---|
-| `EvoWorld` | archive mode: `pump`, `finish`, `grid_json`, `elites_json`, champion |
 | `EcoSim` | ecology: `tick(days, evals)`, `set_planet`, `snapshot_json`, `lineages_json(kind, habitat, sort, max)`, `representative_json`, `plant_representative_json`, `terrain_json`, `immigrate` |
 | `ReplaySim` | one physics episode stepped in the browser: `parts_json` (with flat and grip), `transforms`, `com`, `distance`, `slope` |
 

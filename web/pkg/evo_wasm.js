@@ -192,131 +192,6 @@ export class EcoSim {
 }
 if (Symbol.dispose) EcoSim.prototype[Symbol.dispose] = EcoSim.prototype.free;
 
-export class EvoWorld {
-    __destroy_into_raw() {
-        const ptr = this.__wbg_ptr;
-        this.__wbg_ptr = 0;
-        EvoWorldFinalization.unregister(this);
-        return ptr;
-    }
-    free() {
-        const ptr = this.__destroy_into_raw();
-        wasm.__wbg_evoworld_free(ptr, 0);
-    }
-    /**
-     * All archive elite genomes as a JSON array (seed stock for the ecology).
-     * @returns {string}
-     */
-    elites_json() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.evoworld_elites_json(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-    /**
-     * Insert the completed generation; returns the summary as JSON or "".
-     * @param {number} elapsed_s
-     * @returns {string}
-     */
-    finish(elapsed_s) {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.evoworld_finish(this.__wbg_ptr, elapsed_s);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-    /**
-     * @returns {number}
-     */
-    generation() {
-        const ret = wasm.evoworld_generation(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
-     * @returns {string}
-     */
-    grid_json() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.evoworld_grid_json(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-    /**
-     * @param {string} planet_json
-     * @param {string} env
-     * @param {number} episode_time
-     * @param {number} batch
-     * @param {bigint} seed
-     */
-    constructor(planet_json, env, episode_time, batch, seed) {
-        const val3 = +episode_time;
-        const val4 = +batch;
-        const val5 = BigInt.asIntN(64, seed);
-        let ptr0, len0, ptr1, len1;
-        try {
-            ptr0 = passStringToWasm0(planet_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            len0 = WASM_VECTOR_LEN;
-            ptr1 = passStringToWasm0(env, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            len1 = WASM_VECTOR_LEN;
-        } catch (e) {
-            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
-            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
-            throw e;
-        }
-        const ret = wasm.evoworld_new(ptr0, len0, ptr1, len1, val3, val4, val5);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        this.__wbg_ptr = ret[0];
-        EvoWorldFinalization.register(this, this.__wbg_ptr, this);
-        return this;
-    }
-    /**
-     * Evaluate up to `max_evals` creatures. Returns true when a generation
-     * completed (call `finish` to insert it).
-     * @param {number} max_evals
-     * @returns {boolean}
-     */
-    pump(max_evals) {
-        const ret = wasm.evoworld_pump(this.__wbg_ptr, max_evals);
-        return ret !== 0;
-    }
-    /**
-     * Champion as JSON if it improved since the last call, else "".
-     * @returns {string}
-     */
-    take_new_champion_json() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.evoworld_take_new_champion_json(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-}
-if (Symbol.dispose) EvoWorld.prototype[Symbol.dispose] = EvoWorld.prototype.free;
-
 export class ReplaySim {
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
@@ -541,14 +416,6 @@ export function derive_json(planet_json) {
 }
 
 /**
- * @returns {number}
- */
-export function grid_size() {
-    const ret = wasm.grid_size();
-    return ret >>> 0;
-}
-
-/**
  * Decode any genome as a plant body for display.
  * @param {string} genome_json
  * @param {number} gravity
@@ -640,9 +507,6 @@ function __wbg_get_imports() {
 const EcoSimFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_ecosim_free(ptr, 1));
-const EvoWorldFinalization = (typeof FinalizationRegistry === 'undefined')
-    ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_evoworld_free(ptr, 1));
 const ReplaySimFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_replaysim_free(ptr, 1));

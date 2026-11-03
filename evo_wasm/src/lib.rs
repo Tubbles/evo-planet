@@ -1,12 +1,11 @@
-//! Browser bindings. `EvoWorld` runs evolution incrementally (meant for a
-//! Web Worker); `ReplaySim` steps one creature for rendering on the main
-//! thread. Both use the same evo_core code, so the replay matches the score.
+//! Browser bindings. `EcoSim` runs the planet ecology (meant for a Web
+//! Worker); `ReplaySim` steps one creature for rendering on the main thread.
+//! Both use the same evo_core code, so the replay matches the measurement.
 
 use evo_core::decode::decode;
-use evo_core::evolve::{EvolveConfig, Evolver, GRID};
 use evo_core::genome::{Genome, NodeKind};
 use evo_core::planet::PlanetParams;
-use evo_core::sim::{CreatureSim, Environment, EpisodeResult, SimConfig};
+use evo_core::sim::{CreatureSim, Environment, SimConfig};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -34,82 +33,6 @@ pub fn derive_json(planet_json: &str) -> String {
     match serde_json::from_str::<PlanetParams>(planet_json) {
         Ok(p) => serde_json::to_string(&p.derive()).unwrap_or_default(),
         Err(e) => format!("{{\"error\":\"{e}\"}}"),
-    }
-}
-
-#[wasm_bindgen]
-pub fn grid_size() -> usize {
-    GRID
-}
-
-#[derive(Serialize)]
-struct ChampionOut<'a> {
-    genome: &'a Genome,
-    result: &'a EpisodeResult,
-    generation_born: u32,
-}
-
-#[wasm_bindgen]
-pub struct EvoWorld {
-    ev: Evolver,
-    last_sent_best: f32,
-}
-
-#[wasm_bindgen]
-impl EvoWorld {
-    #[wasm_bindgen(constructor)]
-    pub fn new(planet_json: &str, env: &str, episode_time: f32, batch: usize, seed: u64) -> Result<EvoWorld, JsValue> {
-        let planet: PlanetParams = serde_json::from_str(planet_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let cfg = EvolveConfig {
-            planet,
-            env: parse_env(env),
-            sim: SimConfig { episode_time, ..Default::default() },
-            batch: batch.max(2),
-            threads: 1,
-            seed,
-            ..Default::default()
-        };
-        Ok(EvoWorld { ev: Evolver::new(cfg), last_sent_best: -1.0 })
-    }
-
-    /// Evaluate up to `max_evals` creatures. Returns true when a generation
-    /// completed (call `finish` to insert it).
-    pub fn pump(&mut self, max_evals: usize) -> bool {
-        self.ev.pump(max_evals)
-    }
-
-    /// Insert the completed generation; returns the summary as JSON or "".
-    pub fn finish(&mut self, elapsed_s: f32) -> String {
-        match self.ev.finish_generation(elapsed_s) {
-            Some(s) => serde_json::to_string(&s).unwrap_or_default(),
-            None => String::new(),
-        }
-    }
-
-    pub fn grid_json(&self) -> String {
-        serde_json::to_string(&self.ev.grid_fitness()).unwrap_or_default()
-    }
-
-    /// Champion as JSON if it improved since the last call, else "".
-    pub fn take_new_champion_json(&mut self) -> String {
-        match self.ev.champion() {
-            Some(c) if c.result.fitness > self.last_sent_best => {
-                self.last_sent_best = c.result.fitness;
-                serde_json::to_string(&ChampionOut { genome: &c.genome, result: &c.result, generation_born: c.generation_born })
-                    .unwrap_or_default()
-            }
-            _ => String::new(),
-        }
-    }
-
-    pub fn generation(&self) -> u32 {
-        self.ev.generation
-    }
-
-    /// All archive elite genomes as a JSON array (seed stock for the ecology).
-    pub fn elites_json(&self) -> String {
-        let v: Vec<&Genome> = self.ev.archive.iter().flatten().map(|e| &e.genome).collect();
-        serde_json::to_string(&v).unwrap_or_default()
     }
 }
 

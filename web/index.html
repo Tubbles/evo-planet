@@ -86,13 +86,7 @@ select { font: 500 13px var(--body); padding: 7px 10px; border-radius: 8px; bord
 .kv dd.good { color: var(--good); }
 .kv dd.warn { color: var(--warn); }
 .note { color: var(--fg-muted); font-size: 12.5px; margin: 0; }
-.grid-wrap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 8px; align-items: center; }
-.grid-wrap canvas { width: 100%; max-width: 240px; aspect-ratio: 1; display: block; border-radius: 6px; }
-.axis { font-size: 11px; color: var(--fg-muted); letter-spacing: 0.04em; text-transform: uppercase; }
-.axis.y { writing-mode: vertical-rl; transform: rotate(180deg); }
-.spark { width: 100%; height: 44px; display: block; }
 details summary { cursor: pointer; font-weight: 500; }
-.pending { color: var(--warn); font-size: 12.5px; }
 .hidden { display: none; }
 [hidden] { display: none !important; }
 .map-wrap { display: grid; gap: 6px; }
@@ -123,7 +117,7 @@ body.tv .chip { font-size: 15px; }
   <header>
     <div>
       <h1>Evo Planet</h1>
-      <p>Creatures evolve inside rigid-body physics under the planet you set. Wings, legs and fins earn their abilities from lift, friction and oxygen, not from stat tags.</p>
+      <p>A planet with no score. Life starts as floating algae; everything else has to earn its energy under the physics of the world you set. Wings, legs and fins get their abilities from lift, friction and oxygen, not from stat tags.</p>
     </div>
     <div class="statusbar" id="status">
       <span class="stat">Loading simulation…</span>
@@ -133,10 +127,10 @@ body.tv .chip { font-size: 15px; }
   <section class="stage">
     <div class="view" id="view">
       <canvas id="gl"></canvas>
-      <div class="hud" id="hud"><span class="chip">waiting for first champion</span></div>
+      <div class="hud" id="hud"><span class="chip">forming the planet…</span></div>
     </div>
     <div class="row">
-      <span class="seg" role="group" aria-label="View" id="viewSeg" hidden>
+      <span class="seg" role="group" aria-label="View" id="viewSeg">
         <button type="button" data-view="globe" aria-pressed="true">Globe</button>
         <button type="button" data-view="creature" aria-pressed="false">Creature</button>
       </span>
@@ -145,11 +139,9 @@ body.tv .chip { font-size: 15px; }
         <button type="button" data-speed="1" aria-pressed="true">1×</button>
         <button type="button" data-speed="2">2×</button>
       </span>
-      <button type="button" class="ghost" id="replayBtn">Replay champion</button>
-      <label class="row" style="gap:6px"><input type="checkbox" id="followNew" checked> switch to new champions</label>
       <button type="button" class="ghost" id="copyBtn">Copy genome JSON</button>
     </div>
-    <div class="panel map-wrap" id="mapPanel" hidden>
+    <div class="panel map-wrap" id="mapPanel">
       <header><h2>Globe</h2><span class="note" id="mapNote"></span></header>
       <div class="legend">
         <span style="--sw:#3f8a4f">vegetated land</span><span style="--sw:#b8a070">bare land</span><span style="--sw:#8a8a8a">rock</span><span style="--sw:#f2f4f8">snow (below 0 °C)</span><span style="--sw:#1f5f9a">sea (greener with algae)</span>
@@ -158,25 +150,15 @@ body.tv .chip { font-size: 15px; }
       <p class="note">Uniform patches on a sphere, no poles or seams. Elevation from ridged noise; sea level is the elevation quantile matching the water-coverage dial; local temperature falls with latitude and 6.5 °C per km of altitude, so peaks and poles stay barren.</p>
     </div>
     <div class="panel">
-      <header><h2 id="champTitle">Champion</h2><span class="note" id="champBorn"></span></header>
+      <header><h2 id="champTitle">Selected lineage</h2><span class="note" id="champBorn"></span></header>
       <dl class="kv" id="champ">
-        <dt>Status</dt><dd>no champion yet</dd>
+        <dt>Status</dt><dd>tap a lineage in the table to replay a member</dd>
       </dl>
     </div>
   </section>
 
   <section class="controls">
-    <div class="panel">
-      <header><h2>Mode</h2>
-        <span class="seg" role="group" aria-label="Mode" id="modeSeg">
-          <button type="button" data-mode="archive" aria-pressed="true">Archive evolution</button>
-          <button type="button" data-mode="ecology" aria-pressed="false">Planet ecology</button>
-        </span>
-      </header>
-      <p class="note" id="modeNote">Archive evolution scores creatures on one task and keeps the best per body type. Planet ecology has no score: plants and animals eat, pay energy, reproduce and die on the whole planet at full speed.</p>
-    </div>
-
-    <div class="panel" id="ecoPanel" hidden>
+    <div class="panel" id="ecoPanel">
       <header><h2>Planet ecology</h2><span class="note" id="ecoNote"></span></header>
       <canvas class="pop" id="popChart" aria-label="Populations over time"></canvas>
       <div class="legend">
@@ -206,16 +188,10 @@ body.tv .chip { font-size: 15px; }
       </header>
       <div class="dials" id="dials"></div>
       <div class="row">
-        <span class="seg" role="group" aria-label="Environment" id="envSeg">
-          <button type="button" data-env="land" aria-pressed="true">Land</button>
-          <button type="button" data-env="water">Water</button>
-          <button type="button" data-env="air">Air drop</button>
-        </span>
-        <button type="button" class="primary" id="applyBtn">Apply &amp; restart evolution</button>
+        <button type="button" class="primary" id="applyBtn">Apply &amp; restart planet</button>
         <button type="button" class="ghost" id="pauseBtn" aria-pressed="false">Pause</button>
       </div>
-      <p class="pending hidden" id="pendingNote">Dials changed. Restart evolution to apply them to the physics.</p>
-      <p class="note" id="liveNote" hidden>In planet ecology the dials act on the living world as you drag them: seas rise or fall, climates shift, gravity re-tests every body. "Apply &amp; restart" starts a fresh planet instead.</p>
+      <p class="note" id="liveNote">The dials act on the living world as you drag them: seas rise or fall, climates shift, gravity re-tests every body. "Apply &amp; restart" starts a fresh planet instead.</p>
     </div>
 
     <div class="panel">
@@ -229,19 +205,6 @@ body.tv .chip { font-size: 15px; }
       <p class="note">Illustrative Earth-normalised model: productivity from light, CO₂, temperature and water; animal cost from gravity and buoyancy; oxygen caps metabolic rate.</p>
     </div>
 
-    <div class="panel" id="evoPanel">
-      <header><h2>Evolution</h2><span class="note" id="evoNote"></span></header>
-      <canvas class="spark" id="spark" aria-label="Best fitness over generations"></canvas>
-      <dl class="kv" id="evo"></dl>
-      <div class="grid-wrap">
-        <span class="axis y">Part count →</span>
-        <canvas id="grid" width="240" height="240" aria-label="Archive heat map"></canvas>
-        <span></span>
-        <span class="axis">Membrane area per kg →</span>
-      </div>
-      <p class="note">One elite per cell. Bright cells scored higher. Young bodies that lost their cell wait in a nursery for six generations so their controllers can catch up.</p>
-    </div>
-
     <div class="panel">
       <details>
         <summary>How the physics ties to the dials</summary>
@@ -249,10 +212,10 @@ body.tv .chip { font-size: 15px; }
           <li><b>Gravity</b>: weight grows with volume × g; muscle torque with limb cross-section. Heavy worlds favour short, thick limbs.</li>
           <li><b>Pressure, O₂, CO₂, temperature</b> set air density by the ideal gas law. Every membrane sub-panel gets a flat-plate normal force F = ½ρA|v|²·2.61·sin α plus parasitic drag; limbs get anisotropic quadratic drag.</li>
           <li><b>O₂ partial pressure</b> feeds an oxygen budget: lung fraction × torso volume × pO₂ against muscle section × frequency. The ratio scales motor strength (fatigue factor).</li>
-          <li><b>Humidity and temperature</b> set aridity. Land fitness is multiplied by hydration unless the water-store gene covers the need; stored water adds mass.</li>
-          <li><b>Water</b> environment adds Archimedes buoyancy from displaced volume and submersion damping; the same lift code runs at water density, so fins and wings share physics.</li>
-          <li><b>Scoring</b>: Land = distance walked in 8 s after a 1 s settle. Water = distance swum. Air = dropped from 10 m, distance at landing + 0.25 × seconds aloft.</li>
-          <li>Everything runs at a fixed 120 Hz step. Runs that go non-finite or exceed 60 m/s score zero, because evolution exploits any energy leak.</li>
+          <li><b>Humidity and temperature</b> set aridity. Motor strength on land is multiplied by hydration unless the water-store gene covers the need; stored water adds mass.</li>
+          <li><b>Water</b> adds Archimedes buoyancy from tissue volume and submersion damping; the same lift code runs at water density, so fins and wings share physics.</li>
+          <li><b>Measurement, not scoring</b>: every new body runs a short battery (land and water with motors on and off, steering and posture shifts, an air launch if it is light enough). Sustained speed after settling, net of the motors-off twin, becomes the body's range and its chances in a chase. Nothing is ranked; the ecology decides what a body is worth.</li>
+          <li>Everything runs at a fixed 120 Hz step. Runs that go non-finite or exceed 60 m/s are discarded, because evolution exploits any energy leak.</li>
         </ul>
       </details>
     </div>
@@ -261,7 +224,7 @@ body.tv .chip { font-size: 15px; }
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script type="module">
-import init, { presets_json, derive_json, grid_size, ReplaySim } from './pkg/evo_wasm.js';
+import init, { presets_json, derive_json, ReplaySim } from './pkg/evo_wasm.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 2) => Number.isFinite(v) ? v.toFixed(d) : '–';
@@ -269,28 +232,22 @@ const fmt = (v, d = 2) => Number.isFinite(v) ? v.toFixed(d) : '–';
 // ---------------------------------------------------------------- state
 let presets = [];
 let planet = null;
-let env = 'land';
+let env = 'land';             // environment of the current replay's scene
 let episode = 8;
 let runId = 0;
 let paused = false;
-let dirty = false;
-let GRID = 6;
-let history = [];
 let worker = null;
 let activeRun = { planet: null, env: 'land' };
-let pendingChampion = null;
-let champion = null;          // { genome, result, generation_born, planet, env }
+let pendingChampion = null;   // next body to replay: { genome, planet, env, lineage }
 let replay = null;            // ReplaySim
 let replayMeta = null;
 let speed = 1;
 let accumulator = 0;
 let lastFrame = performance.now();
-let mode = 'archive';
-let viewMode = 'globe';     // ecology mode: 'globe' | 'creature'
+let viewMode = 'globe';       // 'globe' | 'creature'
 let ecoSnap = null;
 let ecoHistory = [];
 let selectedLineage = null;
-let archiveRunning = false;
 
 // ---------------------------------------------------------------- dials
 const DIALS = [
@@ -324,7 +281,7 @@ function buildDials() {
       $('preset').value = 'custom';
       refreshDials();
       refreshDerived();
-      if (mode === 'ecology') { applyPlanetLive(); } else { dirty = true; $('pendingNote').classList.remove('hidden'); }
+      applyPlanetLive();
     });
   }
   refreshDials();
@@ -370,7 +327,7 @@ function startWorker() {
   worker = new Worker('./worker.js', { type: 'module' });
   worker.onmessage = (e) => {
     const m = e.data;
-    if (m.type === 'ready') { restartEvolution(); return; }
+    if (m.type === 'ready') { restartEcology(); return; }
     if (m.runId !== runId) return;
     if (m.type === 'eco_terrain') { buildTerrain(m.terrain); return; }
     if (m.type === 'eco_snap') { ecoSnap = m.snap; ecoHistory = m.history; renderEco(m.dps); return; }
@@ -383,41 +340,17 @@ function startWorker() {
       if (m.rep) { showPlant(m.rep, m.lineage); setViewMode('creature'); }
       return;
     }
-    if (m.type === 'gen') {
-      history.push(m.summary.best_fitness);
-      if (history.length > 300) history.shift();
-      renderEvo(m.summary, m.grid);
-    } else if (m.type === 'champion') {
-      const c = { ...m.champion, planet: activeRun.planet, env: activeRun.env };
-      if ($('followNew').checked || !champion) pendingChampion = c;
-      champion = c;
-    }
   };
   worker.onerror = (e) => { setStatus(`Worker error: ${e.message}`); };
 }
-function restartEvolution() {
-  if (mode === 'ecology') { restartEcology(); return; }
-  runId += 1;
-  dirty = false;
-  archiveRunning = true;
-  $('pendingNote').classList.add('hidden');
-  history = [];
-  activeRun = { planet: JSON.parse(JSON.stringify(planet)), env };
-  worker.postMessage({ type: 'start', runId, planet: activeRun.planet, env, episode, batch: 16, seed: Math.floor(Math.random() * 1e9) });
-  setStatus('Generation 0 · evaluating first batch…');
-  $('evoNote').textContent = `${activeRun.planet.name} · ${env === 'air' ? 'Air drop' : env[0].toUpperCase() + env.slice(1)}`;
-  kv($('evo'), [['Generation', '0'], ['Best fitness', '–']]);
-  drawGrid(null);
-  drawSpark();
-}
 
-// In ecology mode the dials act on the running world: sea level, climate,
-// gravity and air change under the living planet (debounced per slider drag).
+// The dials act on the running world: sea level, climate, gravity and air
+// change under the living planet (debounced per slider drag).
 let planetLiveTimer = null;
 function applyPlanetLive() {
   clearTimeout(planetLiveTimer);
   planetLiveTimer = setTimeout(() => {
-    if (mode !== 'ecology' || !worker) return;
+    if (!worker) return;
     activeRun.planet = JSON.parse(JSON.stringify(planet));
     const detail = (window.innerWidth < 700) ? 5 : 6;
     worker.postMessage({ type: 'eco_planet', planet: activeRun.planet, detail });
@@ -428,9 +361,6 @@ function applyPlanetLive() {
 
 function restartEcology() {
   runId += 1;
-  dirty = false;
-  archiveRunning = false;
-  $('pendingNote').classList.add('hidden');
   ecoSnap = null; ecoHistory = []; selectedLineage = null; terrain = null;
   activeRun = { planet: JSON.parse(JSON.stringify(planet)), env: 'land' };
   const patches = parseInt($('gridSel').value, 10);
@@ -440,21 +370,8 @@ function restartEcology() {
   $('ecoNote').textContent = `${activeRun.planet.name} · ${patches} patches`;
   kv($('ecoStats'), [['Day', '0']]);
   $('lineages').querySelector('tbody').innerHTML = '';
-}
-
-function setMode(m) {
-  if (m === mode) return;
-  mode = m;
-  document.querySelectorAll('#modeSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
-  const eco = m === 'ecology';
-  $('ecoPanel').hidden = !eco; $('mapPanel').hidden = !eco; $('viewSeg').hidden = !eco;
-  $('evoPanel').hidden = eco; $('envSeg').hidden = eco; $('liveNote').hidden = !eco;
-  if (eco) setViewMode('globe');
+  setViewMode('globe');
   if (lastDerived) updateSceneLook(lastDerived);
-  $('champTitle').textContent = eco ? 'Selected lineage' : 'Champion';
-  $('followNew').parentElement.hidden = eco;
-  if (eco) restartEcology();
-  else restartEvolution();
 }
 
 // ---------------------------------------------------------------- ecology rendering
@@ -621,51 +538,7 @@ function setLinFilter(patch) {
 document.querySelectorAll('#linFilter .seg button').forEach((b) => b.addEventListener('click', () => setLinFilter({ [b.closest('.seg').dataset.filter]: b.dataset.v })));
 $('linSort').addEventListener('change', () => setLinFilter({ sort: $('linSort').value }));
 function setStatus(html) { $('status').innerHTML = `<span class="stat">${html}</span>`; }
-
-function renderEvo(s, grid) {
-  setStatus(`gen <b>${s.generation}</b> · best <b>${fmt(s.best_fitness, 2)}</b> · <b>${fmt(s.evals_per_second, 1)}</b> evals/s`);
-  kv($('evo'), [
-    ['Generation', `${s.generation} (${s.evaluations} evaluations)`],
-    ['Best fitness', `${fmt(s.best_fitness, 3)} (batch ${fmt(s.batch_best, 3)})`],
-    ['Archive cells', `${s.occupied_cells} / ${GRID * GRID} · nursery ${s.nursery_size}`],
-    ['Throughput', `${fmt(s.evals_per_second, 1)} evals/s · exploded ${s.exploded_in_batch}`, s.exploded_in_batch > 3 ? 'warn' : ''],
-  ]);
-  drawGrid(grid);
-  drawSpark();
-}
-
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-function drawGrid(grid) {
-  const c = $('grid'); const ctx = c.getContext('2d');
-  const n = GRID; const cell = c.width / n;
-  ctx.clearRect(0, 0, c.width, c.height);
-  const empty = cssVar('--grid-empty');
-  const accent = new THREE.Color(cssVar('--accent'));
-  const teal = new THREE.Color(cssVar('--teal'));
-  const max = grid ? Math.max(0.001, ...grid.filter((x) => x != null)) : 1;
-  for (let r = 0; r < n; r++) for (let col = 0; col < n; col++) {
-    const v = grid ? grid[r * n + col] : null;
-    // Rows: small part counts at the bottom.
-    const y = (n - 1 - r) * cell;
-    if (v == null) { ctx.fillStyle = empty; }
-    else { const t = Math.pow(v / max, 0.6); const k = teal.clone().lerp(accent, t); ctx.fillStyle = '#' + k.getHexString(); }
-    ctx.beginPath(); ctx.roundRect(col * cell + 2, y + 2, cell - 4, cell - 4, 4); ctx.fill();
-  }
-}
-function drawSpark() {
-  const c = $('spark'); const dpr = window.devicePixelRatio || 1;
-  const w = c.clientWidth || 300, h = 44;
-  c.width = w * dpr; c.height = h * dpr;
-  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
-  if (history.length < 2) { ctx.fillStyle = cssVar('--fg-muted'); ctx.font = '11px ' + cssVar('--mono'); ctx.fillText('best fitness per generation', 0, 12); return; }
-  const max = Math.max(...history) || 1;
-  ctx.strokeStyle = cssVar('--accent'); ctx.lineWidth = 1.5; ctx.beginPath();
-  history.forEach((v, i) => { const x = (i / (history.length - 1)) * (w - 2) + 1; const y = h - 3 - (v / max) * (h - 8); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-  ctx.stroke();
-  ctx.fillStyle = cssVar('--accent'); ctx.beginPath(); ctx.arc(w - 1, h - 3 - (history[history.length - 1] / max) * (h - 8), 2.5, 0, 7); ctx.fill();
-  ctx.fillStyle = cssVar('--fg-muted'); ctx.font = '11px ' + cssVar('--mono'); ctx.fillText(fmt(max, 2), 0, 10);
-}
 
 // ---------------------------------------------------------------- three.js scene
 const canvas = $('gl');
@@ -796,7 +669,7 @@ function showPlant(rep, lineage) {
 let azimuth = 0.9, elevation = 0.3, zoom = 1;
 let drag = null, pinch = null;
 canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); if (drag && drag.id !== e.pointerId) { pinch = { ids: [drag.id, e.pointerId], pts: { [drag.id]: { x: drag.x, y: drag.y }, [e.pointerId]: { x: e.clientX, y: e.clientY } }, zoom }; } else drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; });
-const globeView = () => mode === 'ecology' && viewMode === 'globe';
+const globeView = () => viewMode === 'globe';
 function applyZoom(f) {
   if (globeView()) globeZoom = Math.min(2.2, Math.max(0.55, globeZoom * f));
   else zoom = Math.min(3, Math.max(0.4, zoom * f));
@@ -841,9 +714,8 @@ function resize() {
 // Audit hook: replay any genome in the 3D view (used by the screenshot checks).
 window.evoDebug = {
   replayGenome: (genomeJson, env) => {
-    setMode('archive');
-    setViewMode && setViewMode('creature');
-    startReplay({ genome: JSON.parse(genomeJson), planet, env, result: null, generation_born: 0, lineage: 0 });
+    setViewMode('creature');
+    startReplay({ genome: JSON.parse(genomeJson), planet, env, lineage: 0 });
   },
   replayTime: () => (replay ? replay.time() : -1),
   setZoom: (z) => { zoom = z; },
@@ -871,8 +743,8 @@ function startReplay(c) {
 }
 function renderChampion() {
   const c = replayMeta; if (!c || !replay) return;
-  const r = c.result;
-  $('champBorn').textContent = r ? `born generation ${c.generation_born} · ${c.planet.name} · ${c.env}` : `lineage ${c.lineage} · ${c.planet.name} · ${c.env} · most prolific member`;
+  const g = c.genome;
+  $('champBorn').textContent = `lineage ${c.lineage} · ${c.planet.name} · ${c.env} · most prolific member`;
   kv($('champ'), [
     ['Parts / membranes', `${replay.part_count()} / ${replay.membrane_count()}`],
     ['Mass', `${fmt(replay.total_mass(), 1)} kg`],
@@ -880,8 +752,7 @@ function renderChampion() {
     ['Lung gene → O₂ fatigue', `${fmt(replay.lung_frac() * 100, 1)} % → ×${fmt(replay.fatigue(), 2)}`, replay.fatigue() < 0.6 ? 'warn' : ''],
     ['Water store → hydration', `${fmt(replay.water_store() * 100, 1)} % → ×${fmt(replay.hydration(), 2)}`, replay.hydration() < 0.8 ? 'warn' : ''],
     ['Base frequency', `${fmt(replay.base_freq(), 2)} Hz`],
-    r ? ['Scored', `fitness ${fmt(r.fitness, 3)} · ${fmt(r.distance, 2)} m · airborne ${fmt(r.airborne_frac * 100, 0)} %`]
-      : ['Diet', (() => { const g = c.genome; const cc = Math.min(1, g.diet_carn || 0), dd = Math.min(1, g.diet_detr || 0); const s = cc + dd; const [c2, d2] = s > 1 ? [cc / s, dd / s] : [cc, dd]; return `herb ${fmt(1 - c2 - d2, 2)} · carn ${fmt(c2, 2)} · detr ${fmt(d2, 2)}`; })()],
+    ['Genes', `motility ${fmt(g.motility, 2)} · heterotrophy ${fmt(g.heterotrophy, 2)} · breathing ${fmt(g.breathing, 2)} (0 gills, 1 lungs) · gut type ${fmt(g.gut_type, 2)}`],
   ]);
 }
 
@@ -1001,12 +872,11 @@ function pollGamepad(dt) {
   else if (held) { gpRepeat -= dt; if (gpRepeat <= 0) { gpRepeat = 0.16; fireNav(held); } }
   function fireNav(h) { if (h === 'up') gpMove(-1); else if (h === 'down') gpMove(1); else gpAdjust(h === 'left' ? -1 : 1); }
   if (edge(0)) gpActivate();
-  if (edge(1)) { if (mode === 'ecology') setViewMode('globe'); }
+  if (edge(1)) setViewMode('globe');
   if (edge(2)) $('pauseBtn').click();
-  if (edge(3)) setMode(mode === 'ecology' ? 'archive' : 'ecology');
+  if (edge(3) || edge(8)) setViewMode(viewMode === 'globe' ? 'creature' : 'globe');
   if (edge(4) || edge(5)) { const sel = $('preset'); const n = presets.length; let i = sel.value === 'custom' ? 0 : parseInt(sel.value, 10); i = (i + (edge(5) ? 1 : -1) + n) % n; sel.value = String(i); sel.dispatchEvent(new Event('change')); }
   if (edge(9)) $('applyBtn').click();
-  if (edge(8) && mode === 'ecology') setViewMode(viewMode === 'globe' ? 'creature' : 'globe');
   // Right stick: orbit / spin. Triggers: zoom.
   const rx = Math.abs(ax[2] || 0) > 0.15 ? ax[2] : 0, ry = Math.abs(ax[3] || 0) > 0.15 ? ax[3] : 0;
   if (rx || ry) {
@@ -1024,17 +894,11 @@ document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('cli
   speed = parseFloat(b.dataset.speed);
   document.querySelectorAll('[data-speed]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
 }));
-$('envSeg').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-  env = b.dataset.env; $('envSeg').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-  restartEvolution();
-}));
-$('applyBtn').addEventListener('click', restartEvolution);
-document.querySelectorAll('#modeSeg button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+$('applyBtn').addEventListener('click', restartEcology);
 document.querySelectorAll('#viewSeg button').forEach((b) => b.addEventListener('click', () => setViewMode(b.dataset.view)));
 $('immBtn').addEventListener('click', () => worker.postMessage({ type: 'eco_immigrate', count: 10 }));
-$('gridSel').addEventListener('change', () => { if (mode === 'ecology') restartEcology(); });
+$('gridSel').addEventListener('change', restartEcology);
 $('pauseBtn').addEventListener('click', () => { paused = !paused; $('pauseBtn').setAttribute('aria-pressed', String(paused)); $('pauseBtn').textContent = paused ? 'Resume' : 'Pause'; worker.postMessage({ type: 'pause', paused }); });
-$('replayBtn').addEventListener('click', () => { if (champion) startReplay(champion); });
 $('copyBtn').addEventListener('click', async () => {
   if (!replayMeta) return;
   const text = JSON.stringify(replayMeta.genome, null, 2);
@@ -1046,18 +910,15 @@ $('preset').addEventListener('change', () => {
   const v = $('preset').value; if (v === 'custom') return;
   planet = JSON.parse(JSON.stringify(presets[parseInt(v, 10)]));
   refreshDials(); refreshDerived();
-  if (mode === 'ecology') applyPlanetLive(); else restartEvolution();
+  applyPlanetLive();
 });
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { drawGrid(null); drawSpark(); });
 
 await init();
-GRID = grid_size();
 presets = JSON.parse(presets_json());
 planet = JSON.parse(JSON.stringify(presets[0]));
 $('preset').innerHTML = presets.map((p, i) => `<option value="${i}">${p.name}</option>`).join('') + '<option value="custom">Custom</option>';
 buildDials();
 refreshDerived();
-drawGrid(null); drawSpark();
 startWorker();
 requestAnimationFrame(frame);
 </script>

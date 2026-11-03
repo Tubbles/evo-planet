@@ -104,7 +104,6 @@ pub const WATER_DEPTH: f32 = 12.0;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct EpisodeResult {
-    pub fitness: f32,
     pub distance: f32,
     pub airborne_frac: f32,
     pub time_aloft: f32,
@@ -771,23 +770,7 @@ impl CreatureSim {
         } else {
             0.0
         };
-        let fitness = if self.exploded {
-            0.0
-        } else {
-            match self.env {
-                Environment::Land => distance * self.hydration,
-                Environment::Water => distance,
-                Environment::Shore => self.shore_best * self.hydration,
-                Environment::Air => {
-                    // Horizontal distance dominates so gliders beat parachutes;
-                    // time aloft still rewards slowing the fall as a first step.
-                    let d = (self.landing_distance.unwrap_or(distance) - ballistic_distance(-self.gravity.y)).max(0.0);
-                    (d + 0.25 * self.time_aloft) * self.hydration
-                }
-            }
-        };
         EpisodeResult {
-            fitness: fitness.max(0.0),
             distance,
             airborne_frac,
             time_aloft: self.time_aloft,
@@ -843,8 +826,8 @@ mod tests {
             let g = Genome::random(seed);
             let a = CreatureSim::run_episode(decode(&g), &planet, Environment::Land, cfg);
             let b = CreatureSim::run_episode(decode(&g), &planet, Environment::Land, cfg);
-            assert!(a.fitness.is_finite());
-            assert_eq!(a.fitness.to_bits(), b.fitness.to_bits(), "non-deterministic for seed {seed}");
+            assert!(a.distance.is_finite());
+            assert_eq!(a.distance.to_bits(), b.distance.to_bits(), "non-deterministic for seed {seed}");
         }
     }
 
