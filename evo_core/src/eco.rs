@@ -69,6 +69,8 @@ pub const LETHAL_WATER_LOSS: f32 = 0.15;
 /// kilogram of dry food eaten.
 pub const WATER_PER_KG_PLANT: f32 = 4.0;
 pub const WATER_PER_KG_MEAT: f32 = 2.5;
+/// Dew per square metre of surface on a fully humid night, kg.
+pub const DEW_KG_PER_M2: f32 = 0.2;
 /// Growth yield of decomposers on dead matter (fraction becoming bacteria).
 pub const BACTERIAL_YIELD: f32 = 0.4;
 /// Phagocytosis: fraction of the suspended particles passing a surface that
@@ -1206,9 +1208,18 @@ impl EcoWorld {
         // beds beneath them. Their leaf area per patch sets the light left for
         // the plants and each sheet's share of the surface light.
         let mut motile_area: Vec<f32> = vec![0.0; n_patches];
+        // Photosynthesising mass per cell, plant and mat, for the nutrient share
+        // every photosynthesiser in the cell gets (the same rule for both).
+        let mut photo_mass: Vec<f32> = vec![0.0; n_patches];
         for a in &self.animals {
             let lin = (a.mass / a.traits.mass.max(1e-6)).clamp(0.01, 1.0).powf(1.0 / 3.0);
             motile_area[a.patch] += a.traits.membrane_area * lin * lin;
+            if a.traits.membrane_area > 0.0 && a.genome.heterotrophy < 1.0 {
+                photo_mass[a.patch] += a.mass;
+            }
+        }
+        for p in &self.plants {
+            photo_mass[p.patch] += p.biomass;
         }
         let mut seeds: Vec<(Genome, u32, usize, f32, Option<PlantBody>)> = Vec::new();
         let mut dead_plants: Vec<usize> = Vec::new();
@@ -1570,7 +1581,13 @@ impl EcoWorld {
                     // its share by area, so a crowded surface is a dim one.
                     let mat = self.patches[patch].motile_area.max(leaf_now);
                     let intercepted = light * a_area * (0.3 * sub + (1.0 - sub)) * (1.0 - (-0.5 * mat / a_area).exp());
-                    let photo = (1.0 - 0.6 * het) * intercepted * (leaf_now / mat) * 0.02 * cf * tf;
+                    // The same nutrient limit a plant has: the cell's nutrient
+                    // against the demand of everything photosynthesising in it.
+                    let demand = photo_mass[patch] * 0.002;
+                    let share = if demand > 0.0 { (self.patches[patch].nutrient / demand).min(1.0) } else { 1.0 };
+                    let photo = (1.0 - 0.6 * het) * intercepted * (leaf_now / mat) * 0.02 * cf * tf * (0.3 + 0.7 * share);
+                    let used = (photo * 0.03).min(self.patches[patch].nutrient);
+                    self.patches[patch].nutrient -= used;
                     delta += photo;
                     production_today += photo;
                 }
@@ -1917,11 +1934,15 @@ impl EcoWorld {
                 let surface = (6.0 * (a.mass / 1000.0).powf(2.0 / 3.0)).max(2.0 * a.traits.membrane_area * (a.mass / a.traits.mass.max(1e-3)).powf(2.0 / 3.0));
                 let loss = surface * EVAPORATION_KG_PER_M2_DAY * (1.0 - sub) * (1.0 - moisture) * (0.5 + tf) * (1.0 - 0.95 * waterproof);
                 let food_water = food_plant * WATER_PER_KG_PLANT + (food_carrion + food_meat) * WATER_PER_KG_MEAT;
-                a.water = (a.water - loss + food_water).min(0.0);
-                // Drinking: in or beside water the deficit is made up; on land
-                // the patch's wetness (dew, pools, streams) covers that share.
-                let drink = if sub > 0.0 { 1.0 } else { moisture };
-                a.water *= 1.0 - drink;
+                // Dew settles on the body's own surface in proportion to the
+                // air's moisture: a tenth of a millimetre or so a night.
+                let dew = surface * DEW_KG_PER_M2 * moisture * (1.0 - sub);
+                a.water = (a.water - loss + food_water + dew).min(0.0);
+                // Open water, in it or beside it, is drunk to the fill. Humid
+                // ground is not a drink: inland the water is in the food.
+                if sub > 0.0 {
+                    a.water = 0.0;
+                }
             }
 
             // --- movement: when hungry, toward the best reachable neighbour --------
