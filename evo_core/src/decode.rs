@@ -11,8 +11,12 @@ use std::f32::consts::PI;
 pub const MAX_PARTS: usize = 24;
 pub const MAX_DEPTH: usize = 14;
 pub const MEMBRANE_THICKNESS: f32 = 0.02;
-/// Membrane areal density: 1.5 kg per m^2 of panel (thin skin and spars).
-pub const MEMBRANE_AREAL_DENSITY: f32 = 1.5;
+/// A sheet's thickness comes from its `r1` gene, the same mapping the plant
+/// decoder uses for leaves (0.1-2 mm), times tissue density: 0.1-2 kg/m^2.
+/// A bird's wing with its bone is about 1 kg/m^2; an alga sheet a tenth.
+pub fn sheet_thickness(r1: f32) -> f32 {
+    (r1 * 0.002).clamp(0.0001, 0.002)
+}
 /// Muscle strength per unit cross-section (N*m per m^2 of limb section).
 pub const STRENGTH_PER_AREA: f32 = 4000.0;
 /// Animal tissue is water-dense and not evolvable; the genome's density gene
@@ -60,6 +64,8 @@ pub struct Phenotype {
     pub base_freq: f32,
     pub total_mass: f32,
     pub membrane_area: f32,
+    /// Mass held in sheets (flat share of each part), kg.
+    pub membrane_mass: f32,
     pub torso_volume: f32,
     pub total_section_area: f32,
 }
@@ -140,7 +146,7 @@ impl<'a> Ctx<'a> {
         let r_cap = 0.5 * (r0 + r1);
         let radius = (1.0 - flat) * r_cap + flat * r0;
         let cap_vol = capsule_volume(len, r_cap);
-        let sheet_mass = len * 2.0 * r0 * MEMBRANE_AREAL_DENSITY;
+        let sheet_mass = len * 2.0 * r0 * sheet_thickness(node.r1 * scale) * ANIMAL_DENSITY;
         let mass = (1.0 - flat) * cap_vol * ANIMAL_DENSITY + flat * sheet_mass;
         let tissue_vol = (1.0 - flat) * cap_vol + flat * sheet_mass / ANIMAL_DENSITY;
         let density = mass / tissue_vol.max(1e-9);
@@ -232,7 +238,7 @@ pub fn decode(g: &Genome) -> Phenotype {
         let r_cap = 0.5 * (parts[0].r0 + parts[0].r1);
         let v = capsule_volume(parts[0].len, r_cap);
         let torso_density = ANIMAL_DENSITY * (1.0 - 0.9 * lung) * (1.0 + water);
-        let sheet_mass = parts[0].len * 2.0 * parts[0].r0 * MEMBRANE_AREAL_DENSITY;
+        let sheet_mass = parts[0].len * 2.0 * parts[0].r0 * sheet_thickness(parts[0].r1) * ANIMAL_DENSITY;
         let mass = (1.0 - f) * v * torso_density + f * sheet_mass;
         let vol = (1.0 - f) * v + f * sheet_mass / ANIMAL_DENSITY;
         parts[0].mass = mass;
@@ -256,6 +262,7 @@ pub fn decode(g: &Genome) -> Phenotype {
     let total_mass = parts.iter().map(|p| p.mass).sum();
     let membrane_area: f32 = parts.iter().map(|p| p.flat * p.len * 2.0 * p.r0).sum::<f32>().max(0.0);
     let total_section_area = parts.iter().skip(1).map(|p| p.section_area).sum();
+    let membrane_mass: f32 = parts.iter().map(|p| p.mass * p.flat).sum();
     Phenotype {
         parts,
         lung_frac: lung,
@@ -263,6 +270,7 @@ pub fn decode(g: &Genome) -> Phenotype {
         base_freq: g.base_freq,
         total_mass,
         membrane_area,
+        membrane_mass,
         torso_volume,
         total_section_area,
     }

@@ -148,6 +148,8 @@ pub struct Traits {
     pub section_area: f32,
     pub base_freq: f32,
     pub membrane_area: f32,
+    /// Mass held in sheets at adult size, kg.
+    pub membrane_mass: f32,
     pub measured_land: bool,
     pub measured_water: bool,
     pub measured_air: bool,
@@ -241,8 +243,12 @@ impl Animal {
         (0.5 - 0.35 * g, 0.45 + 0.45 * g)
     }
 
+    /// Lifespan on the motility continuum: a sessile organism's lifespan gene
+    /// (days) blending into the animal's 150·M^0.25·longevity as it moves.
     pub fn lifespan(&self) -> f32 {
-        150.0 * self.traits.mass.max(0.01).powf(0.25) * self.genome.longevity.max(0.1)
+        let m = self.genome.motility.clamp(0.0, 1.0);
+        let animal = 150.0 * self.traits.mass.max(0.01).powf(0.25) * self.genome.longevity.max(0.1);
+        (1.0 - m) * self.genome.lifespan.max(1.0) + m * animal
     }
 }
 
@@ -644,6 +650,7 @@ impl EcoWorld {
                 .sum::<f32>(),
             base_freq: pheno.base_freq,
             membrane_area: pheno.membrane_area,
+            membrane_mass: pheno.membrane_mass,
             reach: bm.reach,
             mouth_area: bm.mouth_area,
             claws: bm.claws,
@@ -1098,7 +1105,9 @@ impl EcoWorld {
                         }
                     }
                 }
-                if p.energy < -p.biomass * 0.3 || p.age > p.genome.lifespan {
+                let m = p.genome.motility.clamp(0.0, 1.0);
+                let lifespan = (1.0 - m) * p.genome.lifespan.max(1.0) + m * 150.0 * p.body().target_mass.max(0.01).powf(0.25) * p.genome.longevity.max(0.1);
+                if p.energy < -p.biomass * 0.3 || p.age > lifespan {
                     dead_plants.push(i);
                 }
             }
@@ -1272,7 +1281,7 @@ impl EcoWorld {
             // tissue at 0.05%/day for a plant's wood rising to 0.3%/day for a fully
             // motile body (muscle tone, nerves, osmoregulation), with Q10 and the
             // oxygen limit. Locomotion is charged separately as the work done.
-            let membrane_mass = (membrane_area * lin_f * lin_f * crate::decode::MEMBRANE_AREAL_DENSITY).min(mass);
+            let membrane_mass = (self.animals[ai].traits.membrane_mass * size_f).min(mass);
             let fmr = (membrane_mass * 0.004 + (mass - membrane_mass) * (0.0005 + 0.0025 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3);
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
             // Short of oxygen, the muscles cannot be kept working all day.
@@ -1713,7 +1722,10 @@ impl EcoWorld {
                     a.reserve -= grow;
                     surplus -= grow;
                 }
-                let mature = a.mass >= a.genome.maturity_frac.clamp(0.2, 0.98) * adult_mass;
+                // One gene for both kingdoms: reproduce at this fraction of full
+                // size (the plant's repro_frac), so a sheet that turns motile keeps
+                // the maturity its line evolved.
+                let mature = a.mass >= a.genome.repro_frac.clamp(0.1, 0.98) * adult_mass;
                 if mature {
                     let mass0 = (a.genome.offspring_frac.clamp(0.01, 0.5) * adult_mass).max(0.001);
                     let cost = mass0 * 1.3; // body plus a starter reserve

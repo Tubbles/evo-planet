@@ -17,14 +17,14 @@ fn main() {
                     pt.water, pt.submersion, pt.light_left, pt.bacteria, pt.dead_matter, w.plants.iter().filter(|p| p.patch == a.patch).count());
             }
         }
-        if shown < 90 {
+        if shown < 400 {
             for (k, lin) in &followed {
                 if let Some(a) = w.animals.iter().find(|a| a.key == *k) {
-                    println!("  day {d} lin {lin}: mass {:.4} reserve {:.4} gross intake {:.5} ate plant {:.4} carrion {:.4} age {:.0} patch {} water_speed {:.3}", a.mass, a.reserve, a.intake_rate, a.ate_plant, a.ate_carrion, a.age, a.patch, a.traits.water_speed);
+                    if (a.age as u32) % 25 == 1 { println!("  day {d} lin {lin}: mass {:.4}/{:.3} reserve {:.4} gross intake {:.5} offspring {} age {:.0}/{:.0} repro_frac {:.2} water_speed {:.3}", a.mass, a.traits.mass, a.reserve, a.intake_rate, a.offspring, a.age, a.lifespan(), a.genome.repro_frac, a.traits.water_speed); }
                     shown += 1;
                 }
             }
         }
-        if followed.len() >= 3 && shown >= 90 { break; }
+        if followed.len() >= 3 && shown >= 400 { break; }
     }
 }

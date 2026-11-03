@@ -559,7 +559,25 @@ photosynthesises like the plant beside it. The microbial loop itself was
 not the blocker: 25 g of bacteria per 200 m³ patch is in the real range,
 and the seed with a little heterotrophy was already taking 1.5 g a day
 from it. With the ledger fixed, the followed seed grew from 37 g to 78 g
-in its first 80 days with its reserve rising. The 5000-day run is below. The remaining
+in its first 80 days with its reserve rising. The 5000-day run after
+that: 28 motile seeds, three to five alive at a time, none established.
+They grew but never bred: the animal side gated reproduction on a
+maturity gene the plant side never selects (0.7 of full size) and gave a
+770 g sheet a 140-day life, so it died of age a decade short of maturity.
+Two more switches removed: reproduction uses the one gene both kingdoms
+have (the plant's repro_frac, the fraction of full size at which to
+breed), and lifespan blends the sessile lifespan gene into the animal's
+150·M^0.25·longevity by motility. That run: six motile seeds, none
+established, and the ledger showed why: a 1.85 m² sheet weighed 57 g in
+the plant decoder (0.12 mm thick, dry) and 2.4 kg in the animal decoder
+(a fixed 1.5 kg/m² "skin and spars" for wings), so the same genome had
+forty times the body to grow and maintain the moment it moved. One
+thickness gene now sets a sheet's mass in both decoders (0.1-2 mm of
+tissue; a bird's wing with bone is about 1 kg/m², an alga a tenth of
+that). With that, the followed seed grew from 35 g to its 305 g adult
+size in a hundred days and had ten offspring, themselves born motile:
+the first heterotroph lineage to establish from algae. The 5000-day and
+6000-day runs after it are recorded below. The remaining
 switch is in the code, not the biology: an organism is ticked as a plant
 below motility 0.5 and as a mover above it, because the two have different
 data structures. Nothing it pays or earns jumps at that line.
