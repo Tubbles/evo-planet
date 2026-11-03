@@ -459,6 +459,19 @@ pub struct TerrainMesh {
     pub patch_water: Vec<u8>,
 }
 
+/// A pair of creature types waiting for the arena: the two bodies that met
+/// first stand for their lineages, with the turn signs their tests gave.
+#[derive(Clone, Debug)]
+struct ArenaRequest {
+    pred: u32,
+    prey: u32,
+    env: Environment,
+    genome_pred: Genome,
+    genome_prey: Genome,
+    sign_pred: f32,
+    sign_prey: f32,
+}
+
 pub struct EcoWorld {
     pub planet: PlanetParams,
     pub derived: Derived,
@@ -474,15 +487,14 @@ pub struct EcoWorld {
     next_lineage: u32,
     trait_cache: HashMap<String, Traits>,
     pending: Vec<(usize, Environment)>,
-    /// Genome behind each body key, so a cached body type can be rebuilt
-    /// for the arena.
-    body_genomes: HashMap<String, Genome>,
-    /// Fought-out outcomes per (predator type, prey type, medium): the
-    /// shares of eaten, fled and survived over `arena::BOUTS` bouts.
-    arena_cache: HashMap<(String, String, Environment), crate::arena::ArenaOutcome>,
-    /// Pairs that met and have not been fought yet, in meeting order.
-    arena_pending: Vec<(String, String, Environment)>,
-    arena_seen: HashSet<(String, String, Environment)>,
+    /// Fought-out outcomes per (predator lineage, prey lineage, medium): the
+    /// shares of eaten, fled and survived over `arena::BOUTS` bouts. The
+    /// lineage is the "creature type"; the bodies that first met stand for it.
+    arena_cache: HashMap<(u32, u32, Environment), crate::arena::ArenaOutcome>,
+    /// Pairs whose first attack has happened and that have not been fought
+    /// yet, in order of first attack.
+    arena_pending: Vec<ArenaRequest>,
+    arena_seen: HashSet<(u32, u32, Environment)>,
     pub stats: EcoStats,
     pub history: Vec<[f32; 7]>,
 }
@@ -563,7 +575,6 @@ impl EcoWorld {
             next_lineage: 1,
             trait_cache: HashMap::new(),
             pending: Vec::new(),
-            body_genomes: HashMap::new(),
             arena_cache: HashMap::new(),
             arena_pending: Vec::new(),
             arena_seen: HashSet::new(),
@@ -852,7 +863,6 @@ impl EcoWorld {
             }
             let genome = self.animals[idx].genome.clone();
             let key = self.animals[idx].key.clone();
-            self.body_genomes.entry(key.clone()).or_insert_with(|| genome.clone());
             let mut traits = self.trait_cache.get(&key).copied().unwrap_or(self.animals[idx].traits);
             let already = match env {
                 Environment::Water => traits.measured_water,
@@ -969,30 +979,22 @@ impl EcoWorld {
                 }
             }
         }
-        // Then the arena: pairs of body types that met and were not yet
-        // fought out. A pair costs `PAIR_COST` units of the same budget.
-        while done + crate::arena::PAIR_COST <= budget.max(if self.pending.is_empty() { crate::arena::PAIR_COST } else { 0 }) {
-            let Some(pair) = self.arena_pending.pop() else { break };
-            if self.arena_cache.contains_key(&pair) {
+        // Then the arena: pairs of creature types whose first attack has
+        // happened and that were not yet fought out. A pair costs
+        // `PAIR_COST` units of the same budget, and at most one pair a day
+        // runs when bodies are still waiting.
+        let arena_budget = if self.pending.is_empty() { budget.max(crate::arena::PAIR_COST) } else { budget };
+        while done + crate::arena::PAIR_COST <= arena_budget {
+            let Some(req) = self.arena_pending.pop() else { break };
+            let key = (req.pred, req.prey, req.env);
+            if self.arena_cache.contains_key(&key) {
                 continue;
             }
-            let (Some(gp), Some(gq)) = (self.body_genomes.get(&pair.0), self.body_genomes.get(&pair.1)) else { continue };
-            let pp = decode(gp);
-            let pq = decode(gq);
-            let (sp, sq) = {
-                let tp = self.trait_cache.get(&pair.0).copied().unwrap_or_default();
-                let tq = self.trait_cache.get(&pair.1).copied().unwrap_or_default();
-                if pair.2 == Environment::Water { (tp.turn_sign_water, tq.turn_sign_water) } else { (tp.turn_sign_land, tq.turn_sign_land) }
-            };
-            let seed = {
-                use std::hash::{Hash, Hasher};
-                let mut h = std::collections::hash_map::DefaultHasher::new();
-                pair.0.hash(&mut h);
-                pair.1.hash(&mut h);
-                h.finish()
-            };
-            let out = crate::arena::run_pair(&pp, &pq, &self.planet, pair.2, sp, sq, seed);
-            self.arena_cache.insert(pair, out);
+            let pp = decode(&req.genome_pred);
+            let pq = decode(&req.genome_prey);
+            let seed = (req.pred as u64) << 32 | req.prey as u64;
+            let out = crate::arena::run_pair(&pp, &pq, &self.planet, req.env, req.sign_pred, req.sign_prey, seed);
+            self.arena_cache.insert(key, out);
             self.stats.arena_pairs = self.arena_cache.len();
             done += crate::arena::PAIR_COST;
         }
@@ -1001,18 +1003,24 @@ impl EcoWorld {
         done
     }
 
-    /// The fought-out outcome for a predator type against a prey type in a
-    /// medium, if the pair has been through the arena; otherwise queue it.
-    fn arena_outcome(&mut self, pred_key: &str, prey_key: &str, env: Environment) -> Option<crate::arena::ArenaOutcome> {
+    /// The fought-out outcome for a predator lineage against a prey lineage
+    /// in a medium, if that pair has been through the arena.
+    fn arena_outcome(&self, pred: u32, prey: u32, env: Environment) -> Option<crate::arena::ArenaOutcome> {
         let env = if env == Environment::Water { Environment::Water } else { Environment::Land };
-        let pair = (pred_key.to_string(), prey_key.to_string(), env);
-        if let Some(o) = self.arena_cache.get(&pair) {
-            return Some(*o);
+        self.arena_cache.get(&(pred, prey, env)).copied()
+    }
+
+    /// Queue a pair for the arena at its first attack, with the two bodies
+    /// that met standing for their lineages.
+    fn arena_request(&mut self, pred_idx: usize, prey_idx: usize, env: Environment) {
+        let env = if env == Environment::Water { Environment::Water } else { Environment::Land };
+        let (a, b) = (&self.animals[pred_idx], &self.animals[prey_idx]);
+        let key = (a.lineage, b.lineage, env);
+        if self.arena_cache.contains_key(&key) || !self.arena_seen.insert(key) {
+            return;
         }
-        if self.arena_seen.insert(pair.clone()) {
-            self.arena_pending.push(pair);
-        }
-        None
+        let (sp, sq) = if env == Environment::Water { (a.traits.turn_sign_water, b.traits.turn_sign_water) } else { (a.traits.turn_sign_land, b.traits.turn_sign_land) };
+        self.arena_pending.push(ArenaRequest { pred: a.lineage, prey: b.lineage, env, genome_pred: a.genome.clone(), genome_prey: b.genome.clone(), sign_pred: sp, sign_prey: sq });
     }
 
     /// Larval drift: a random walk that stays in the birth patch's medium
@@ -1647,8 +1655,7 @@ impl EcoWorld {
                     // body types; until that pair has been through it, the
                     // attack-versus-defence form stands in as the prior.
                     let medium = if sub >= 0.5 || self.patches[prey.patch].water { Environment::Water } else { Environment::Land };
-                    let (my_key, prey_key) = (self.animals[ai].key.clone(), prey.key.clone());
-                    let p_capture = match self.arena_outcome(&my_key, &prey_key, medium) {
+                    let p_capture = match self.arena_outcome(self.animals[ai].lineage, prey.lineage, medium) {
                         Some(o) => o.eaten,
                         None => hump / (1.0 + (-(attack - defence) / scale).exp()),
                     };
@@ -1670,6 +1677,10 @@ impl EcoWorld {
                 if let Some((j, p_success, profitability)) = best {
                     if profitability > alternative_rate {
                         delta -= 0.1 * fmr; // the attempt costs energy either way
+                        // The first real attack between two types sends the pair
+                        // to the arena; later attacks use what it found.
+                        let medium = if sub >= 0.5 || self.patches[self.animals[j].patch].water { Environment::Water } else { Environment::Land };
+                        self.arena_request(ai, j, medium);
                         if self.rng.gen_bool(p_success.clamp(0.0, 1.0) as f64) {
                             let prey_mass = self.animals[j].mass;
                             let prey_reserve = self.animals[j].reserve.max(0.0);
