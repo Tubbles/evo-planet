@@ -272,7 +272,7 @@ impl ArenaSim {
         let steer_q = self.prey.steer_toward(&self.bodies, pred_com, true);
         for (f, steer) in [(&self.pred, steer_p), (&self.prey, steer_q)] {
             let dr = Drive { active: self.settled, steer, bias_shift: 0.0, amp_scale: 1.0 };
-            update_motors(&self.bodies, &mut self.impulse_joints, &f.pheno.parts, &f.handles, &f.joint_handles, f.pheno.base_freq, f.fatigue, self.time, dr);
+            let _ = update_motors(&self.bodies, &mut self.impulse_joints, &f.pheno.parts, &f.handles, &f.joint_handles, f.pheno.base_freq, f.fatigue, self.time, dr);
         }
         apply_fluid_forces(&self.ctx, &mut self.bodies, &self.pred.pheno.parts, &self.pred.handles);
         apply_fluid_forces(&self.ctx, &mut self.bodies, &self.prey.pheno.parts, &self.prey.handles);

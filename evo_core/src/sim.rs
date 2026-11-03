@@ -139,6 +139,25 @@ pub struct EpisodeResult {
     /// Reach as swept: the farthest any part's end got from the centre of
     /// mass during the episode, metres. Measured, not read off the rest pose.
     pub swept_reach: f32,
+    /// Share of settled steps in which the trunk itself touched the ground: 0
+    /// for a body carried on its limbs, 1 for one dragging its belly.
+    pub trunk_contact_frac: f32,
+    /// Footfalls: ground-contact onsets of parts other than the trunk during
+    /// the settled time. A gait is made of these; a tumble or a slide is not.
+    pub footfalls: u32,
+    /// Mean angular speed of the trunk, rad/s: low for a carried trunk, high
+    /// for a body that rolls or tumbles its way forward.
+    pub trunk_spin: f32,
+    /// Mechanical work the joints did during the settled time, joules (the
+    /// absolute value of torque times angular displacement, summed).
+    pub work: f32,
+    /// Cost of transport: work per kilogram per metre of progress, J/(kg m).
+    /// Walking mammals 1 to 5; a thrashing body far more.
+    pub cost_of_transport: f32,
+    /// Energy audit: mechanical energy (kinetic plus potential) gained over
+    /// the settled time minus the work the motors did, joules. Friction and
+    /// drag only remove energy, so anything above zero is a leak.
+    pub energy_leak: f32,
 }
 
 pub struct CreatureSim {
@@ -185,6 +204,12 @@ pub struct CreatureSim {
     yaw_sum: f32,
     yaw_n: u32,
     swept_reach: f32,
+    trunk_contact_steps: u32,
+    part_down: Vec<bool>,
+    footfalls: u32,
+    trunk_spin_sum: f32,
+    work: f32,
+    energy_start: Option<f32>,
 }
 
 fn part_bounding_radius(p: &crate::decode::Part) -> f32 {
@@ -426,7 +451,8 @@ pub fn update_motors(
     fatigue: f32,
     time: f32,
     dr: Drive,
-) {
+) -> f32 {
+    let mut power = 0.0f32;
     let t = time;
     let f = base_freq;
     for i in 1..parts.len() {
@@ -472,8 +498,23 @@ pub fn update_motors(
             j.data.set_motor_max_force(JointAxis::AngZ, strength + rigid);
             j.data.set_motor_position(JointAxis::AngY, t3, stiffness, damping);
             j.data.set_motor_max_force(JointAxis::AngY, strength + rigid);
+            // The torque this motor model applies, and the power it spends:
+            // the joint's angles and rates in its own frame against the targets.
+            if let (Some(b1), Some(b2)) = (bodies.get(j.body1), bodies.get(j.body2)) {
+                let r1 = b1.position().rotation * j.data.local_frame1.rotation;
+                let r2 = b2.position().rotation * j.data.local_frame2.rotation;
+                let rel = r1.inverse() * r2;
+                let ang = rel.scaled_axis();
+                let w = r1.inverse() * (b2.angvel() - b1.angvel());
+                let maxf = strength + rigid;
+                for (target, theta, omega) in [(t1, ang.x, w.x), (t2, ang.z, w.z), (t3, ang.y, w.y)] {
+                    let tau = (stiffness * (target - theta) - damping * omega).clamp(-maxf, maxf);
+                    power += (tau * omega).abs();
+                }
+            }
         }
     }
+    power
 }
 
 /// Fluid, spin, rolling and buoyancy forces on every part of one body.
@@ -661,6 +702,7 @@ impl CreatureSim {
         params.num_solver_iterations = std::num::NonZeroUsize::new(8).unwrap();
 
         let start_com = Vector3::zeros();
+        let n_parts = pheno.parts.len();
         let mut sim = Self {
             bodies,
             colliders,
@@ -700,6 +742,12 @@ impl CreatureSim {
             yaw_sum: 0.0,
             yaw_n: 0,
             swept_reach: 0.0,
+            trunk_contact_steps: 0,
+            part_down: vec![false; n_parts],
+            footfalls: 0,
+            trunk_spin_sum: 0.0,
+            work: 0.0,
+            energy_start: None,
         };
         sim.start_com = sim.com();
         if !sim.settled {
@@ -712,6 +760,24 @@ impl CreatureSim {
             }
         }
         sim
+    }
+
+    /// Kinetic plus gravitational potential energy of the body, joules.
+    pub fn mechanical_energy(&self) -> f32 {
+        let g = -self.gravity.y;
+        let mut e = 0.0;
+        for (i, h) in self.handles.iter().enumerate() {
+            if let Some(rb) = self.bodies.get(*h) {
+                let m = self.pheno.parts[i].mass;
+                let v = rb.linvel();
+                let w = rb.angvel();
+                let inertia = rb.mass_properties().local_mprops.principal_inertia();
+                let w_local = rb.position().rotation.inverse() * w;
+                let rot = 0.5 * (inertia.x * w_local.x * w_local.x + inertia.y * w_local.y * w_local.y + inertia.z * w_local.z * w_local.z);
+                e += 0.5 * m * v.norm_squared() + rot + m * g * rb.translation().y;
+            }
+        }
+        e
     }
 
     pub fn com(&self) -> Vector3<f32> {
@@ -801,7 +867,10 @@ impl CreatureSim {
 
     fn update_motors(&mut self) {
         let drive = Drive { active: self.motors_active(), steer: self.cfg.steer, bias_shift: self.cfg.bias_shift, amp_scale: self.cfg.amp_scale };
-        update_motors(&self.bodies, &mut self.impulse_joints, &self.pheno.parts, &self.handles, &self.joint_handles, self.pheno.base_freq, self.fatigue, self.time, drive);
+        let power = update_motors(&self.bodies, &mut self.impulse_joints, &self.pheno.parts, &self.handles, &self.joint_handles, self.pheno.base_freq, self.fatigue, self.time, drive);
+        if self.settled {
+            self.work += power * self.cfg.dt;
+        }
     }
 
     pub fn world_ctx(&self) -> WorldCtx {
@@ -850,8 +919,32 @@ impl CreatureSim {
 
         if self.settled {
             self.total_steps += 1;
+            if self.energy_start.is_none() {
+                self.energy_start = Some(self.mechanical_energy());
+            }
             let c = self.com();
             self.com_height_sum += c.y - self.ground_at(c.x);
+            // Which parts touch the ground (lowest point within 2 cm of it)?
+            // The trunk touching is belly contact; a limb's touch after being
+            // up is a footfall. The trunk's angular speed is its tumble.
+            for i in 0..self.pheno.parts.len() {
+                let Some(rb) = self.bodies.get(self.handles[i]) else { continue };
+                let p = &self.pheno.parts[i];
+                let iso = rb.position();
+                let half = iso.rotation * Vector3::new(0.0, p.len * 0.5, 0.0);
+                let r = p.radius * (1.0 - p.flat) + 0.5 * MEMBRANE_THICKNESS * p.flat;
+                let low = (iso.translation.vector + half).y.min((iso.translation.vector - half).y) - r;
+                let down = low <= self.ground_at(iso.translation.x) + 0.02;
+                if i == 0 {
+                    if down {
+                        self.trunk_contact_steps += 1;
+                    }
+                    self.trunk_spin_sum += rb.angvel().norm();
+                } else if down && !self.part_down[i] {
+                    self.footfalls += 1;
+                }
+                self.part_down[i] = down;
+            }
             // Reach is what the body sweeps, not what it is drawn as.
             if self.total_steps % 4 == 0 {
                 for (i, h) in self.handles.iter().enumerate() {
@@ -936,6 +1029,19 @@ impl CreatureSim {
             total_mass: self.pheno.total_mass,
             mean_height: if self.total_steps > 0 { self.com_height_sum / self.total_steps as f32 } else { 0.0 },
             swept_reach: self.swept_reach,
+            trunk_contact_frac: if self.total_steps > 0 { self.trunk_contact_steps as f32 / self.total_steps as f32 } else { 0.0 },
+            footfalls: self.footfalls,
+            trunk_spin: if self.total_steps > 0 { self.trunk_spin_sum / self.total_steps as f32 } else { 0.0 },
+            work: self.work,
+            energy_leak: match self.energy_start {
+                Some(e0) => (self.mechanical_energy() - e0) - self.work,
+                None => 0.0,
+            },
+            cost_of_transport: {
+                let g = -self.gravity.y;
+                let d = distance.max(0.05);
+                self.work / (self.pheno.total_mass * g * d)
+            },
             air_distance: self.landing_distance.unwrap_or(distance),
             sustained_speed: match self.mid_com {
                 Some(m) => {
