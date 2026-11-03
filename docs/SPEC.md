@@ -256,6 +256,11 @@ motors off; the air launch has no settling).
 | airborne fraction, time aloft, air distance | share of steps off the ground; seconds before first landing; horizontal distance at first landing |
 | mean height | centre-of-mass height above ground, averaged (uprightness) |
 | swept reach (`swept_reach`) | the farthest any part's end got from the centre of mass during the episode |
+| belly contact (`trunk_contact_frac`) | share of steps in which the trunk touched the ground: 0 carried on limbs, 1 dragging |
+| footfalls, stepping limbs | ground-contact onsets of parts other than the trunk; how many different parts made them |
+| trunk clearance, trunk spin | how high the trunk's lowest point rides (m); the trunk's mean angular speed (rad/s): a tumble or a roll shows here |
+| work, cost of transport | joules the joints did (motor torque against angular rate, each axis, each step); work per kilogram per metre of progress |
+| energy leak | mechanical energy gained minus work, joules: friction and drag only remove energy, so anything above zero is a leak in the physics |
 | shore progress, exploded | beach probe; the run went non-finite or past 60 m/s and is discarded |
 
 ## 5. Measurement, not scoring
@@ -277,6 +282,8 @@ own episodes run.
 | powered lift (`flap_lift`) | air, full stroke | the same body holding its wings | metres of mean height the stroke adds |
 | sustained air speed | air, full stroke | | distance over the episode, only if aloft for 95% of it and past 5 m |
 | reach | land, water, air | | the swept reach, the largest over the environments measured |
+| gait power, cost of transport | land, water | | what moving costs: the episode's joint work per second at full drive, and per kilogram per metre; the ecology charges movement with these |
+| gait signature | land | | stepping limbs, trunk clearance and trunk spin, reported in the lineage tables |
 
 The air battery runs only for bodies light enough for wings to matter
 (wing loading under 50 kg/m²). A **glider** is a lineage whose held wings
@@ -294,6 +301,19 @@ over an ensemble of mountings, frequencies and feather phases and judged
 by its mean, its share of positive cases and its best case. Before the
 shoulder twist and the attached-flow lift existed, no mounting, frequency
 or feather phase produced lift; both findings are recorded in `MODEL.md`.
+
+Movement is paid for with these measurements: an animal's daily activity
+costs its gait's measured power over the foraging day, and a move
+between cells costs its measured cost of transport, both through muscle
+efficiency (a quarter) and 18 MJ per kilogram of dry biomass. The
+muscle-section estimate remains only as the prior for a body not yet
+measured.
+
+Whether this physics can produce an upright, multi-segment gait at all
+was settled by a direct search on the land episode (`examples/gait_search`,
+an audit tool): it can, once walking is what pays. The found bodies are
+in `docs/gaits/`, with frames; the stages the search went through and
+the measurement bugs it exposed are in `MODEL.md`.
 
 Three quantities are read from anatomy rather than measured: mouth area,
 claws and plating. They enter the ecology as what a body *is*, in the
@@ -478,7 +498,7 @@ lineage tables.
 | Guard | Where | Binds when |
 |---|---|---|
 | plant density caps | 0.48 per m² at sea, 0.08 per m² on land | always, in a full sea |
-| measurement budget | 8 bodies per day headless; a few per slice in the browser | whenever births outrun it (badly, in the unguarded run) |
+| measurement budget | a batch per day, run on every core (32 bodies per day headless by default; a few per slice in the browser, single-threaded) | whenever births outrun it (badly, in the unguarded run) |
 | maximum nodes and parts | 10 nodes, 24 parts | rarely |
 | prey candidates per day | 3 | at high prey density |
 
