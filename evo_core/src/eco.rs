@@ -81,6 +81,12 @@ pub const CLEARANCE_M3_PER_KG_DAY: f32 = 1.2;
 // are the only limits. Performance is a separate problem (cohorts, planned)
 // and is never solved by discarding births.
 pub const TRAIT_EPISODE_S: f32 = 4.0;
+/// Foraging day, seconds (8 h), over which the gait's measured power is paid.
+pub const FORAGE_S: f32 = 8.0 * 3600.0;
+/// Muscle converts a quarter of its metabolic energy into mechanical work.
+pub const MUSCLE_EFFICIENCY: f32 = 0.25;
+/// Energy in a kilogram of dry biomass, joules (about 18 MJ).
+pub const J_PER_KG_DRY: f32 = 18.0e6;
 pub const NEIGHBOURS: usize = 6;
 
 // ---------------------------------------------------------------------------
@@ -164,6 +170,16 @@ pub struct Traits {
     pub turn_sign_land: f32,
     #[serde(default)]
     pub turn_sign_water: f32,
+    /// Measured mechanical power of the gait at full drive, watts, and its
+    /// cost of transport, J/(kg m), per medium. What moving costs.
+    #[serde(default)]
+    pub power_land: f32,
+    #[serde(default)]
+    pub power_water: f32,
+    #[serde(default)]
+    pub cot_land: f32,
+    #[serde(default)]
+    pub cot_water: f32,
     /// Nimbleness: yaw rate gained from asymmetric drive (rad/s) and vertical
     /// speed gained from a posture shift (m/s), per environment. Zero unless
     /// the body locomotes at all.
@@ -520,6 +536,114 @@ fn hash_genome(g: &Genome) -> String {
     serde_json::to_string(g).unwrap_or_default()
 }
 
+/// Measure one body in one environment: the episodes of the battery and the
+/// traits they set. Pure, so a day's batch can run on every core.
+fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut traits: Traits) -> Traits {
+    let pheno = decode(&genome);
+    let cfg = SimConfig { episode_time: TRAIT_EPISODE_S, ..Default::default() };
+    let r = CreatureSim::run_episode(pheno.clone(), planet, env, cfg);
+    // Sustained progress only, and only what the muscles add: the same
+    // body is run again with its motors off (sham control) and that
+    // passive drift, a buoyant rise with a tilted fin or a slide after
+    // a topple, is subtracted. The air drop has its own control (a stone).
+    let mut passive_shore = 0.0;
+    // In the air the control is the same body holding its wings
+    // still (amp_scale 0): what the held wing does is the glide,
+    // what the stroke adds over it is powered lift.
+    let mut hold_air: Option<EpisodeResult> = None;
+    let passive = if r.exploded {
+        0.0
+    } else if env == Environment::Air {
+        let hold = SimConfig { episode_time: TRAIT_EPISODE_S, amp_scale: 0.0, ..Default::default() };
+        hold_air = Some(CreatureSim::run_episode(pheno, planet, env, hold));
+        0.0
+    } else {
+        let sham = SimConfig { episode_time: TRAIT_EPISODE_S, motors: false, ..Default::default() };
+        let c = CreatureSim::run_episode(pheno, planet, env, sham);
+        passive_shore = if c.exploded { 0.0 } else { c.shore_progress };
+        if c.exploded { 0.0 } else { c.sustained_speed }
+    };
+    let speed = if r.exploded { 0.0 } else { (r.sustained_speed - passive).max(0.0) };
+    // Nimbleness, only for bodies that locomote: the same body driven
+    // asymmetrically (turning) and with a shifted posture (climb/dive).
+    let mut turn_sign = 0.0f32;
+    let (turn, climb) = if speed > 0.01 && !r.exploded && env != Environment::Shore {
+        let pheno2 = decode(&genome);
+        let st = SimConfig { episode_time: TRAIT_EPISODE_S, steer: 0.6, ..Default::default() };
+        let rs = CreatureSim::run_episode(pheno2.clone(), planet, env, st);
+        let turn = if rs.exploded { 0.0 } else { (rs.yaw_rate - r.yaw_rate).abs() };
+        if !rs.exploded {
+            turn_sign = (rs.yaw_rate - r.yaw_rate).signum();
+        }
+        let climb = if env == Environment::Land {
+            0.0
+        } else {
+            let bc = SimConfig { episode_time: TRAIT_EPISODE_S, bias_shift: 0.4, ..Default::default() };
+            let rc = CreatureSim::run_episode(pheno2, planet, env, bc);
+            if rc.exploded { 0.0 } else { (rc.climb_speed - r.climb_speed).abs() }
+        };
+        (turn, climb)
+    } else {
+        (0.0, 0.0)
+    };
+    match env {
+        Environment::Shore => {
+            traits.shore = if r.exploded { 0.0 } else { (r.shore_progress - passive_shore).max(0.0) };
+            traits.measured_shore = true;
+        }
+        Environment::Water => {
+            traits.water_speed = speed;
+            traits.power_water = if r.exploded { 0.0 } else { r.work / TRAIT_EPISODE_S };
+            traits.cot_water = if r.exploded { 0.0 } else { r.cost_of_transport };
+            traits.turn_water = turn;
+            traits.turn_sign_water = turn_sign;
+            traits.climb_water = climb;
+            traits.measured_water = true;
+            traits.reach = traits.reach.max(r.swept_reach);
+        }
+        Environment::Air => {
+            // Dropped from 10 m: a body still aloft for most of the episode
+            // and moving forward is flying or gliding, not falling.
+            // How far the body gets through the air in the episode from a
+            // 10 m launch: a brick scores nothing, a parachuter little, a glider
+            // metres per second, a flapper more. Continuous, so wings can grow.
+            // Launched at 3 m/s from 10 m: metres beyond where a stone lands are
+            // the wings' doing (glide ratio = that / 10). Still aloft at the
+            // end of the episode means sustained flight at the measured speed.
+            let stone = crate::sim::ballistic_distance(planet.gravity);
+            // Glide: what the held wing does beyond a thrown stone.
+            // Powered lift: how much higher the stroke keeps the body
+            // than holding the same wing (the flapping test's control).
+            let (glide, lift) = match &hold_air {
+                Some(h) if !h.exploded => ((h.air_distance - stone).max(0.0), (r.mean_height - h.mean_height).max(0.0)),
+                _ => ((r.air_distance - stone).max(0.0), 0.0),
+            };
+            traits.glide_distance = if r.exploded { 0.0 } else { glide };
+            traits.flap_lift = if r.exploded { 0.0 } else { lift };
+            traits.air_speed = if !r.exploded && r.airborne_frac >= 0.95 && r.distance > 5.0 { r.distance / TRAIT_EPISODE_S } else { 0.0 };
+            traits.turn_air = turn;
+            traits.climb_air = climb;
+            traits.measured_air = true;
+            traits.reach = traits.reach.max(r.swept_reach);
+        }
+        _ => {
+            traits.land_speed = speed;
+            traits.power_land = if r.exploded { 0.0 } else { r.work / TRAIT_EPISODE_S };
+            traits.cot_land = if r.exploded { 0.0 } else { r.cost_of_transport };
+            traits.turn_land = turn;
+            traits.turn_sign_land = turn_sign;
+            traits.measured_land = true;
+            // Reach is what the body swept in the episode, not the
+            // rest pose it was drawn in.
+            if r.swept_reach > 0.0 {
+                traits.reach = r.swept_reach;
+            }
+            traits.upright = (r.mean_height / (0.5 * traits.reach).max(0.01)).clamp(0.0, 1.0);
+        }
+    }
+    traits
+}
+
 impl EcoWorld {
     /// `n_patches` uniform patches on the sphere (clamped to 200..6000).
     pub fn new(planet: PlanetParams, n_patches: usize, seed: u64) -> Self {
@@ -867,123 +991,56 @@ impl EcoWorld {
             order.reverse();
             self.pending = order;
         }
-        while done < budget {
+        // Gather the day's batch: one request per unmeasured (body, environment).
+        let mut batch: Vec<(String, Genome, Environment, Traits)> = Vec::new();
+        while batch.len() < budget {
             let Some((idx, env)) = self.pending.pop() else { break };
             if idx >= self.animals.len() {
                 continue;
             }
-            let genome = self.animals[idx].genome.clone();
             let key = self.animals[idx].key.clone();
-            let mut traits = self.trait_cache.get(&key).copied().unwrap_or(self.animals[idx].traits);
+            let traits = self.trait_cache.get(&key).copied().unwrap_or(self.animals[idx].traits);
             let already = match env {
                 Environment::Water => traits.measured_water,
                 Environment::Air => traits.measured_air,
                 Environment::Shore => traits.measured_shore,
                 _ => traits.measured_land,
             };
-            if !already {
-                let pheno = decode(&genome);
-                let cfg = SimConfig { episode_time: TRAIT_EPISODE_S, ..Default::default() };
-                let r = CreatureSim::run_episode(pheno.clone(), &self.planet, env, cfg);
-                // Sustained progress only, and only what the muscles add: the same
-                // body is run again with its motors off (sham control) and that
-                // passive drift, a buoyant rise with a tilted fin or a slide after
-                // a topple, is subtracted. The air drop has its own control (a stone).
-                let mut passive_shore = 0.0;
-                // In the air the control is the same body holding its wings
-                // still (amp_scale 0): what the held wing does is the glide,
-                // what the stroke adds over it is powered lift.
-                let mut hold_air: Option<EpisodeResult> = None;
-                let passive = if r.exploded {
-                    0.0
-                } else if env == Environment::Air {
-                    let hold = SimConfig { episode_time: TRAIT_EPISODE_S, amp_scale: 0.0, ..Default::default() };
-                    hold_air = Some(CreatureSim::run_episode(pheno, &self.planet, env, hold));
-                    0.0
-                } else {
-                    let sham = SimConfig { episode_time: TRAIT_EPISODE_S, motors: false, ..Default::default() };
-                    let c = CreatureSim::run_episode(pheno, &self.planet, env, sham);
-                    passive_shore = if c.exploded { 0.0 } else { c.shore_progress };
-                    if c.exploded { 0.0 } else { c.sustained_speed }
-                };
-                let speed = if r.exploded { 0.0 } else { (r.sustained_speed - passive).max(0.0) };
-                // Nimbleness, only for bodies that locomote: the same body driven
-                // asymmetrically (turning) and with a shifted posture (climb/dive).
-                let mut turn_sign = 0.0f32;
-                let (turn, climb) = if speed > 0.01 && !r.exploded && env != Environment::Shore {
-                    let pheno2 = decode(&genome);
-                    let st = SimConfig { episode_time: TRAIT_EPISODE_S, steer: 0.6, ..Default::default() };
-                    let rs = CreatureSim::run_episode(pheno2.clone(), &self.planet, env, st);
-                    let turn = if rs.exploded { 0.0 } else { (rs.yaw_rate - r.yaw_rate).abs() };
-                    if !rs.exploded {
-                        turn_sign = (rs.yaw_rate - r.yaw_rate).signum();
-                    }
-                    let climb = if env == Environment::Land {
-                        0.0
-                    } else {
-                        let bc = SimConfig { episode_time: TRAIT_EPISODE_S, bias_shift: 0.4, ..Default::default() };
-                        let rc = CreatureSim::run_episode(pheno2, &self.planet, env, bc);
-                        if rc.exploded { 0.0 } else { (rc.climb_speed - r.climb_speed).abs() }
-                    };
-                    (turn, climb)
-                } else {
-                    (0.0, 0.0)
-                };
-                match env {
-                    Environment::Shore => {
-                        traits.shore = if r.exploded { 0.0 } else { (r.shore_progress - passive_shore).max(0.0) };
-                        traits.measured_shore = true;
-                    }
-                    Environment::Water => {
-                        traits.water_speed = speed;
-                        traits.turn_water = turn;
-                        traits.turn_sign_water = turn_sign;
-                        traits.climb_water = climb;
-                        traits.measured_water = true;
-                        traits.reach = traits.reach.max(r.swept_reach);
-                    }
-                    Environment::Air => {
-                        // Dropped from 10 m: a body still aloft for most of the episode
-                        // and moving forward is flying or gliding, not falling.
-                        // How far the body gets through the air in the episode from a
-                        // 10 m launch: a brick scores nothing, a parachuter little, a glider
-                        // metres per second, a flapper more. Continuous, so wings can grow.
-                        // Launched at 3 m/s from 10 m: metres beyond where a stone lands are
-                        // the wings' doing (glide ratio = that / 10). Still aloft at the
-                        // end of the episode means sustained flight at the measured speed.
-                        let stone = crate::sim::ballistic_distance(self.planet.gravity);
-                        // Glide: what the held wing does beyond a thrown stone.
-                        // Powered lift: how much higher the stroke keeps the body
-                        // than holding the same wing (the flapping test's control).
-                        let (glide, lift) = match &hold_air {
-                            Some(h) if !h.exploded => ((h.air_distance - stone).max(0.0), (r.mean_height - h.mean_height).max(0.0)),
-                            _ => ((r.air_distance - stone).max(0.0), 0.0),
-                        };
-                        traits.glide_distance = if r.exploded { 0.0 } else { glide };
-                        traits.flap_lift = if r.exploded { 0.0 } else { lift };
-                        traits.air_speed = if !r.exploded && r.airborne_frac >= 0.95 && r.distance > 5.0 { r.distance / TRAIT_EPISODE_S } else { 0.0 };
-                        traits.turn_air = turn;
-                        traits.climb_air = climb;
-                        traits.measured_air = true;
-                        traits.reach = traits.reach.max(r.swept_reach);
-                    }
-                    _ => {
-                        traits.land_speed = speed;
-                        traits.turn_land = turn;
-                        traits.turn_sign_land = turn_sign;
-                        traits.measured_land = true;
-                        // Reach is what the body swept in the episode, not the
-                        // rest pose it was drawn in.
-                        if r.swept_reach > 0.0 {
-                            traits.reach = r.swept_reach;
-                        }
-                        traits.upright = (r.mean_height / (0.5 * traits.reach).max(0.01)).clamp(0.0, 1.0);
+            if already || batch.iter().any(|(k, _, e, _)| *k == key && *e == env) {
+                for a in self.animals.iter_mut() {
+                    if a.key == key {
+                        a.traits = traits;
                     }
                 }
-                self.stats.trait_evals += 1;
-                done += 1;
-                self.trait_cache.insert(key.clone(), traits);
+                continue;
             }
+            batch.push((key, self.animals[idx].genome.clone(), env, traits));
+        }
+        // Run the batch, on every core where there are cores (not in wasm).
+        let planet = &self.planet;
+        let results: Vec<Traits> = {
+            #[cfg(target_arch = "wasm32")]
+            {
+                batch.iter().map(|(_, g, env, t)| measure_body(planet, g, *env, *t)).collect()
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).max(1);
+                if batch.len() <= 1 || threads == 1 {
+                    batch.iter().map(|(_, g, env, t)| measure_body(planet, g, *env, *t)).collect()
+                } else {
+                    let chunk = (batch.len() + threads - 1) / threads;
+                    std::thread::scope(|sc| {
+                        let hs: Vec<_> = batch.chunks(chunk).map(|c| sc.spawn(move || c.iter().map(|(_, g, env, t)| measure_body(planet, g, *env, *t)).collect::<Vec<_>>())).collect();
+                        hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
+                    })
+                }
+            }
+        };
+        for ((key, _, _, _), traits) in batch.into_iter().zip(results) {
+            self.stats.trait_evals += 1;
+            done += 1;
+            self.trait_cache.insert(key.clone(), traits);
             for a in self.animals.iter_mut() {
                 if a.key == key {
                     a.traits = traits;
@@ -1439,7 +1496,19 @@ impl EcoWorld {
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
             // Short of oxygen, the muscles cannot be kept working all day.
             let activity = activity * resp_eff;
-            let activity_cost = 0.004 * section * freq * 20.0 * activity * motility * size_f.powf(2.0 / 3.0);
+            // Moving costs what the gait episode measured: mechanical power at
+            // full drive (scaled to this individual's mass) over the foraging
+            // day, through muscle efficiency, in dry biomass. A body not yet
+            // measured pays the muscle-section estimate instead.
+            let activity_cost = {
+                let t = &self.animals[ai].traits;
+                let power = (t.power_water * sub + t.power_land * (1.0 - sub)) * (mass / adult_mass).clamp(0.01, 1.0);
+                if power > 0.0 {
+                    power * activity * motility * FORAGE_S / MUSCLE_EFFICIENCY / J_PER_KG_DRY
+                } else {
+                    0.004 * section * freq * 20.0 * activity * motility * size_f.powf(2.0 / 3.0)
+                }
+            };
             let mut delta = -(fmr + upkeep + activity_cost);
             // A motile organism with membranes still photosynthesises (Euglena,
             // not a sudden animal): the same leaf chemistry as a plant, halved for
@@ -1857,8 +1926,15 @@ impl EcoWorld {
                 if let Some((target, _)) = best {
                     let target_water = self.patches[target].water;
                     let use_speed = (if target_water { water_speed_raw } else { land_speed_raw.max(air_speed_raw) }) * motility * lin_f;
-                    // Cost of transport ~ M^-0.3 per kg per metre (Tucker), 10 m per patch.
-                    delta -= 0.00001 * mass.powf(0.7) * (g / 9.81) * patch_w / (0.3 + use_speed).min(3.0);
+                    // The move costs the measured cost of transport (J per kg per
+                    // metre, Tucker's form when unmeasured), one cell width.
+                    let t = &self.animals[ai].traits;
+                    let cot = if target_water { t.cot_water } else { t.cot_land };
+                    delta -= if cot > 0.0 {
+                        cot * mass * (g / 9.81) * patch_w / MUSCLE_EFFICIENCY / J_PER_KG_DRY
+                    } else {
+                        0.00001 * mass.powf(0.7) * (g / 9.81) * patch_w / (0.3 + use_speed).min(3.0)
+                    };
                     self.animals[ai].patch = target;
                 }
             }

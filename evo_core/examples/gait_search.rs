@@ -26,6 +26,8 @@ struct Scored {
     mass: f32,
     cot: f32,
     leak: f32,
+    limbs: u32,
+    clearance: f32,
 }
 
 fn evaluate(g: &Genome, planet: &PlanetParams) -> Scored {
@@ -46,8 +48,12 @@ fn evaluate(g: &Genome, planet: &PlanetParams) -> Scored {
     // Efficiency: energy is food. Walking mammals move for 1 to 5 J per
     // kilogram per metre; a body that thrashes its way forward pays far more.
     let efficiency = 1.0 / (1.0 + r.cost_of_transport / 3.0);
-    let fitness = speed * carried * steady * stepping * efficiency * (0.3 + 0.7 * upright) * (0.4 + 0.6 * segments);
-    Scored { genome: g.clone(), fitness, speed, upright, parts: ph.parts.len(), height: r.mean_height, contact: r.trunk_contact_frac, footfalls: r.footfalls, spin: r.trunk_spin, mass: ph.total_mass, cot: r.cost_of_transport, leak: r.energy_leak }
+    // Legs: at least two different limbs step in turn, and they hold the
+    // trunk at least its own diameter off the ground.
+    let limbs = (r.stepping_limbs as f32 / 2.0).min(1.0);
+    let tall = (r.trunk_clearance / (2.0 * ph.parts[0].radius).max(0.02)).clamp(0.0, 1.0);
+    let fitness = speed * carried * steady * stepping * efficiency * limbs * (0.3 + 0.7 * tall) * (0.3 + 0.7 * upright) * (0.4 + 0.6 * segments);
+    Scored { genome: g.clone(), fitness, speed, upright, parts: ph.parts.len(), height: r.mean_height, contact: r.trunk_contact_frac, footfalls: r.footfalls, spin: r.trunk_spin, mass: ph.total_mass, cot: r.cost_of_transport, leak: r.energy_leak, limbs: r.stepping_limbs, clearance: r.trunk_clearance }
 }
 
 fn main() {
@@ -75,8 +81,8 @@ fn main() {
         population.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
         let best = &population[0];
         println!(
-            "gen {:>3} | best {:.3} | {:.2} m/s upright {:.2} h {:.2} m belly {:.2} footfalls {} spin {:.1} rad/s parts {} mass {:.0} kg COT {:.1} leak {:.0} J | median {:.3} | {:.0} s",
-            gen, best.fitness, best.speed, best.upright, best.height, best.contact, best.footfalls, best.spin, best.parts, best.mass, best.cot, best.leak, population[pop / 2].fitness, start.elapsed().as_secs_f32()
+            "gen {:>3} | best {:.3} | {:.2} m/s upright {:.2} h {:.2} m belly {:.2} footfalls {} limbs {} clear {:.2} m spin {:.1} rad/s parts {} mass {:.0} kg COT {:.1} leak {:.0} J | median {:.3} | {:.0} s",
+            gen, best.fitness, best.speed, best.upright, best.height, best.contact, best.footfalls, best.limbs, best.clearance, best.spin, best.parts, best.mass, best.cot, best.leak, population[pop / 2].fitness, start.elapsed().as_secs_f32()
         );
         // Elites survive; the rest are mutated children of tournament winners.
         let elite = pop / 6;
@@ -99,8 +105,8 @@ fn main() {
     population.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap());
     let best = &population[0];
     println!(
-        "\nbest: fitness {:.3} speed {:.2} m/s upright {:.2} height {:.2} m belly {:.2} footfalls {} spin {:.1} parts {} mass {:.0} kg COT {:.1} leak {:.0} J",
-        best.fitness, best.speed, best.upright, best.height, best.contact, best.footfalls, best.spin, best.parts, best.mass, best.cot, best.leak
+        "\nbest: fitness {:.3} speed {:.2} m/s upright {:.2} height {:.2} m belly {:.2} footfalls {} limbs {} clearance {:.2} m spin {:.1} parts {} mass {:.0} kg COT {:.1} leak {:.0} J",
+        best.fitness, best.speed, best.upright, best.height, best.contact, best.footfalls, best.limbs, best.clearance, best.spin, best.parts, best.mass, best.cot, best.leak
     );
     let ph = decode(&best.genome);
     for (i, p) in ph.parts.iter().enumerate() {

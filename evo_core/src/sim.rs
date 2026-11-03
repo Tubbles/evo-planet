@@ -145,6 +145,12 @@ pub struct EpisodeResult {
     /// Footfalls: ground-contact onsets of parts other than the trunk during
     /// the settled time. A gait is made of these; a tumble or a slide is not.
     pub footfalls: u32,
+    /// How many different parts made footfalls: one limb hopping, or several
+    /// limbs stepping in turn.
+    pub stepping_limbs: u32,
+    /// Mean clearance of the trunk's lowest point above the ground, metres:
+    /// how tall the body stands on whatever carries it.
+    pub trunk_clearance: f32,
     /// Mean angular speed of the trunk, rad/s: low for a carried trunk, high
     /// for a body that rolls or tumbles its way forward.
     pub trunk_spin: f32,
@@ -206,7 +212,9 @@ pub struct CreatureSim {
     swept_reach: f32,
     trunk_contact_steps: u32,
     part_down: Vec<bool>,
+    part_falls: Vec<u32>,
     footfalls: u32,
+    clearance_sum: f32,
     trunk_spin_sum: f32,
     work: f32,
     energy_start: Option<f32>,
@@ -744,7 +752,9 @@ impl CreatureSim {
             swept_reach: 0.0,
             trunk_contact_steps: 0,
             part_down: vec![false; n_parts],
+            part_falls: vec![0; n_parts],
             footfalls: 0,
+            clearance_sum: 0.0,
             trunk_spin_sum: 0.0,
             work: 0.0,
             energy_start: None,
@@ -939,9 +949,11 @@ impl CreatureSim {
                     if down {
                         self.trunk_contact_steps += 1;
                     }
+                    self.clearance_sum += (low - self.ground_at(iso.translation.x)).max(0.0);
                     self.trunk_spin_sum += rb.angvel().norm();
                 } else if down && !self.part_down[i] {
                     self.footfalls += 1;
+                    self.part_falls[i] += 1;
                 }
                 self.part_down[i] = down;
             }
@@ -1031,6 +1043,8 @@ impl CreatureSim {
             swept_reach: self.swept_reach,
             trunk_contact_frac: if self.total_steps > 0 { self.trunk_contact_steps as f32 / self.total_steps as f32 } else { 0.0 },
             footfalls: self.footfalls,
+            stepping_limbs: self.part_falls.iter().filter(|&&n| n >= 2).count() as u32,
+            trunk_clearance: if self.total_steps > 0 { self.clearance_sum / self.total_steps as f32 } else { 0.0 },
             trunk_spin: if self.total_steps > 0 { self.trunk_spin_sum / self.total_steps as f32 } else { 0.0 },
             work: self.work,
             energy_leak: match self.energy_start {
