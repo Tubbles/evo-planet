@@ -8,7 +8,8 @@ fn main() {
     let ph = decode(&g);
     for (i, p) in ph.parts.iter().enumerate() { println!("part {i} {:?} len {:.3} r {:.3} mass {:.3} joint {:?} limit {:.2} amp {:.2} freq_mult {:.1} max_torque {:.2}", p.kind, p.len, p.radius, p.mass, p.joint, p.limit, p.cpg.amp, p.cpg.freq_mult, p.max_torque); }
     println!("base_freq {:.2}", g.base_freq);
-    let cfg = SimConfig { episode_time: 4.0, ..Default::default() };
+    let motors = std::env::args().nth(2).map(|s| s != "off").unwrap_or(true);
+    let cfg = SimConfig { episode_time: 4.0, motors, ..Default::default() };
     let mut sim = CreatureSim::new(ph.clone(), &PlanetParams::earth(), Environment::Water, cfg);
     let mut n = 0;
     while !sim.finished() {

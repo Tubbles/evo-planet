@@ -345,6 +345,7 @@ mod tests {
     fn heavier_gravity_lowers_growth_cap() {
         let mut rng = StdRng::seed_from_u64(2);
         let mut lower = 0;
+        let mut tall = 0;
         for _ in 0..40 {
             let mut g = Genome::random_plant(&mut rng);
             // Make it tall and thin so the check bites.
@@ -352,13 +353,20 @@ mod tests {
             g.nodes[0].r0 = 0.02;
             g.nodes[0].r1 = 0.02;
             g.nodes[0].recursive_limit = 3;
-            g.density = 400.0; // dense wood: a 9 m, 4 cm column stands on Earth, buckles at 3 g
-            let a = decode_plant(&g, 9.81).growth_cap;
-            let b = decode_plant(&g, 30.0).growth_cap;
-            if b < a {
+            g.density = 800.0; // dense wood: a 9 m, 4 cm column is near its limit on Earth, buckles at 3 g
+            let pa = decode_plant(&g, 9.81);
+            let pb = decode_plant(&g, 30.0);
+            // Only genomes whose recursion actually stacks the column are tall
+            // enough to load it; short ones stand at any gravity.
+            if pa.height < 6.5 {
+                continue;
+            }
+            tall += 1;
+            if pb.growth_cap < pa.growth_cap {
                 lower += 1;
             }
         }
-        assert!(lower > 20, "{lower}");
+        assert!(tall >= 8, "too few tall columns: {tall}");
+        assert!(lower * 10 >= tall * 8, "{lower} of {tall} tall columns lost cap at 3 g");
     }
 }

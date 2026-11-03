@@ -452,21 +452,54 @@ absorb stands at 600-1000 kg across the planet, so the limit is not the
 food but the step from sheet to feeder; the candidates below are the
 missing steps.
 
-### Steps that would enrich the origin further (not built)
-- **A microbial loop.** Dead matter should become bacterial biomass
-  (fast, temperature-driven) that filter feeders and osmotrophs eat, not
-  nutrient directly; the first heterotrophs ate bacteria.
-- **Phagocytosis as the first mouth.** Engulfing particles smaller than
-  oneself needs contact, not a trunk: a capture term for a sheet or blob
-  against suspended particles and tiny organisms, scaling with surface.
-- **Size continuum down to cells.** The smallest body is 4 cm; the origin
-  happened at microns. A log-scale size floor with surface-limited
-  physiology would let osmotrophs be small and grazers grow from them.
-- **Light as a vertical resource.** Depth strata in water: surface sheets
-  shade the column; motility toward light is the first behaviour.
-- **Daily rhythm and tides.** Submersion and light vary within a day; a
-  fixed 0.5 shore and constant light flatten the pressures that drove
-  rhythms and vertical migration.
+### A decode bug found while checking the enrichments
+A body whose root node is a membrane took its mass from a capsule of the
+membrane's radius: a 5 cm sheet weighed 630 g instead of 8 g, carried a
+lung cavity, and rose through the water as a buoyant slab at 1.8 m/s.
+Every "fast swimmer" the audits had flagged (0.5-1.3 m/s, two parts) was
+one of these. A membrane root now keeps its membrane mass and has no lung;
+the same bodies measure 20-30 g and move under 1 cm/s. The sham control
+had been subtracting the drift, which is why it never showed as a fake
+speed, but the mass and the buoyancy were wrong all along.
+
+### Origin enrichments (built)
+- **Microbial loop.** Decomposition turns dead matter into bacterial
+  biomass (growth yield 0.4) and mineral nutrient; bacteria respire and die
+  back to nutrient at a fifth a day unless eaten. Filter feeders strain
+  them (meat-like quality); phagotrophs capture them.
+- **Phagocytosis as the first mouth.** An organism with heterotrophy
+  captures a fraction (0.05 per unit heterotrophy) of the particles that
+  water movement (5 cm/s of waves and current, plus its own speed) carries
+  past its surface each day. A sheet needs no trunk to eat bacteria.
+- **Size floor at a centimetre.** Parts can be 1 cm long and 4 mm thick,
+  so a body can weigh under a gram instead of the old 80 g floor. The
+  physics probes (single capsule, hand-built gliders, audited bodies)
+  were rerun unchanged.
+- **Light through water.** Light reaching a plant's top falls off with the
+  water above it (extinction 0.3 per metre), so deep beds are dark and the
+  osmotroph's niche is real; a motile photosynthesiser near the surface
+  gets the canopy's leftover light.
+- **Tide.** The intertidal band's submersion swings between a third and two
+  thirds over a 14.8-day spring-neap cycle. Seasons (axial tilt) remain
+  unbuilt.
+
+The check: in the algae-only world before these enrichments,
+heterotrophy among sessile plants rose slowly (mean 0.07, 38% of plants
+over 0.1 at day 3000) and 28 motile seeds arose over 3000 days, none
+persisting. After them: mean 0.28 at day 5000 with 99.8% of plants over
+0.1 and a third over 0.3, so the osmotroph/phagotroph niche is real and
+strongly selected; motility stayed near zero (mean 0.014) and 15 motile
+seeds all died. That run also showed 20,000 of 27,000 sea plants in near
+darkness, because the founding algae were being treated as bed-anchored
+under twelve metres of water; a sheet with no stem and no root now floats
+and is lit at the surface. With that fix (5000 days): heterotrophy
+again rose to a mean of 0.28 with a third of plants over 0.3, 15 motile
+seeds arose, none persisted. The likeliest reason is now in the
+accounting rather than the ecology: the moment a seed is motile it pays
+a vertebrate's field metabolic rate (0.006·M^0.75 per day) plus muscle
+work, while the sessile sheet beside it pays 0.4% of its leaf mass a day.
+A Euglena does not pay a fish's bills. Maintenance should be a continuum
+tied to activity and tissue, not a kingdom switch; that is the next step.
 
 ### Audit tooling
 `cargo run --example shore_probe -- <genome.json>...` runs bodies on the beach

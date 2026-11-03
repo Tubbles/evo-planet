@@ -57,6 +57,15 @@ pub const INTERFERENCE_PER_100M2: f32 = 0.15;
 pub const FOUNDERS_PER_M2: f32 = 1.0 / 1200.0;
 /// Farthest a hungry walker or swimmer relocates in a day, metres.
 pub const RELOCATE_MAX_M: f32 = 50.0;
+/// Growth yield of decomposers on dead matter (fraction becoming bacteria).
+pub const BACTERIAL_YIELD: f32 = 0.4;
+/// Phagocytosis: fraction of the suspended particles passing a surface that
+/// are captured, per unit heterotrophy.
+pub const CAPTURE_EFF: f32 = 0.05;
+/// Ambient water movement past a body, m/s (waves, currents).
+pub const CURRENT_M_S: f32 = 0.05;
+/// Light extinction in water, per metre.
+pub const WATER_EXTINCTION: f32 = 0.3;
 /// Osmotrophy: kg absorbed per m^2 of surface per day per kg/m^2 of dead matter.
 pub const OSMOTROPHY_RATE: f32 = 0.3;
 /// Larval drift from the birth site, metres.
@@ -271,6 +280,10 @@ pub struct Patch {
     /// swimming photosynthesiser gets), set by the plant tick.
     #[serde(default)]
     pub light_left: f32,
+    /// Bacterial biomass, kg: grown on dead matter, eaten by filter feeders
+    /// and phagotrophs, respired back to nutrient (the microbial loop).
+    #[serde(default)]
+    pub bacteria: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -483,7 +496,7 @@ impl EcoWorld {
                 } else {
                     (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 }, light_left: 1.0 }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 }, light_left: 1.0, bacteria: 0.0 }
             })
             .collect();
         // Shore band: land patches touching water stay wet, the first foothold for plants.
@@ -964,6 +977,7 @@ impl EcoWorld {
             order.sort_by(|a, b| self.plants[*b].height.partial_cmp(&self.plants[*a].height).unwrap());
             // Light arrives per square metre; `remaining` is in m^2 of full sun.
             // Water attenuates it, which is the pull toward land.
+            let patch_plant_mass: f32 = order.iter().map(|&i| self.plants[i].biomass).sum();
             let mut remaining = light * a * (0.3 * sub + (1.0 - sub));
             let mut nutrient_demand = 0.0;
             let mut intercepts = Vec::with_capacity(order.len());
@@ -983,6 +997,17 @@ impl EcoWorld {
             // Osmotrophy: organisms absorb dead organic matter through their surface
             // in proportion to their heterotrophy gene; the pool is shared.
             let dom_density = patch.dead_matter / a; // kg/m^2
+            // Depth: light reaching a plant's top falls off through the water above it.
+            let depth = (-patch.elevation).max(0.0) * sub.min(1.0);
+            // Suspended particles (bacteria and drifting fragments) per m^3, for phagocytosis.
+            let particles = (patch.bacteria + SUSPENDED_FRACTION * patch_plant_mass) / (a * 2.0);
+            let mut phago_demand = 0.0f32;
+            for &i in &order {
+                let p = &self.plants[i];
+                phago_demand += p.genome.heterotrophy.clamp(0.0, 1.0) * p.leaf_area() * CURRENT_M_S * sub * 86400.0 * particles * CAPTURE_EFF;
+            }
+            let phago_share = if phago_demand > 0.0 { (patch.bacteria * 0.3 / phago_demand).min(1.0) } else { 1.0 };
+            let mut bacteria_used = 0.0f32;
             let mut dom_demand = 0.0f32;
             for &i in &order {
                 let p = &self.plants[i];
@@ -1017,13 +1042,22 @@ impl EcoWorld {
                 let photo = got * 0.02 * cf * tf * water_frac * habitat_eff * (0.3 + 0.7 * nutrient_share) * (1.0 - 0.35 * tough) * (1.0 - 0.6 * het);
                 let absorbed = het * p.leaf_area() * dom_density * OSMOTROPHY_RATE * dom_share * (0.3 + tf);
                 dom_used += absorbed;
+                // Phagocytosis: particles passing the surface, captured in proportion.
+                let captured = het * p.leaf_area() * CURRENT_M_S * sub * 86400.0 * particles * CAPTURE_EFF * phago_share;
+                bacteria_used += captured;
+                // Light left after the water column above this plant's top. A
+                // sheet with no stem and no root floats at the surface (the founding
+                // algae); anything anchored sits on the bed.
+                let floats = p.body().stem_mass <= 0.0 && p.body().root_mass <= 0.0;
+                let depth_attn = if floats { 1.0 } else { (-WATER_EXTINCTION * (depth - p.height).max(0.0)).exp() };
+                let got = got * depth_attn;
                 // Leaves respire fast, woody and root tissue slowly.
                 let leaf_m = p.leaf_mass();
                 // Transport: feeding leaves through long stems costs upkeep per kg*m.
                 let transport = p.body().transport * (p.biomass / p.body().target_mass).clamp(0.0, 1.0);
                 let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * 0.0005 + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
                 production_today += photo;
-                p.energy += photo + absorbed * 0.6 - respiration;
+                p.energy += photo + (absorbed + captured) * 0.6 - respiration;
                 // Leaf economics: thin leaves live weeks, thick ones years
                 // (Wright et al. 2004: lifespan ~ LMA^1.5, a year at 0.1 kg/m^2).
                 // Shed leaves are litter and must be regrown from energy.
@@ -1066,6 +1100,7 @@ impl EcoWorld {
             let pt = &mut self.patches[pi];
             pt.nutrient = (pt.nutrient - nutrient_used).max(0.0);
             pt.dead_matter = (pt.dead_matter - dom_used).max(0.0) + litter_today;
+            pt.bacteria = (pt.bacteria - bacteria_used).max(0.0);
             pt.light_left = light_left;
         }
         // Seeds hop over the neighbour graph and land where there is room.
@@ -1131,8 +1166,14 @@ impl EcoWorld {
         for (i, a) in self.animals.iter().enumerate() {
             animals_in[a.patch].push(i);
         }
+        // Tide: the intertidal band is under water half the day on average,
+        // between a third and two thirds over a spring-neap cycle of 14.8 days.
+        let tide = 0.5 + 0.17 * (2.0 * PI * self.day as f32 / 14.77).sin();
         for p in self.patches.iter_mut() {
             p.canopy = 0.0;
+            if p.shore {
+                p.submersion = tide;
+            }
         }
         for p in &self.plants {
             let pt = &mut self.patches[p.patch];
@@ -1286,6 +1327,8 @@ impl EcoWorld {
             // a supplement at fish-level metabolism, not a free living.
             let filtered = (CLEARANCE_M3_PER_KG_DAY * mass * sub / (a * 2.0)).min(1.0);
             let search = (search + SUSPENDED_FRACTION * filtered).min(1.0);
+            // The filter also takes bacteria (eaten at meat-like quality).
+            let bacteria_rate = filtered * self.patches[patch].bacteria * 0.5;
 
             // Plants here (accessible leaf mass), plus shore plants reachable from the water.
             let mut plant_targets: Vec<(usize, f32)> = Vec::new();
@@ -1397,6 +1440,13 @@ impl EcoWorld {
             let strip = if sub < 1.0 && air_speed > 0.0 { 40.0 } else { 6.0 };
             let carrion_search = ((PI * reach_now * reach_now + strip * reach_now * path) / a).min(1.0);
             let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here + interference);
+            {
+                // Bacteria through the filter: cheap, meat-like food for anything that strains water.
+                let take = bacteria_rate.min(self.patches[patch].bacteria * 0.3);
+                self.patches[patch].bacteria -= take;
+                delta += take * eff_meat;
+                self.animals[ai].ate_carrion += take * eff_meat;
+            }
             // Energy value per kg eaten, by gut.
             let plant_value = plant_rate * eff_plant;
             let carrion_value = carrion_rate * eff_meat;
@@ -1625,8 +1675,12 @@ impl EcoWorld {
                 let pool = self.patches[a.patch].dead_matter;
                 let absorbed = (het * surface * (pool / a_area) * OSMOTROPHY_RATE * q).min(pool * 0.2);
                 self.patches[a.patch].dead_matter -= absorbed;
-                delta += absorbed * 0.6;
-                a.ate_plant += absorbed * 0.6;
+                // Phagocytosis: particles swept past the surface by water and by moving.
+                let particles = self.patches[a.patch].bacteria / (a_area * 2.0);
+                let captured = (het * surface * (CURRENT_M_S * sub + speed_here) * 86400.0 * particles * CAPTURE_EFF).min(self.patches[a.patch].bacteria * 0.3);
+                self.patches[a.patch].bacteria -= captured;
+                delta += (absorbed + captured) * 0.6;
+                a.ate_plant += (absorbed + captured) * 0.6;
             }
             a.intake_rate = (delta + fmr + upkeep + activity_cost).max(0.0); // gross gain today
             a.reserve += delta;
@@ -1749,9 +1803,16 @@ impl EcoWorld {
         for pt in self.patches.iter_mut() {
             let tf = temp_factor(pt.temp_c);
             let rate = 0.03 * (0.2 + tf) * (0.3 + 0.7 * pt.moisture);
+            // Microbial loop: decomposers turn dead matter into their own biomass
+            // (growth yield 0.4) and mineral nutrient; bacteria in turn respire
+            // and die back to nutrient at a fifth a day, unless eaten first.
             let dec = pt.dead_matter * rate;
             pt.dead_matter -= dec;
-            pt.nutrient += dec * 0.8;
+            pt.bacteria += dec * BACTERIAL_YIELD;
+            pt.nutrient += dec * (0.8 - BACTERIAL_YIELD);
+            let turnover = pt.bacteria * 0.2 * (0.2 + tf);
+            pt.bacteria -= turnover;
+            pt.nutrient += turnover * 0.8;
             let rot = pt.carrion * (rate * 3.0).min(0.5);
             pt.carrion -= rot;
             pt.nutrient += rot * 0.8;

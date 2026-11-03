@@ -119,9 +119,11 @@ impl<'a> Ctx<'a> {
         self.counts[node_idx] += 1;
         let is_last = self.counts[node_idx] == node.recursive_limit;
 
-        let len = (node.len * scale).clamp(0.04, 3.0);
-        let r0 = (node.r0 * scale).clamp(0.02, 0.8);
-        let r1 = (node.r1 * scale).clamp(0.02, 0.8);
+        // Size floor of a centimetre: the origin of heterotrophy happened far
+        // smaller than the old 4 cm floor allowed (a few hundred grams of body).
+        let len = (node.len * scale).clamp(0.01, 3.0);
+        let r0 = (node.r0 * scale).clamp(0.004, 0.8);
+        let r1 = (node.r1 * scale).clamp(0.004, 0.8);
         let radius = match node.kind {
             NodeKind::Membrane => r0,
             _ => 0.5 * (r0 + r1),
@@ -217,13 +219,20 @@ pub fn decode(g: &Genome) -> Phenotype {
     );
     let mut parts = ctx.parts;
 
-    // Lungs lighten the torso; stored water adds mass.
-    let torso_volume = capsule_volume(parts[0].len, parts[0].radius);
+    // Lungs lighten the torso; stored water adds mass. A membrane root is a
+    // sheet, not a trunk: it keeps its membrane mass (a 5 cm sheet is grams,
+    // not the 600 g capsule its radius would imply) and has no lung cavity.
     let lung = g.lung_frac.clamp(0.0, 0.6);
     let water = g.water_store.clamp(0.0, 0.5);
-    let torso_density = ANIMAL_DENSITY * (1.0 - 0.9 * lung) * (1.0 + water);
-    parts[0].density = torso_density;
-    parts[0].mass = torso_volume * torso_density;
+    let torso_volume = if parts[0].kind == NodeKind::Membrane {
+        parts[0].mass / parts[0].density.max(1.0)
+    } else {
+        let v = capsule_volume(parts[0].len, parts[0].radius);
+        let torso_density = ANIMAL_DENSITY * (1.0 - 0.9 * lung) * (1.0 + water);
+        parts[0].density = torso_density;
+        parts[0].mass = v * torso_density;
+        v
+    };
 
     // Clamp neighbouring mass ratios to about 10:1 for solver stability by
     // raising the lighter part's density.
