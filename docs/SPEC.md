@@ -1,22 +1,33 @@
 # Evo Planet: system specification
 
 A reading guide to how the simulation is built: the data it holds, the
-systems that act on it, the order they run in, and how the pieces talk to
-each other. For *why* each rule exists and what it rests on, see
+systems that act on it, the order they run in each day, and how the pieces
+talk to each other. For *why* each rule exists and what it rests on, see
 `MODEL.md` (design notes and audit log) and `RULES_AUDIT.md` (every number
 and its backing). This document is the *what*.
 
-Diagrams are Mermaid; GitHub renders them inline.
+Names are written out in full here even where the code abbreviates them;
+the code name is given in brackets the first time.
 
-## 1. The two modes and the layers
+Status 2026-11-03.
+
+## 1. Overview
+
+Evo Planet is a technology demo for a game, not the game itself: it shows
+that bodies, abilities and an ecology can all come out of physics and
+energy with nothing scripted. There is one mode, the planet ecology.
+Nothing is scored or ranked. The physics only measures what a body can
+do; the ecology decides what that is worth by making the body earn its
+energy. An earlier archive-evolution mode (a scored task with a MAP-Elites
+archive) was removed on 2026-11-03.
 
 ```mermaid
 flowchart LR
   subgraph core["evo_core (Rust)"]
-    G[genome] --> D[decode]
-    D --> S[sim: rapier physics episodes]
-    D --> P[plant: plant decoder]
-    S --> E[eco: planet ecology]
+    G[genome] --> D[animal decoder]
+    G --> P[plant decoder]
+    D --> S[physics episodes: rapier3d]
+    S --> E[planet ecology]
     P --> E
     T[terrain] --> E
     PL[planet] --> S
@@ -28,387 +39,424 @@ flowchart LR
   end
   subgraph web["web/ (browser)"]
     WK[worker.js] --> W2
-    IX[index.html: three.js globe, creature view, tables, dials] --> WK
+    IX[index.html: globe, creature view, tables, dials] --> WK
     IX --> W3
   end
-  H[evo_headless CLI] --> E
+  H[evo_headless command line] --> E
   SV[evo_serve: embeds web/] --> IX
 ```
 
-There is one mode, the **planet ecology** (`eco.rs`): no score. Organisms
-earn energy, pay for tissue and work, grow, breed and die on a sphere of
-cells under a planet's gravity, atmosphere, light and water. The physics
-(`sim.rs`) only measures what a body can do; nothing is ranked. An earlier
-archive-evolution mode (a scored task with a MAP-Elites archive) was
-removed on 2026-11-03.
+## 2. The genome
 
-## 2. Data structures
+A directed graph of nodes with recursion limits, in the style of Karl
+Sims (1994), plus a set of whole-organism genes. The same genome is read
+as an animal body or as a plant body; the motility gene decides which,
+and nothing an organism earns or pays jumps at that point.
 
-### 2.1 Genome (`genome.rs`)
+### 2.1 Node
 
-A directed graph of nodes with recursion limits (Sims-style), plus global
-genes. The same genome is read as an animal body (`decode.rs`) or as a
-plant body (`plant.rs`); which reading the ecology uses follows from the
-`motility` gene.
+One node describes one kind of segment and the joint that attaches it to
+its parent. A node can be expanded several times (a tail of repeated
+segments, a leg of three joints) because connections may point back at
+their own node up to the node's recursion limit.
 
-```mermaid
-classDiagram
-  class Genome {
-    nodes: Vec~Node~
-    root: usize
-    base_freq: Hz
-    lung_frac, water_store, density
-    land_tolerance, seed_mass, dispersal, lifespan, repro_frac
-    motility  (0 sessile .. 1 motile; born motile at >= 0.5)
-    gut_type, gut_frac, fat_frac, offspring_frac
-    longevity, leaf_toughness
-    breathing  (0 gills .. 1 lungs)
-    heterotrophy  (0 .. 1: absorb and capture, at the cost of chloroplasts)
-    mutate() (Genome, body_changed)
-  }
-  class Node {
-    len, r0, r1   (metres; r1 doubles as sheet thickness)
-    flat  (0 capsule .. 1 sheet)
-    grip  (0 skin .. 1 clawed foot)
-    stiffness  (0 free .. 1 welded)
-    freedom  (0 one driven axis .. 1 two)
-    limit  (rad)
-    recursive_limit  (1..4)
-    cpg: Cpg
-    connections: Vec~Connection~
-    kind, joint  (labels derived from the genes)
-  }
-  class Connection {
-    target: node index
-    along  (0 base .. 1 tip)
-    around, pitch, roll  (rad)
-    scale
-    reflect, terminal_only, phase_flip
-  }
-  class Cpg {
-    amp, phase, bias
-    amp2, phase2  (second axis)
-    freq_mult  (0.5, 1, 2)
-  }
-  Genome "1" --> "1..10" Node
-  Node "1" --> "0..4" Connection
-  Node --> Cpg
-```
+| Field (code name) | Meaning | Range |
+|---|---|---|
+| length (`len`) | segment length, metres | 0.01 to 3 after scaling |
+| radius at base (`r0`) | capsule radius at the base; for a sheet, half the sheet's width | 0.004 to 0.8 |
+| radius at tip (`r1`) | capsule radius at the tip; for a sheet, its thickness gene (0.1 to 2 mm) | 0.004 to 0.8 |
+| flatness (`flat`) | 0 a round capsule, 1 a thin sheet; every physical quantity blends on it | 0 to 1 |
+| grip | 0 smooth skin, 1 a clawed, gripping foot | 0 to 1 |
+| stiffness | 0 a free joint, 1 welded to the parent (a passive spring grows with it) | 0 to 1 |
+| freedom | 0 one driven axis (a hinge), 1 three driven axes (a ball joint with twist) | 0 to 1 |
+| limit | half range of joint motion, radians | |
+| recursion limit (`recursive_limit`) | how many times this node may expand along one path | 1 to 4 |
+| oscillator (`cpg`) | the segment's rhythm, see 2.2 | |
+| connections | how child nodes hang off this one, see 2.3 | 0 to 4 |
 
-Mutation operators: nudge every scalar gene; nudge the four form genes
-(±0.1, one in five ±0.4); add a random node; **duplicate a segment**
-(copy a used node onto its host, serial or mirrored, keeping its
-oscillator); add or remove a connection; mutate connection parameters and
-pointers; change a recursion limit; motility drifts with an occasional
-flagellum-sized jump. `garbage_collect` drops unreachable nodes. Old JSON
-genomes without the form genes resolve them from the `kind`/`joint`
-labels.
+The old `kind` (capsule, membrane, pad) and `joint` (hinge, ball, rigid)
+labels are derived from the four form genes for display only; genomes
+saved before the form genes existed resolve them from the labels.
 
-### 2.2 Phenotype (`decode.rs`)
+### 2.2 Oscillator
 
-```mermaid
-classDiagram
-  class Phenotype {
-    parts: Vec~Part~
-    lung_frac, water_store, base_freq
-    total_mass, membrane_area, membrane_mass
-    torso_volume, total_section_area
-  }
-  class Part {
-    node, parent
-    len, r0, r1, radius
-    mass, density  (blend of capsule and sheet by flat)
-    flat, grip, stiffness, freedom, limit
-    anchor_parent, rot_from_parent
-    cpg, max_torque, section_area, reflected
-  }
-  class BodyMetrics {
-    reach  (farthest extent from the centre of mass)
-    mouth_area  (trunk front x (1 - flat))
-    claws  (grip-weighted section / trunk section)
-    plating  (mass held stiff on round parts / total)
-  }
-  Phenotype "1" --> "1..24" Part
-  Phenotype ..> BodyMetrics : body_metrics()
-```
+Each node carries a small rhythm generator, in the code a central pattern
+generator (`Cpg`), which is a biologist's name for a nerve circuit that
+produces a repeating movement on its own, the way a spinal circuit drives
+walking or a fin beat without the brain timing every stroke. Here it is a
+sine wave per driven joint axis. Every joint target is
+`bias + amplitude × sin(2π × frequency × time + phase)`.
 
-`decode` expands the graph depth-first with per-path recursion counts,
-clamps sizes (1 cm length, 4 mm radius floors), blends each part's mass,
-tissue volume and muscle section by `flat`, applies lungs and stored
-water to the trunk, clamps joined-part mass ratios to 12:1, and sums the
-whole-body quantities. `placements` lays the parts out with the root at
-the origin; `body_metrics` reads reach, mouth, claws and plating off that
-geometry.
+| Field (code name) | Meaning |
+|---|---|
+| amplitude (`amp`), phase, bias | the hinge axis: how far, when in the cycle, and around what rest angle |
+| sideways amplitude (`amp2`), sideways phase (`phase2`) | the second axis, a sideways swing, opened by the freedom gene |
+| twist amplitude (`amp3`), twist phase (`phase3`) | the third axis, a twist about the segment's own length (a shoulder's pronation, which pitches a wing or a fin through its stroke), opened by the freedom gene |
+| frequency multiplier (`freq_mult`) | 0.5, 1 or 2 times the genome's base frequency |
 
-### 2.3 Plant body (`plant.rs`)
+### 2.3 Connection
 
-```mermaid
-classDiagram
-  class PlantBody {
-    parts: Vec~PlantPart~  (kind label, flat, pose, mass)
-    height, target_mass
-    leaf_mass, stem_mass, root_mass
-    leaf_area  (effective, nine-direction projection with overlap removed)
-    leaf_area_total, transport  (kg x m of stem path)
-    sla, growth_cap, stress, gravity
-  }
-```
+| Field | Meaning |
+|---|---|
+| target | which node the child is |
+| along | where on the parent's length, 0 base to 1 tip |
+| around | angle around the parent's axis, radians |
+| pitch | tilt of the child from the parent's outward normal toward its tip |
+| roll | roll of the child about its own axis |
+| scale | multiplies every dimension of the child subtree |
+| reflect | also make a mirror-image copy across the parent's symmetry plane |
+| terminal only | expand only on the parent's last recursion |
+| phase flip | the mirrored copy runs half a cycle behind (alternating gait) instead of in step (bounding, flapping) |
 
-Each part is `flat` leaf (chord 2·r0, thickness from r1) and `1 − flat`
-stem; whatever is below ground is root. Structure is checked two ways
-under gravity: bending moment at every stem from the horizontal lever arm
-of all it carries, and Euler buckling of columns; `growth_cap` is the
-fraction of full size the stems can hold. `set_gravity` rescales stress
-without re-decoding.
+### 2.4 Whole-organism genes
 
-### 2.4 Physics episode (`sim.rs`)
+| Gene (code name) | Meaning |
+|---|---|
+| base frequency (`base_freq`) | hertz of the oscillators |
+| motility | 0 sessile (lives as a plant), 1 fully motile (lives as an animal); offspring at or above 0.5 are born animals |
+| heterotrophy | investment in absorbing and capturing food through the surface, at the cost of photosynthetic machinery |
+| breathing | 0 gills (water), 1 lungs (air); halfway breathes poorly in both |
+| gut type (`gut_type`) | 0 a long fermenting gut, 1 a short carnivore gut; sets how well plant and animal tissue are assimilated |
+| stomach fraction (`gut_frac`) | stomach capacity as a fraction of body mass |
+| fat fraction (`fat_frac`) | energy reserve capacity as a fraction of body mass |
+| offspring fraction (`offspring_frac`) | a newborn's mass as a fraction of adult mass |
+| maturity fraction (`repro_frac`) | fraction of full size at which reproduction starts, for plants and animals alike |
+| longevity | multiplier on the lifespan that mass sets |
+| lifespan | a sessile organism's lifespan in days; blended with the mass-based lifespan by motility |
+| seed mass (`seed_mass`), dispersal | a seed's mass and how far it travels (10 m per unit) |
+| land tolerance (`land_tolerance`) | a plant's adaptation to air and dry ground; costs upkeep everywhere |
+| leaf toughness (`leaf_toughness`) | tough leaves lose less to grazers and digest worse but photosynthesise slower |
+| lung fraction (`lung_frac`) | share of the trunk's volume given to lungs or gills |
+| water store (`water_store`) | extra trunk mass held as water, against aridity |
+| density | tissue density, kg/m³ |
 
-```mermaid
-classDiagram
-  class SimConfig {
-    dt (1/120 s), settle_time (1 s), episode_time (4 s)
-    motors: bool  (false = sham control)
-    steer  (-1..1 asymmetric drive)
-    bias_shift  (posture shift)
-  }
-  class CreatureSim {
-    pheno, planet-derived fluid densities, environment
-    rapier bodies, colliders, joints
-    ground (flat, or the shore's slope)
-    water level, fatigue, hydration
-    step(), result()
-  }
-  class EpisodeResult {
-    distance, sustained_speed  (second half, after settling)
-    yaw_rate, climb_speed
-    airborne_frac, time_aloft, air_distance
-    mean_height  (uprightness)
-    shore_progress, exploded
-  }
-  CreatureSim --> SimConfig
-  CreatureSim ..> EpisodeResult
-```
+### 2.5 How and when the genome changes
 
-Environments: Land (flat ground, bodies placed on it), Water (12 m deep;
-a body starts where it would rest: floating, on the bed, or mid-water),
-Air (launched at 3 m/s from 10 m; a stone's distance is subtracted),
-Shore (a bed rising 12 cm/m through the waterline; probe only).
+Mutation happens only at reproduction. There is no recombination and no
+change during life. A plant mutates every seed it makes; an animal's
+birth is an exact copy one time in four and a mutated copy three times in
+four. One mutation pass makes about one and a half changes on average,
+whatever the genome's size (each element's chance is scaled by the number
+of elements). The operators, in the order they run:
 
-Forces per step: per-part fluid forces blended by `flat` (capsule drag
-on three axial samples; panel lift and drag on four sub-panels), both
-capped at the force that would stop the sample's share of the part in one
-step; spin drag about the part's own axis; buoyancy from tissue volume;
-rolling resistance on ground contact; joint motors driven by the CPG with
-a Hill force-velocity limit, a passive spring per `stiffness`, and a
-second axis per `freedom`.
+1. **Nudge every scalar gene** of every node by a relative Gaussian step
+   (large values move by large amounts), and the four form genes by a
+   small step, one time in five by a large one.
+2. **Nudge the whole-organism genes.** Motility drifts in small steps
+   with, one time in ten, a jump of about a third: a flagellum.
+3. **Duplicate a segment** (serial homology): copy a node that is in use,
+   with its attachment and its oscillator, onto the same host, further
+   along it or mirrored. Two legs become four; a fin becomes a pair.
+4. **Add a node** with random genes, attached somewhere reachable.
+5. **Mutate connections**: nudge their pose, scale and pointers; add or
+   remove one.
+6. **Garbage collect** nodes no longer reachable from the root.
 
-### 2.5 Ecology (`eco.rs`)
+A child whose body changed starts a new lineage with some probability
+(one in five for animals, three in a hundred per seed); this is
+bookkeeping for the table and has no effect on the organism.
 
-```mermaid
-classDiagram
-  class EcoWorld {
-    planet: PlanetParams, derived: Derived
-    patches: Vec~Patch~, neighbours: 6 per patch
-    plants: Vec~Plant~, animals: Vec~Animal~
-    day, patch_area (m2), terrain_seed
-    trait_cache: body key to Traits
-    pending: measurement queue (animal, environment)
-    stats: EcoStats, history
-    tick(), measure_pending(budget), set_planet()
-  }
-  class Patch {
-    pos, elevation, temp_c, water, shore, moisture
-    submersion  (1 sea, tide-swung ~0.5 shore, 0 inland)
-    nutrient, dead_matter, carrion, bacteria  (kg pools)
-    canopy, light_left, motile_area
-  }
-  class Plant {
-    genome, body: PlantBody, lineage, patch
-    biomass, energy, age, height
-    light_frac, water_frac
-  }
-  class Animal {
-    genome, key, traits: Traits, lineage, patch
-    mass, reserve, gut_plant, gut_meat, age
-    kills, offspring, ate_plant, ate_meat, ate_carrion, intake_rate
-  }
-  class Traits {
-    mass, membrane_area, membrane_mass, section_area, activity
-    land_speed, water_speed, air_speed, glide_distance
-    turn_land, turn_water, climb_water, turn_air, climb_air
-    reach, mouth_area, claws, plating, upright
-    measured_land, measured_water, measured_air
-  }
-  EcoWorld "1" --> "*" Patch
-  EcoWorld "1" --> "*" Plant
-  EcoWorld "1" --> "*" Animal
-  Animal --> Traits
-```
+## 3. The two bodies a genome can be
 
-`Traits` are what the physics and geometry say a body can do. They are
-cached by body key, measured lazily (at birth, and again at half adult
-mass), and a changed body inherits its parent's measured speeds as a
-neutral prior until its own episodes run.
+### 3.1 Animal phenotype (`decode.rs`)
 
-### 2.6 Planet and terrain (`planet.rs`, `terrain.rs`)
+The graph is expanded depth-first into up to 24 parts. Each part is a
+blend, by its flatness, of a capsule of mean radius and a sheet of width
+twice the base radius: mass, tissue volume (for buoyancy) and muscle
+cross-section all blend. Lungs and stored water are added to the trunk.
+Joined parts have their mass ratio clamped to 12:1 for the solver.
 
-`PlanetParams` (gravity, pressure, O2 and CO2 fractions, mean
-temperature, water coverage, humidity, insolation) derives `Derived`
-(air and water density, O2 availability, NPP factor, aridity, flight
-index, and so on). Terrain is ridged noise on a Fibonacci sphere; sea
-level is the elevation quantile that matches water coverage; local
-temperature falls with latitude and 6.5 °C per km. All of it can change
-under a running world (`set_planet`).
+The muscle that moves a part sits on the segment it hangs from (a thigh
+is swung by the hip, a wing by the chest), so a part's **maximum torque**
+is 4000 newton-metres per square metre of its *parent's* cross-section.
 
-## 3. Systems and the daily tick
+| Phenotype field | Meaning |
+|---|---|
+| parts | the tree of parts, root first |
+| total mass, membrane area, membrane mass | whole-body sums; membrane means sheet |
+| torso volume, total muscle section | lung room; oxygen demand |
+
+| Part field | Meaning |
+|---|---|
+| length, radii, blended radius, mass, density | size and substance |
+| flatness, grip, stiffness, freedom, limit | the form genes, copied |
+| anchor on parent, rotation from parent | joint placement |
+| oscillator, maximum torque, muscle section, own section, reflected | drive and strength |
+
+Body geometry also yields three **anatomical** quantities read off the
+rest pose: mouth area (the trunk's front, times one minus its flatness),
+claws (grip-weighted foot section over trunk section) and plating (the
+share of mass held stiff on round parts). These are anatomy, not
+abilities; every ability is measured (section 5).
+
+### 3.2 Plant body (`plant.rs`)
+
+Each part is leaf in proportion to its flatness (a sheet of width twice
+the base radius and thickness from the tip-radius gene) and stem for the
+rest; whatever lies below ground is root. Structure is checked under the
+planet's gravity two ways: the bending moment at every stem from the
+horizontal lever arm of all it carries, and Euler buckling of columns
+with a 3 GPa modulus. The result is a **growth cap**, the fraction of full
+size the stems can hold. Effective leaf area is the projection from nine
+sky directions with overlap removed. Transport cost grows with the
+kilogram-metres of stem between root and every leaf.
+
+## 4. Physics episodes (`sim.rs`)
+
+A creature simulation builds one body in rapier3d and steps it at 120 Hz
+for a fixed episode (4 s in the ecology, after 1 s of settling with the
+motors off; the air launch has no settling).
+
+### 4.1 Environments
+
+| Environment | Start | Ground and fluid |
+|---|---|---|
+| Land | placed on the ground with 1 cm clearance | flat ground, air |
+| Water | where the body would rest: floating, on the bed or mid-water | 12 m deep, water below the surface |
+| Air | launched forward at 3 m/s from 10 m | air; a thrown stone's distance is the baseline |
+| Shore | 4 m seaward of the waterline | a bed rising 12 cm per metre (an audit probe, not used by the ecology) |
+
+### 4.2 Configuration
+
+| Setting (code name) | Meaning |
+|---|---|
+| time step (`dt`), settle time, episode time | 1/120 s, 1 s, 4 s |
+| motors | false is the sham control: the same body with no muscle at all |
+| amplitude scale (`amp_scale`) | 0 is the hold control: muscles hold the rest posture but do not swing |
+| steer | asymmetric drive, mirrored parts get less and the others more: how a body turns |
+| bias shift (`bias_shift`) | added to every joint's rest angle: the posture shift used to climb or dive |
+
+### 4.3 Forces each step
+
+- **Joint motors.** Each joint has three driven axes: the hinge, the
+  sideways swing and the twist about the part's length; freedom opens
+  the last two. Torque follows a Hill force-velocity limit (zero at
+  25 rad/s), a passive spring proportional to stiffness holds the rest
+  pose, and limits shrink with stiffness.
+- **Sheet forces**, in proportion to flatness, on four sub-panels. Below
+  the stall (about 15 degrees) the flow is attached: lift perpendicular to
+  the relative wind with the thin-aerofoil slope 2π, reduced for the
+  panel's aspect ratio along the wind, plus induced drag. Past the stall:
+  the flat-plate normal force (2.61 sin α cos α). The two are blended
+  across the stall. Attached lift is what lets a flapping wing push:
+  the lift vector tilts with the stroke.
+- **Capsule drag**, in proportion to one minus flatness, on three samples
+  along the axis (0.5 axial, 1.1 lateral).
+- **Force limiter**: no sample's fluid force may exceed what would stop
+  its share of the part in one step.
+- **Spin drag** about the part's own axis; **rolling resistance** (0.05)
+  on ground contact; **buoyancy** from tissue volume; submersion damping.
+
+### 4.4 What an episode reports
+
+| Result (code name) | Meaning |
+|---|---|
+| distance, sustained speed (`sustained_speed`) | horizontal progress; progress over the second half only, so a topple or an initial roll does not count |
+| yaw rate, climb speed | trunk turning rate and vertical speed over the second half |
+| airborne fraction, time aloft, air distance | share of steps off the ground; seconds before first landing; horizontal distance at first landing |
+| mean height | centre-of-mass height above ground, averaged (uprightness) |
+| swept reach (`swept_reach`) | the farthest any part's end got from the centre of mass during the episode |
+| shore progress, exploded | beach probe; the run went non-finite or past 60 m/s and is discarded |
+
+## 5. Measurement, not scoring
+
+Every ability an organism has in the ecology comes from physics episodes
+with a control. A body is measured when it is born and again at half its
+adult mass; a body identical to its parent's inherits the parent's
+measurements, and a changed body uses them as a neutral prior until its
+own episodes run.
+
+| Ability | Episode | Control | Definition |
+|---|---|---|---|
+| land speed | land, motors on | the same body, motors off | sustained speed minus the control's |
+| uprightness | land, motors on | | mean height over half the reach |
+| turn rate (land, water, air) | asymmetric drive | symmetric drive | difference in yaw rate |
+| water speed | water, motors on | motors off | sustained speed minus the control's |
+| climb speed (water, air) | posture shift | no shift | difference in vertical speed |
+| glide | air, wings held (amplitude 0) | a thrown stone | metres beyond where the stone lands |
+| powered lift (`flap_lift`) | air, full stroke | the same body holding its wings | metres of mean height the stroke adds |
+| sustained air speed | air, full stroke | | distance over the episode, only if aloft for 95% of it and past 5 m |
+| reach | land, water, air | | the swept reach, the largest over the environments measured |
+
+The air battery runs only for bodies light enough for wings to matter
+(wing loading under 50 kg/m²). A **glider** is a lineage whose held wings
+carry it 10 m beyond the stone (a glide angle under 45 degrees); a
+**powered flier** is one whose stroke lifts it at least half a metre over
+holding still.
+
+The claim "flapping makes it fly" is held to this test in the code
+(`flapping_and_feathering_sheets_add_lift`): a bat-like body whose chest
+flaps the arm and twists the shoulder a quarter cycle later stays higher
+than the same body holding its wings, while the same body with the sheets
+replaced by rods of the same mass falls like a stone. Because the flight
+dynamics are chaotic at the level of a float rounding, the claim is made
+over an ensemble of mountings, frequencies and feather phases and judged
+by its mean, its share of positive cases and its best case. Before the
+shoulder twist and the attached-flow lift existed, no mounting, frequency
+or feather phase produced lift; both findings are recorded in `MODEL.md`.
+
+Three quantities are read from anatomy rather than measured: mouth area,
+claws and plating. They enter the ecology as what a body *is*, in the
+same way mass does.
+
+## 6. The world (`terrain.rs`, `planet.rs`, `eco.rs`)
+
+The planet is a Fibonacci sphere of cells, six neighbours each. The cell
+is a run parameter (100 m² by default); every rule is per square metre
+or per metre, so the cell size must change nothing but resolution.
+Terrain is ridged noise; sea level is the elevation quantile matching the
+water-coverage dial; temperature falls with latitude and 6.5 °C per
+kilometre. Shore cells carry a submersion that swings with a spring-neap
+tide and blends breathing, light, water and locomotion between sea and
+land.
+
+| Structure | Fields |
+|---|---|
+| planet parameters | gravity, pressure, O₂ and CO₂ fractions, mean temperature, water coverage, humidity, insolation |
+| derived | air and water density, oxygen availability, productivity factor, aridity, flight index |
+| world (`EcoWorld`) | planet, cells, neighbours, plants, animals, day, cell area, terrain seed, trait cache by body, measurement queue, statistics, history |
+| cell (`Patch`) | position, elevation, temperature, water, shore, moisture, submersion, nutrient, dead matter, carrion and bacteria pools, canopy, light left, motile mat area |
+| plant | genome, body, lineage, cell, biomass, energy, age, height, light and water shares |
+| animal | genome, body key, traits, lineage, cell, mass, reserve, stomach (plant, meat), age, kills, offspring, what it ate, intake rate |
+| traits | mass, membrane area and mass, muscle section, activity, the measured abilities of section 5, mouth area, claws, plating, and which environments were measured |
+
+The planet can change under a running world: sea level, climate and
+gravity follow the dials, plant structure is rescaled, and every body is
+queued for a fresh measurement when gravity, pressure or oxygen changed.
+
+## 7. The daily tick
 
 ```mermaid
 flowchart TD
-  A[measure_pending: run up to N physics test batteries] --> B[tick]
-  B --> C[tide and canopy reset per patch]
-  C --> D[Plants per patch: light, water, nutrients, osmotrophy, phagocytosis, respiration, growth, seeding, leaf shedding, death]
-  D --> E[Seed dispersal: hop over the graph; motile seeds become animals]
-  E --> F[Animals: metabolism, photosynthesis, foraging, predation, movement, growth, reproduction, death]
-  F --> G[Resolve deaths and kills; births placed by larval drift]
-  G --> H[Decomposition: litter to bacteria and nutrient; carrion rots; weathering]
-  H --> I[Statistics and history]
+  A["run the measurement queue (up to N bodies)"] --> B["tide and canopy reset per cell"]
+  B --> C["plants: light, water, nutrients, absorption, capture, respiration, growth, seeding, leaf shedding, death"]
+  C --> D["seed dispersal over the cell graph; seeds with motility ≥ 0.5 are born as animals"]
+  D --> E["animals: maintenance, activity, photosynthesis, foraging, predation, movement, growth, reproduction, death"]
+  E --> F["resolve deaths and kills; place births by larval drift"]
+  F --> G["decomposition: litter to bacteria and nutrient; carrion rots; weathering and leaching"]
+  G --> H["statistics and history"]
 ```
 
-### 3.1 The test battery (`measure_pending`)
-
-For a body not yet measured in an environment, run:
-
-| Episode | What it yields |
-|---|---|
-| Land, motors on | sustained speed, uprightness |
-| Land, motors off | passive drift to subtract (sham control) |
-| Land, asymmetric drive | turn rate |
-| Water, motors on/off | sustained speed net of drift |
-| Water, steer and posture shift | turn rate, climb speed |
-| Air (if wing loading < 50 kg/m²) | glide beyond a stone, sustained flight, turn, climb |
-
-The queue holds one request per (body, environment) and alternates
-between the most-copied unmeasured body and the newest, so a spreading
-body is checked soon and a new plan is not measured last.
-
-### 3.2 Plants per patch
+### 7.1 Plants, per cell
 
 ```mermaid
 flowchart LR
-  L[light x area x surface shade] --> BL[Beer-Lambert by height order]
-  BL --> DA[depth attenuation 0.3/m for bed-anchored plants]
-  DA --> PH[photosynthesis x water x habitat x nutrient x toughness x 1 - 0.6 heterotrophy]
-  DM[dead matter] --> OS[osmotrophy by surface]
-  BA[bacteria] --> PG[phagocytosis by surface and water movement]
+  L["light × area × surface shade from motile mats"] --> BL["Beer-Lambert by height order"]
+  BL --> DA["depth attenuation, 0.3 per metre, for bed-anchored plants"]
+  DA --> PH["photosynthesis × water × habitat × nutrient × toughness × (1 − 0.6 × heterotrophy)"]
+  DM[dead matter] --> OS["absorption through the surface (osmotrophy)"]
+  BA[bacteria] --> PG["capture by the surface in moving water (phagocytosis)"]
   PH --> EN[energy]
   OS --> EN
   PG --> EN
-  EN --> RS[respiration by tissue and motility]
-  RS --> GR[growth to structural cap]
-  GR --> SD[seeds when above repro_frac of full size]
-  EN --> LS[leaf shedding by leaf lifespan]
+  EN --> RS["respiration by tissue class and motility"]
+  RS --> GR["growth to the structural cap"]
+  GR --> SD["seeds above the maturity fraction of full size"]
+  EN --> LS["leaf shedding by leaf lifespan"]
 ```
 
-### 3.3 Animals per individual
+### 7.2 Animals, per individual
 
 ```mermaid
 flowchart LR
-  MB[maintenance: tissue rates, Q10, oxygen] --> DL[delta]
-  AC[activity: driven muscle section x swing x rate] --> DL
-  PH[photosynthesis at the surface mat, shared by area] --> DL
-  RG[range: reach circle + reach x path, rings over cells] --> FR[Holling type II intake of plants, carrion, bacteria, with interference]
-  FR --> GT[stomach and digestion by gut type]
+  MB["maintenance: tissue rates × temperature (Q10) × oxygen"] --> DL[daily balance]
+  AC["activity: driven muscle section × swing × rate"] --> DL
+  PH["photosynthesis at the surface mat, shared by area"] --> DL
+  RG["range: π × reach² + 2 × reach × path, over as many cells as it covers"] --> FR["Holling type II intake of plants, carrion and bacteria, with interference"]
+  FR --> GT["stomach and digestion by gut type"]
   GT --> DL
-  OS[osmotrophy and phagocytosis by surface] --> DL
-  PR[predation: encounter by range, attack vs defence logistic, Brose hump, Fritsch return] --> GT
-  DL --> RV[reserve, capped by fat capacity]
-  RV --> GW[growth: WBE]
-  GW --> RP[reproduction at repro_frac of full size]
-  RV --> DT[death: starved, old, suffocated, killed]
-  HG[hungry] --> MV[relocate within range to the best cell it can enter]
+  OS["absorption and capture by surface"] --> DL
+  PR["predation: encounter by range; attack against defence; size-ratio hump (Brose); kill return (Fritsch)"] --> GT
+  DL --> RV["reserve, capped by fat capacity"]
+  RV --> GW["growth (West, Brown and Enquist)"]
+  GW --> RP["reproduction at the maturity fraction of full size"]
+  RV --> DT["death: starved, old, suffocated, killed"]
+  HG[hungry] --> MV["relocate within range to the best cell it can enter"]
 ```
 
-### 3.4 Energy accounting
+### 7.3 Energy accounting
 
-Every quantity is in kilograms of dry biomass equivalent per day; the
-statistics report the flows (NPP, grazing, predation, scavenging, cost)
-and death causes so the ledger can be audited. The `seed_ledger`,
-`gait_audit`, `flier_audit` and `origin_probe` examples print the
-per-individual ledgers behind the aggregate numbers.
+Every quantity is kilograms of dry biomass equivalent per day.
 
-## 4. Interfaces
+| Flow | From | To |
+|---|---|---|
+| net primary production | light on leaf and membrane area | plant and mat biomass |
+| absorption (osmotrophy) | dead matter pool | organisms, by surface area |
+| capture and filter feeding | bacteria pool, suspended fraction | organisms, by surface and clearance |
+| grazing | plant leaf mass | animal stomach |
+| predation | prey (80% edible) | predator stomach |
+| scavenging | carrion pool | animal stomach |
+| maintenance and activity | reserve | heat |
+| litter and corpses | shed leaves, deaths | dead matter, carrion |
+| decomposition | dead matter | bacteria (yield 0.4) and nutrient |
 
-### 4.1 wasm (`evo_wasm/src/lib.rs`)
+The audit examples (`seed_ledger`, `gait_audit`, `flier_audit`,
+`origin_probe`, `flap_probe3`) print the per-individual ledgers behind
+the aggregate numbers.
 
-| Object | Purpose |
+## 8. Interfaces
+
+| wasm object | Methods |
 |---|---|
-| `EcoSim` | ecology: `tick(days, evals)`, `set_planet`, `snapshot_json`, `lineages_json(kind, habitat, sort, max)`, `representative_json`, `plant_representative_json`, `terrain_json`, `immigrate` |
-| `ReplaySim` | one physics episode stepped in the browser: `parts_json` (with flat and grip), `transforms`, `com`, `distance`, `slope` |
-
-### 4.2 Worker protocol (`web/worker.js`)
+| `EcoSim` | tick(days, measurements), set_planet, snapshot_json, lineages_json(kind, habitat, sort, max), representative_json, plant_representative_json, terrain_json, immigrate |
+| `ReplaySim` | one episode stepped in the browser: parts_json (with flatness and grip), transforms, centre of mass, distance, slope |
 
 ```mermaid
 sequenceDiagram
   participant Page
   participant Worker
   participant Wasm
-  Page->>Worker: eco_start {planet, patches}
+  Page->>Worker: eco_start {planet, cells}
   Worker->>Wasm: EcoSim.new
   Worker-->>Page: eco_terrain {mesh}
   loop every few days
-    Worker->>Wasm: tick(3, evals)
+    Worker->>Wasm: tick(3, measurements)
     Worker-->>Page: eco_snap {snapshot, lineages, history}
   end
-  Page->>Worker: eco_planet {planet}  (dials dragged)
+  Page->>Worker: eco_planet {planet}  (a dial moved)
   Worker->>Wasm: set_planet
   Page->>Worker: eco_filter {kind, habitat, sort}
   Page->>Worker: eco_rep {lineage, habitat}
-  Worker-->>Page: eco_rep {genome, env}
+  Worker-->>Page: eco_rep {genome, environment}
   Page->>Page: ReplaySim in the creature view
 ```
 
-### 4.3 Page (`web/index.html`)
+The page holds the three.js globe coloured from the snapshot, the
+creature view (replay with camera follow and continuous form rendering),
+the ecology panel (statistics, flows, deaths, filtered lineage table) and
+the planet dials, always live. `window.evoDebug` exposes replayGenome,
+setZoom, replayTime and replayDistance for scripted screenshot audits.
 
-Globe (three.js, vertex colours from the snapshot), creature view (replay
-with camera follow, continuous form rendering), ecology panel (stats,
-energy flows, deaths, lineage table with filters), planet dials (live in
-ecology mode), gamepad and TV layout. `window.evoDebug` exposes
-`replayGenome`, `setZoom`, `replayTime`, `replayDistance` for scripted
-screenshot audits.
-
-### 4.4 Command line and tools
-
-`evo_headless --eco --planet earth --days N --grid cells --seed S
+`evo_headless --planet earth --days N --grid cells --seed S
 [--patch-area m2] [--evals-per-day k]` prints the daily ledger and
-lineage tables. Examples under `evo_core/examples/` are the audit probes
-(see `MODEL.md`, "Audit tooling").
+lineage tables.
 
-## 5. Invariants the model is held to
+## 9. Invariants the model is held to
 
-1. **Every rule is per area or per metre.** The cell size is a run
-   parameter and must change nothing but resolution (tested at 25, 100
-   and 400 m²; the coarse cut still disagrees, see `MODEL.md`).
+1. **Every rule is per area or per metre.** The cell size changes nothing
+   but resolution (tested at 25, 100 and 400 m² on a fixed 6 hectares;
+   the two finer cuts agree within about a quarter, the coarse one not yet).
 2. **No binary switches in biology.** Form, joints, breathing, diet,
    maintenance, lifespan and reproduction are continua on genes. The one
-   remaining split is in code: an organism is ticked as a plant below
-   motility 0.5 and as a mover above it; nothing it pays or earns jumps
-   there.
-3. **Every measured ability has a control.** Speeds net of the
-   motors-off twin; glide beyond a thrown stone.
-4. **No founders, no rescues, no population guard.** Life starts as
-   algae; extinction is a result.
+   remaining split is in code: below motility 0.5 an organism is ticked
+   as a plant, above it as a mover; nothing it pays or earns jumps there.
+3. **Every ability is measured, with a control.** Speeds net of the
+   motors-off twin; glide beyond a thrown stone; powered lift over the
+   held wing; reach as swept.
+4. **No founders, no rescues, no population guard.** Life starts as algae.
+   Extinction is a result.
 5. **No claim without a replay looked at.** The audit examples and the
-   page hook exist so that any number can be turned into a picture.
+   page hook exist so any number can be turned into a picture.
 
-## 6. Known performance guards (not biology)
+## 10. Performance guards that remain
 
 | Guard | Where | Binds when |
 |---|---|---|
-| Plant density caps | 0.48/m² sea, 0.08/m² land | always, in a full sea |
-| Measurement budget | 8 bodies/day (headless), a few per slice (browser) | whenever births outrun it |
-| Max nodes/parts | 10 nodes, 24 parts | rarely |
-| Prey candidates per day | 3 | at high prey density |
+| plant density caps | 0.48 per m² at sea, 0.08 per m² on land | always, in a full sea |
+| measurement budget | 8 bodies per day headless; a few per slice in the browser | whenever births outrun it (badly, in the unguarded run) |
+| maximum nodes and parts | 10 nodes, 24 parts | rarely |
+| prey candidates per day | 3 | at high prey density |
 
-The population guard was removed on 2026-11-03; cohorts (one object for
+The population guard was removed on 2026-11-03. Cohorts (one object for
 many identical small organisms) are the planned replacement for its
-performance role and are not built yet.
+performance role and are not built.

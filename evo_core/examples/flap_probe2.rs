@@ -10,9 +10,9 @@ use evo_core::sim::{CreatureSim, Environment, SimConfig};
 use std::f32::consts::PI;
 
 fn bat(trunk_r: f32, wing_len: f32, half_span: f32, flap_amp: f32, feather_amp: f32, feather_phase: f32, feather_limit: f32, freq: f32, sheet: bool) -> Genome {
-    let flap = Cpg { amp: flap_amp, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0 };
-    let feather = Cpg { amp: feather_amp, phase: feather_phase, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0 };
-    let still = Cpg { amp: 0.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0 };
+    let flap = Cpg { amp: flap_amp, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0, amp3: 0.0, phase3: 0.0 };
+    let feather = Cpg { amp: feather_amp, phase: feather_phase, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0, amp3: 0.0, phase3: 0.0 };
+    let still = Cpg { amp: 0.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0, amp3: 0.0, phase3: 0.0 };
     let trunk = Node {
         kind: NodeKind::Capsule, len: 0.25, r0: trunk_r, r1: trunk_r * 0.7, joint: JointKind::Rigid,
         flat: 0.0, grip: 0.0, stiffness: 1.0, freedom: 0.0, limit: 0.3, recursive_limit: 1, cpg: still,

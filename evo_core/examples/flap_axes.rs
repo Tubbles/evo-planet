@@ -9,7 +9,7 @@ use rapier3d::na::Vector3;
 use std::f32::consts::PI;
 
 fn main() {
-    let still = Cpg { amp: 0.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0 };
+    let still = Cpg { amp: 0.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0, amp3: 0.0, phase3: 0.0 };
     for &(sheet_around, sheet_pitch, sheet_roll) in &[(0.0f32, 0.0f32, PI / 2.0), (0.0, 0.0, 0.0), (PI / 2.0, 0.0, 0.0), (0.0, 1.2, 0.0), (0.0, 1.2, PI / 2.0)] {
         let trunk = Node {
             kind: NodeKind::Capsule, len: 0.25, r0: 0.03, r1: 0.02, joint: JointKind::Rigid,

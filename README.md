@@ -1,5 +1,10 @@
 # Evo Planet
 
+A technology demo for a game, not the game: the world mode exists to show
+that bodies, abilities and ecology can all come out of physics and energy,
+with nothing scripted. What a game built on it would add (a player, goals,
+a camera, a part palette) is listed at the end.
+
 A planet with no score. Life starts in the sea as floating algae sheets and
 nothing else; everything that comes after has to earn its energy under the
 physics of the world you set. A Sims-style graph genome grows bodies that
@@ -110,15 +115,23 @@ battery of rapier episodes:
   mid-water); speed net of drift; turn rate and climb speed from steering
   and a posture shift.
 - **Air** (bodies with wing loading under 50 kg/m²): launched at 3 m/s
-  from 10 m; metres beyond where a stone lands are the glide; still aloft
-  at the end is flight.
+  from 10 m. The held wing (muscles hold posture, no stroke) is the glide:
+  metres beyond where a stone lands. The full stroke measured against the
+  held wing is powered lift: metres of mean height the flapping adds.
+  Still aloft at the end is sustained flight.
+- **Reach** is the farthest any part end sweeps during these episodes.
 
 Fluid forces blend by flatness: capsule drag on three axial samples, and
-flat-plate lift and drag on four sub-panels (`C = 2.61 sin α cos α`,
-parasitic drag 0.09), the same code at water and air density. Spin drag,
-rolling resistance, a Hill force-velocity limit and an explicit force
-limiter close the exploits that evolution found. Speeds are also reported
-in body lengths per second.
+on four sub-panels per sheet, attached-flow lift below the stall
+(thin-aerofoil slope, aspect-ratio corrected, with induced drag) and the
+flat-plate normal force past it (`C = 2.61 sin α cos α`), the same code
+at water and air density. Joints have three driven axes (hinge, sideways
+swing, twist about the segment), opened by the freedom gene; torque comes
+from the parent segment's muscle. Spin drag, rolling resistance, a Hill
+force-velocity limit and an explicit force limiter close the exploits
+that evolution found. Speeds are also reported in body lengths per
+second. That flapping sheets lift a body is a test in the code, with the
+held wing and a rod-winged twin as controls (`docs/MODEL.md`, "Flight").
 
 ## The planet ecology
 
@@ -181,7 +194,7 @@ git clone https://github.com/Tubbles/evo-planet.git && cd evo-planet
 
 The script opens a kiosk browser window within a second showing a live
 build log, then pulls the latest commits, installs Rust and wasm-bindgen on
-first run, builds the wasm and the server, and swaps the window to the game
+first run, builds the wasm and the server, and swaps the window to the demo
 when it is ready. If the build fails it runs the previous binary and says so
 on screen. Add the script to Steam as a non-Steam game and choose the
 "Gamepad" controller template so the browser sees a normal controller.

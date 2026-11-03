@@ -77,6 +77,10 @@ impl Default for SimConfig {
 pub const C_P_ALPHA: f32 = 2.61;
 /// Parasitic drag of a thin panel at zero incidence.
 pub const CD0_PANEL: f32 = 0.09;
+/// Incidence at which a thin plate's flow separates (about 15 degrees) and
+/// the width of the blend from attached lift to the stalled normal force.
+pub const STALL_ANGLE: f32 = 0.26;
+pub const STALL_WIDTH: f32 = 0.12;
 /// Rolling resistance coefficient of a body on the ground (soft tissue on
 /// soil: 0.03-0.1). Without it a toppled capsule rolls forever.
 pub const C_ROLLING: f32 = 0.05;
@@ -338,14 +342,16 @@ impl CreatureSim {
             let parent = p.parent.unwrap();
             let frame1 = Isometry3::from_parts(p.anchor_parent.into(), p.rot_from_parent);
             let frame2 = Isometry3::from_parts(Vector3::new(0.0, -p.len * 0.5, 0.0).into(), UnitQuaternion::identity());
-            // One joint: two driven axes, twist locked. `stiffness` adds a passive
-            // spring holding the rest pose (welded at 1); `freedom` opens the second
-            // axis (a hinge at 0, a ball at 1). Both continuous.
+            // One joint, three driven axes: the hinge (X), the sideways swing (Z)
+            // and the twist about the part's own length (Y: a shoulder's
+            // pronation, which is how a wing is pitched). `stiffness` adds a
+            // passive spring holding the rest pose (welded at 1); `freedom` opens
+            // the swing and the twist (a hinge at 0, a ball at 1). All continuous.
             let strength = p.max_torque * fatigue;
             let rigid = strength * RIGID_GAIN * p.stiffness;
             let stiffness = strength * 3.0 + rigid;
             let damping = strength * 0.3 + rigid * 0.1;
-            let mask = JointAxesMask::LIN_X | JointAxesMask::LIN_Y | JointAxesMask::LIN_Z | JointAxesMask::ANG_Y;
+            let mask = JointAxesMask::LIN_X | JointAxesMask::LIN_Y | JointAxesMask::LIN_Z;
             let mut b = GenericJointBuilder::new(mask)
                 .local_frame1(frame1)
                 .local_frame2(frame2)
@@ -360,7 +366,11 @@ impl CreatureSim {
                 .limits(JointAxis::AngZ, [-lim_z, lim_z])
                 .motor_model(JointAxis::AngZ, MotorModel::ForceBased)
                 .motor_position(JointAxis::AngZ, 0.0, stiffness, damping)
-                .motor_max_force(JointAxis::AngZ, strength + rigid);
+                .motor_max_force(JointAxis::AngZ, strength + rigid)
+                .limits(JointAxis::AngY, [-lim_z, lim_z])
+                .motor_model(JointAxis::AngY, MotorModel::ForceBased)
+                .motor_position(JointAxis::AngY, 0.0, stiffness, damping)
+                .motor_max_force(JointAxis::AngY, strength + rigid);
             let jh = impulse_joints.insert(handles[parent], handles[i], b.build(), true);
             joint_handles[i] = Some(jh);
         }
@@ -535,21 +545,25 @@ impl CreatureSim {
             let lim_z = (p.limit * p.freedom * drive).max(0.02);
             let w = 2.0 * PI * f * p.cpg.freq_mult * t;
             let gain = 1.0 + if p.reflected { -self.cfg.steer } else { self.cfg.steer };
-            let (t1, t2) = if self.motors_active() {
+            let (t1, t2, t3) = if self.motors_active() {
                 let a1 = p.cpg.amp * self.cfg.amp_scale;
                 let a2 = p.cpg.amp2 * self.cfg.amp_scale;
+                let a3 = p.cpg.amp3 * self.cfg.amp_scale;
                 (
                     (p.cpg.bias + (self.cfg.bias_shift + a1 * gain * (w + p.cpg.phase).sin()) * drive).clamp(-lim_x, lim_x),
                     (a2 * gain * p.freedom * drive * (w + p.cpg.phase2).sin()).clamp(-lim_z, lim_z),
+                    (a3 * gain * p.freedom * drive * (w + p.cpg.phase3).sin()).clamp(-lim_z, lim_z),
                 )
             } else {
-                (p.cpg.bias.clamp(-lim_x, lim_x), 0.0)
+                (p.cpg.bias.clamp(-lim_x, lim_x), 0.0, 0.0)
             };
             if let Some(j) = self.impulse_joints.get_mut(jh) {
                 j.data.set_motor_position(JointAxis::AngX, t1, stiffness, damping);
                 j.data.set_motor_max_force(JointAxis::AngX, strength + rigid);
                 j.data.set_motor_position(JointAxis::AngZ, t2, stiffness, damping);
                 j.data.set_motor_max_force(JointAxis::AngZ, strength + rigid);
+                j.data.set_motor_position(JointAxis::AngY, t3, stiffness, damping);
+                j.data.set_motor_max_force(JointAxis::AngY, strength + rigid);
             }
         }
     }
@@ -583,6 +597,7 @@ impl CreatureSim {
                     let normal = iso.rotation * Vector3::z();
                     let chord = iso.rotation * Vector3::x();
                     let area = p.len * 2.0 * p.r0 * 0.25 * flat;
+                    let full_area = p.len * 2.0 * p.r0;
                     for (sy, sx) in [(-0.25f32, -0.5f32), (-0.25, 0.5), (0.25, -0.5), (0.25, 0.5)] {
                         let point = center + axis * (sy * p.len) + chord * (sx * p.r0);
                         let v = rb.velocity_at_point(&Point3::from(point));
@@ -592,12 +607,40 @@ impl CreatureSim {
                         }
                         let vhat = v / speed;
                         let s = vhat.dot(&normal); // sin(alpha), signed
-                        let f_normal = normal * (-0.5 * rho * area * speed * speed * C_P_ALPHA * s);
+                        let q = 0.5 * rho * area * speed * speed;
+                        // Two regimes, blended across the stall. Attached flow at
+                        // small incidence: lift perpendicular to the relative wind
+                        // (thin-aerofoil slope 2*pi, reduced for the panel's aspect
+                        // ratio along the wind), plus induced drag along it. This is
+                        // what makes a flapping wing push: the lift vector tilts with
+                        // the stroke. Separated flow past the stall: the flat-plate
+                        // normal force (Lu et al.), which is what a parachute, a paddle
+                        // and a leaf in a gale feel.
+                        let alpha = s.clamp(-1.0, 1.0).asin();
+                        let wind_in_plane = vhat - normal * s;
+                        let wip_n = wind_in_plane.norm();
+                        let f_attached = if wip_n > 1e-4 {
+                            let w = wind_in_plane / wip_n;
+                            let chord_eff = (w.dot(&chord).abs() * 2.0 * p.r0 + w.dot(&axis).abs() * p.len).max(1e-3);
+                            let ar = (full_area / chord_eff).powi(2) / full_area; // span² / area
+                            let cl = 2.0 * PI * alpha.sin() * ar / (ar + 2.0);
+                            let cdi = cl * cl / (PI * ar * 0.9);
+                            // Lift is perpendicular to the wind, in the plane of wind
+                            // and normal, on the same side as the plate force.
+                            let perp = normal - vhat * s;
+                            let lift_dir = perp / perp.norm().max(1e-6);
+                            lift_dir * (-q * cl) - vhat * (q * cdi)
+                        } else {
+                            Vector3::zeros()
+                        };
+                        let f_stalled = normal * (-q * C_P_ALPHA * s);
+                        let stall = ((alpha.abs() - STALL_ANGLE) / STALL_WIDTH).clamp(0.0, 1.0);
+                        let f_lift = f_attached * (1.0 - stall) + f_stalled * stall;
                         let f_para = v * (-0.5 * rho * area * CD0_PANEL * speed);
                         // Explicit drag must not exceed what brings this sample's share
                         // of the part to rest in one step, or light parts in dense
                         // fluid blow up numerically.
-                        let mut f = f_normal + f_para;
+                        let mut f = f_lift + f_para;
                         let f_max = 0.25 * p.mass * flat.max(0.05) * speed / self.cfg.dt;
                         let fm = f.norm();
                         if fm > f_max {
@@ -846,6 +889,84 @@ mod tests {
     use super::*;
     use crate::decode::decode;
     use crate::genome::Genome;
+
+    /// A bat-like body: trunk, two mirrored arm bones swung by the chest
+    /// (the flap) and twisted at the shoulder (the feather, a quarter cycle
+    /// off the flap), each carrying a welded horizontal sheet. The mounting
+    /// was found by construction in examples/flap_probe3.
+    fn bat(feather_amp: f32, feather_phase: f32, freq: f32, sheet: bool, mount: f32) -> Genome {
+        use crate::genome::{Connection, Cpg, JointKind, Node, NodeKind};
+        let flap = Cpg { amp: 1.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, amp3: feather_amp, phase3: feather_phase, freq_mult: 1.0 };
+        let still = Cpg { amp: 0.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, amp3: 0.0, phase3: 0.0, freq_mult: 1.0 };
+        let trunk = Node {
+            kind: NodeKind::Capsule, len: 0.25, r0: 0.03, r1: 0.021, joint: JointKind::Rigid,
+            flat: 0.0, grip: 0.0, stiffness: 1.0, freedom: 0.0, limit: 0.3, recursive_limit: 1, cpg: still,
+            connections: vec![Connection { target: 1, along: 0.6, around: mount, pitch: 0.0, roll: mount, scale: 1.0, reflect: true, terminal_only: false, phase_flip: false }],
+        };
+        let arm = Node {
+            kind: NodeKind::Capsule, len: 0.5, r0: 0.012, r1: 0.008, joint: JointKind::Ball,
+            flat: 0.0, grip: 0.0, stiffness: 0.0, freedom: 1.0, limit: 1.2, recursive_limit: 1, cpg: flap,
+            connections: vec![Connection { target: 2, along: 1.0, around: -PI, pitch: 0.0, roll: -PI, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false }],
+        };
+        let (flat, r0, r1) = if sheet { (1.0, 0.5, 0.1) } else { (0.0, 0.0056, 0.0056) };
+        let wing = Node {
+            kind: if sheet { NodeKind::Membrane } else { NodeKind::Capsule }, len: 0.5, r0, r1, joint: JointKind::Rigid,
+            flat, grip: 0.0, stiffness: 1.0, freedom: 0.0, limit: 0.3, recursive_limit: 1, cpg: still, connections: vec![],
+        };
+        let mut g = Genome::random(1);
+        g.nodes = vec![trunk, arm, wing];
+        g.root = 0;
+        g.base_freq = freq;
+        g.lung_frac = 0.1;
+        g.water_store = 0.0;
+        g.motility = 1.0;
+        g
+    }
+
+    #[test]
+    fn flapping_and_feathering_sheets_add_lift() {
+        // The claim "flapping makes it fly" with its controls: the same body
+        // holding its wings still (what posture alone does), and the same
+        // body with the sheets replaced by rods of the same mass (what the
+        // stroke does without a wing). Air launch at 3 m/s from 10 m, 4 s.
+        //
+        // A single run is not evidence: the dynamics are chaotic enough that
+        // one float rounding in the mounting angle moves a run's mean height
+        // by half a metre either way. So the claim is made over an ensemble
+        // of mountings, frequencies and feather phases, and judged by its
+        // mean, its share of positive cases and its best case.
+        let planet = PlanetParams::earth();
+        let t = 4.0;
+        let run = |g: &Genome, amp_scale: f32| CreatureSim::run_episode(decode(g), &planet, Environment::Air, SimConfig { episode_time: t, amp_scale, ..Default::default() });
+        let mut gains = Vec::new();
+        let mut rod_drop = Vec::new();
+        for &mount in &[PI / 2.0, PI / 2.0 + 1e-4, PI / 2.0 - 1e-4] {
+            for &freq in &[1.5f32, 2.5, 4.0] {
+                let hold = run(&bat(0.7, 0.0, freq, true, mount), 0.0);
+                assert!(!hold.exploded);
+                for &phase in &[PI / 2.0, -PI / 2.0, PI, 0.0] {
+                    let flap = run(&bat(0.7, phase, freq, true, mount), 1.0);
+                    assert!(!flap.exploded);
+                    gains.push(flap.mean_height - hold.mean_height);
+                }
+                let rod = run(&bat(0.7, PI / 2.0, freq, false, mount), 1.0);
+                assert!(!rod.exploded);
+                rod_drop.push(hold.mean_height - rod.mean_height);
+            }
+        }
+        let n = gains.len() as f32;
+        let mean = gains.iter().sum::<f32>() / n;
+        let positive = gains.iter().filter(|g| **g > 0.0).count() as f32 / n;
+        let best = gains.iter().cloned().fold(f32::MIN, f32::max);
+        // The stroke keeps the body higher than holding the same wing: on
+        // average, in most cases, and by a lot in the best case.
+        assert!(mean > 0.2, "mean gain {:.2} m over {} runs: {:?}", mean, gains.len(), gains);
+        assert!(positive >= 0.7, "only {:.0}% of runs gained height: {:?}", positive * 100.0, gains);
+        assert!(best > 0.5, "best gain {:.2} m", best);
+        // Rods fall like a stone (mean height of a 10 m drop ~2.6 m): the
+        // sheet is what the stroke works with.
+        assert!(rod_drop.iter().all(|d| *d > 1.0), "rod twin not far below the held wing: {:?}", rod_drop);
+    }
 
     #[test]
     fn episodes_run_and_are_deterministic() {

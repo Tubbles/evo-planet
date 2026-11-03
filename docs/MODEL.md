@@ -618,3 +618,65 @@ predator–prey mass ratios with a wide distribution, several trophic
 levels in the realised energy-flow web, size-structured food webs
 (Loeuille & Loreau 2005), colonisation of new habitats along gradients,
 turnover of lineages without global collapse.
+
+## Flight, proved and disproved (2026-11-03)
+
+The question was whether flapping sheets make a body fly in this physics,
+with the claim held to a test rather than a replay impression.
+
+Three probes (`examples/flap_probe*.rs`) built a bat-like body by hand:
+trunk, two mirrored arm bones, a sheet on each. The first two probes found
+no gain from flapping, but for the wrong reason: the mountings they chose
+by best glide had both wings stacked above the body, so the "flap" was a
+sideways wag. `flap_probe3` chooses the mounting by construction (lateral
+arm, flap axis along the flight direction, horizontal sheet, feather
+about the span). With that geometry:
+
+- Under the flat-plate model (force normal to the plate) flapping lowered
+  the mean height by 0.3 to 1.8 m at every frequency and feather phase.
+  With the force normal to the plate there is no way to tilt it forward
+  without pitching the wing, and the wing's own hinge, driven by the thin
+  arm's muscle, was too weak to pitch it against the air.
+- Two model changes followed, both real-life systems: attached-flow lift
+  below the stall (thin-aerofoil slope, aspect-ratio corrected, induced
+  drag; the flat-plate normal force past the stall), and a third driven
+  joint axis, the twist about the segment's length, which is the shoulder
+  pronation birds and bats use to pitch the wing. The twist is driven by
+  the parent's muscle like the other axes.
+- With both, flapping with the twist a quarter cycle off the flap keeps
+  the body 0.7 to 1.25 m higher than holding the same wing, and aloft for
+  the whole 4 s against 69 to 73% held. The same body with the sheets
+  replaced by rods of the same mass falls like a stone (mean height
+  2.6 m from a 10 m launch). This is the test
+  `flapping_and_feathering_sheets_add_lift`.
+
+Two other changes came out of the same work. A part's torque now scales
+with its parent's cross-section (the muscle that swings a thigh is on the
+hip, the one that swings a wing is on the chest). And the air measurement
+in the ecology gained its control: the same body holding its wings still.
+Glide is what the held wing does beyond a thrown stone; powered lift is
+the metres of mean height the stroke adds. Reach is measured as the
+farthest any part end sweeps during the land, water or air episode, not
+read off the rest pose.
+
+What this does not show: that flight will evolve. The test says the
+physics permits it; the ecology decides whether a lineage ever pays for
+it.
+
+### A single run is not evidence
+
+While turning the flapping proof into a test, the same body built in two
+files gave different numbers: the mounting angle differed by one float
+rounding (1.5707963 against 1.5707964 radians) and the held wing's mean
+height moved from 4.45 to 4.71 m, the stroke's gain from +0.91 to +0.06 m.
+Over a grid of seven mounting perturbations (down to a millionth of a
+radian), three frequencies and four feather phases, the gain was positive
+in 77 of 84 runs with a mean near +0.45 m and the rod twin always at
+2.57 m. The flight dynamics are chaotic at the level of a float; the claim
+holds as an ensemble and is tested as one (mean, share positive, best).
+
+This matters beyond the test. The ecology measures each body with single
+episodes. For bodies whose motion is this sensitive, a single episode is a
+sample, not a measurement, and a body's inherited speeds may be a lucky
+draw. Averaging a few perturbed episodes would cost a few times the
+physics budget, which is already the binding limit.

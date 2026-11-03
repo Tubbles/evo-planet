@@ -47,9 +47,15 @@ pub struct Cpg {
     pub amp: f32,
     pub phase: f32,
     pub bias: f32,
-    /// Secondary axis (Ball joints only).
+    /// Sideways swing (opened by the freedom gene).
     pub amp2: f32,
     pub phase2: f32,
+    /// Twist about the part's own length (opened by the freedom gene): a
+    /// shoulder's pronation, which pitches a wing or a fin through its stroke.
+    #[serde(default)]
+    pub amp3: f32,
+    #[serde(default)]
+    pub phase3: f32,
     /// Frequency multiplier relative to the genome's base frequency: 0.5, 1 or 2.
     pub freq_mult: f32,
 }
@@ -234,6 +240,8 @@ impl Cpg {
             bias: rng.gen_range(-0.4..0.4),
             amp2: rng.gen_range(0.0..0.6),
             phase2: rng.gen_range(-PI..PI),
+            amp3: rng.gen_range(0.0..0.6),
+            phase3: rng.gen_range(-PI..PI),
             freq_mult: *[0.5f32, 1.0, 1.0, 2.0].iter().nth(rng.gen_range(0..4)).unwrap(),
         }
     }
@@ -253,6 +261,12 @@ impl Cpg {
         }
         if rng.gen_bool(p as f64) {
             self.phase2 = wrap_angle(self.phase2 + gaussian(rng) * 0.6);
+        }
+        if rng.gen_bool(p as f64) {
+            self.amp3 = nudge(rng, self.amp3, 0.3, 0.05, 0.0, 1.5);
+        }
+        if rng.gen_bool(p as f64) {
+            self.phase3 = wrap_angle(self.phase3 + gaussian(rng) * 0.6);
         }
         if rng.gen_bool((p * 0.5) as f64) {
             self.freq_mult = *[0.5f32, 1.0, 2.0].iter().nth(rng.gen_range(0..3)).unwrap();

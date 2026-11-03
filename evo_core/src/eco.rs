@@ -32,7 +32,7 @@ use crate::genome::Genome;
 use std::f32::consts::PI;
 use crate::planet::{Derived, PlanetParams};
 use crate::plant::{decode_plant, PlantBody};
-use crate::sim::{fatigue_factor, CreatureSim, Environment, SimConfig};
+use crate::sim::{fatigue_factor, CreatureSim, Environment, EpisodeResult, SimConfig};
 use crate::terrain;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -154,6 +154,10 @@ pub struct Traits {
     /// Sustained flight speed, m/s: set only when the body is still aloft at
     /// the end of the air-drop episode (powered or very efficient flight).
     pub air_speed: f32,
+    /// Powered lift: metres of mean height the wing stroke adds over the same
+    /// body holding its wings still. Zero for a pure glider.
+    #[serde(default)]
+    pub flap_lift: f32,
     /// Nimbleness: yaw rate gained from asymmetric drive (rad/s) and vertical
     /// speed gained from a posture shift (m/s), per environment. Zero unless
     /// the body locomotes at all.
@@ -302,9 +306,13 @@ pub struct EcoStats {
     pub herbivores: usize,
     pub carnivores: usize,
     pub detritivores: usize,
-    /// Animals with a measured sustained air speed.
+    /// Animals with a measured sustained air speed or a real glide.
     #[serde(default)]
     pub fliers: usize,
+    /// Animals whose wing stroke measurably lifts them over holding still
+    /// (powered flight, the flapping test with its controls).
+    #[serde(default)]
+    pub powered: usize,
     /// Animals with carnivory above 0.15 (counted in whichever class dominates).
     pub omnivores: usize,
     /// Realised diet means: fraction of lifetime intake from kills and from carrion.
@@ -385,6 +393,9 @@ pub struct LineageSummary {
     pub upright: f32,
     #[serde(default)]
     pub air_speed: f32,
+    /// Powered lift from the wing stroke over holding still, metres.
+    #[serde(default)]
+    pub lift: f32,
     /// Mean glide distance beyond a thrown stone from a 10 m launch, metres.
     #[serde(default)]
     pub glide: f32,
@@ -833,7 +844,15 @@ impl EcoWorld {
                 // passive drift, a buoyant rise with a tilted fin or a slide after
                 // a topple, is subtracted. The air drop has its own control (a stone).
                 let mut passive_shore = 0.0;
-                let passive = if env == Environment::Air || r.exploded {
+                // In the air the control is the same body holding its wings
+                // still (amp_scale 0): what the held wing does is the glide,
+                // what the stroke adds over it is powered lift.
+                let mut hold_air: Option<EpisodeResult> = None;
+                let passive = if r.exploded {
+                    0.0
+                } else if env == Environment::Air {
+                    let hold = SimConfig { episode_time: TRAIT_EPISODE_S, amp_scale: 0.0, ..Default::default() };
+                    hold_air = Some(CreatureSim::run_episode(pheno, &self.planet, env, hold));
                     0.0
                 } else {
                     let sham = SimConfig { episode_time: TRAIT_EPISODE_S, motors: false, ..Default::default() };
@@ -870,6 +889,7 @@ impl EcoWorld {
                         traits.turn_water = turn;
                         traits.climb_water = climb;
                         traits.measured_water = true;
+                        traits.reach = traits.reach.max(r.swept_reach);
                     }
                     Environment::Air => {
                         // Dropped from 10 m: a body still aloft for most of the episode
@@ -880,17 +900,31 @@ impl EcoWorld {
                         // Launched at 3 m/s from 10 m: metres beyond where a stone lands are
                         // the wings' doing (glide ratio = that / 10). Still aloft at the
                         // end of the episode means sustained flight at the measured speed.
-                        let beyond = (r.air_distance - crate::sim::ballistic_distance(self.planet.gravity)).max(0.0);
-                        traits.glide_distance = if r.exploded { 0.0 } else { beyond };
+                        let stone = crate::sim::ballistic_distance(self.planet.gravity);
+                        // Glide: what the held wing does beyond a thrown stone.
+                        // Powered lift: how much higher the stroke keeps the body
+                        // than holding the same wing (the flapping test's control).
+                        let (glide, lift) = match &hold_air {
+                            Some(h) if !h.exploded => ((h.air_distance - stone).max(0.0), (r.mean_height - h.mean_height).max(0.0)),
+                            _ => ((r.air_distance - stone).max(0.0), 0.0),
+                        };
+                        traits.glide_distance = if r.exploded { 0.0 } else { glide };
+                        traits.flap_lift = if r.exploded { 0.0 } else { lift };
                         traits.air_speed = if !r.exploded && r.airborne_frac >= 0.95 && r.distance > 5.0 { r.distance / TRAIT_EPISODE_S } else { 0.0 };
                         traits.turn_air = turn;
                         traits.climb_air = climb;
                         traits.measured_air = true;
+                        traits.reach = traits.reach.max(r.swept_reach);
                     }
                     _ => {
                         traits.land_speed = speed;
                         traits.turn_land = turn;
                         traits.measured_land = true;
+                        // Reach is what the body swept in the episode, not the
+                        // rest pose it was drawn in.
+                        if r.swept_reach > 0.0 {
+                            traits.reach = r.swept_reach;
+                        }
                         traits.upright = (r.mean_height / (0.5 * traits.reach).max(0.01)).clamp(0.0, 1.0);
                     }
                 }
@@ -1864,6 +1898,7 @@ impl EcoWorld {
         s.detritivores = 0;
         s.aquatic = 0;
         s.fliers = 0;
+        s.powered = 0;
         s.land_herbivores = 0;
         s.best_land_speed = 0.0;
         s.omnivores = 0;
@@ -1918,6 +1953,9 @@ impl EcoWorld {
             // a tumbling plate drifts a metre or two and is not a glider.
             if a.traits.air_speed > 0.0 || a.traits.glide_distance >= crate::sim::AIR_DROP_HEIGHT {
                 s.fliers += 1;
+            }
+            if a.traits.flap_lift >= 0.5 {
+                s.powered += 1;
             }
             {
                 let mut v = [h, c, d];
@@ -1984,6 +2022,7 @@ impl EcoWorld {
             reach: 0.0,
             upright: 0.0,
             air_speed: 0.0,
+            lift: 0.0,
             glide: 0.0,
             turn: 0.0,
             climb: 0.0,
@@ -2063,6 +2102,7 @@ impl EcoWorld {
                     s.land_speed += a.traits.land_speed / c;
                     s.water_speed += a.traits.water_speed / c;
                     s.air_speed += a.traits.air_speed / c;
+                    s.lift += a.traits.flap_lift / c;
                     s.glide += a.traits.glide_distance / c;
                     s.turn += (if self.patches[a.patch].water { a.traits.turn_water } else { a.traits.turn_land.max(a.traits.turn_air) }) / c;
                     s.climb += a.traits.climb_water.max(a.traits.climb_air) / c;
