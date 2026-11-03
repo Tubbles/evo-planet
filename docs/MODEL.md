@@ -529,7 +529,14 @@ Maintenance is the same continuum across the kingdom line: tissue upkeep
 at a plant's rates (membranes 0.4%/day, the rest 0.05%/day) plus the
 vertebrate field rate scaled by motility, paid identically whether the
 organism sits in the plant tick or the animal tick. A sheet at motility
-0.5 pays half an animal's bills; at 0.05 it pays a sheet's. The remaining
+0.5 pays half an animal's bills; at 0.05 it pays a sheet's. The first
+algae-only run on this continuum (5000 days) selected heterotrophy even
+harder (half of all plants over 0.3) and motility rose only to a mean of
+0.05: paying for motility before it is an animal bought nothing, which is
+a switch of its own. Motility now pays continuously on the sessile side
+too: a swimming cell meets more particles (2 cm/s per unit motility added
+to the water's 5 cm/s) and can hold nearer the light (its effective depth
+shrinks by 1 − motility). The remaining
 switch is in the code, not the biology: an organism is ticked as a plant
 below motility 0.5 and as a mover above it, because the two have different
 data structures. Nothing it pays or earns jumps at that line.

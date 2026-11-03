@@ -1003,7 +1003,7 @@ impl EcoWorld {
             let mut phago_demand = 0.0f32;
             for &i in &order {
                 let p = &self.plants[i];
-                phago_demand += p.genome.heterotrophy.clamp(0.0, 1.0) * p.leaf_area() * CURRENT_M_S * sub * 86400.0 * particles * CAPTURE_EFF;
+                phago_demand += p.genome.heterotrophy.clamp(0.0, 1.0) * p.leaf_area() * (CURRENT_M_S * sub + 0.02 * p.genome.motility.clamp(0.0, 1.0)) * 86400.0 * particles * CAPTURE_EFF;
             }
             let phago_share = if phago_demand > 0.0 { (patch.bacteria * 0.3 / phago_demand).min(1.0) } else { 1.0 };
             let mut bacteria_used = 0.0f32;
@@ -1042,13 +1042,16 @@ impl EcoWorld {
                 let absorbed = het * p.leaf_area() * dom_density * OSMOTROPHY_RATE * dom_share * (0.3 + tf);
                 dom_used += absorbed;
                 // Phagocytosis: particles passing the surface, captured in proportion.
-                let captured = het * p.leaf_area() * CURRENT_M_S * sub * 86400.0 * particles * CAPTURE_EFF * phago_share;
+                // Motility pays before it is an animal: a swimming cell meets more
+                // particles (2 cm/s per unit motility) and can hold nearer the light.
+                let mot = p.genome.motility.clamp(0.0, 1.0);
+                let captured = het * p.leaf_area() * (CURRENT_M_S * sub + 0.02 * mot) * 86400.0 * particles * CAPTURE_EFF * phago_share;
                 bacteria_used += captured;
                 // Light left after the water column above this plant's top. A
                 // sheet with no stem and no root floats at the surface (the founding
                 // algae); anything anchored sits on the bed.
                 let floats = p.body().stem_mass <= 0.0 && p.body().root_mass <= 0.0;
-                let depth_attn = if floats { 1.0 } else { (-WATER_EXTINCTION * (depth - p.height).max(0.0)).exp() };
+                let depth_attn = if floats { 1.0 } else { (-WATER_EXTINCTION * ((depth - p.height) * (1.0 - mot)).max(0.0)).exp() };
                 let got = got * depth_attn;
                 // Leaves respire fast, woody and root tissue slowly.
                 let leaf_m = p.leaf_mass();
