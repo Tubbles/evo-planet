@@ -1021,6 +1021,11 @@ impl EcoWorld {
         self.arena_cache.get(&(pred, prey, env)).copied()
     }
 
+    /// Every fought-out pair: (predator lineage, prey lineage, medium, outcome).
+    pub fn arena_outcomes(&self) -> Vec<(u32, u32, Environment, crate::arena::ArenaOutcome)> {
+        self.arena_cache.iter().map(|(k, v)| (k.0, k.1, k.2, *v)).collect()
+    }
+
     /// Queue a pair for the arena at its first attack, with the two bodies
     /// that met standing for their lineages.
     fn arena_request(&mut self, pred_idx: usize, prey_idx: usize, env: Environment) {

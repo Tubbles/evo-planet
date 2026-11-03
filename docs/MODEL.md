@@ -680,3 +680,46 @@ episodes. For bodies whose motion is this sensitive, a single episode is a
 sample, not a measurement, and a body's inherited speeds may be a lucky
 draw. Averaging a few perturbed episodes would cost a few times the
 physics budget, which is already the binding limit.
+
+## The arena: predation fought out (2026-11-03)
+
+Whether one body type can eat another is no longer a formula. At a
+predator's first real attack on a prey of another lineage, the pair goes
+into a two-body physics world in their medium (`arena.rs`): the predator
+steers at the prey and the prey steers away through a bearing controller
+on the turn their own tests measured (its sign from the turn test). A
+bout is eaten when the mouth (the trunk's front, with a gape of the
+trunk's diameter, on a prey part that fits in it) or a clawed foot holds
+the prey for one second; fled when no bite landed and the prey is farther
+away at the end of six seconds; survived otherwise. Ten bouts from
+perturbed starts per pair of lineages; the shares are cached and reused
+for every later meeting. Until a pair has been fought, the old
+attack-against-defence form is the prior.
+
+Two design lessons on the way:
+
+- Keying the fights by full genome made every mutation a new type, and
+  queueing a pair for every candidate the predator considered grew the
+  work without bound; a 1,500-day probe did not finish in half an hour.
+  The type is now the lineage and a pair is queued only when an attack
+  is actually attempted.
+- Behind the body measurement budget the arena starved: in a populated
+  world bodies are always waiting, and 1,300 days fought no pair. The
+  arena has its own allowance (one pair a day headless, one every four
+  days in the browser; a pair costs 0.2 to 0.5 s for small bodies).
+
+What the arena found, Earth, 400 cells, seed 4, day 1,100: 102 pairs
+fought, 48,840 animals. Eaten 0% in every pair; fled 8%, survived 92% on
+average; not one pair with any kill. The ecology was recording 22 kills a
+day at that moment, all from pairs still on the prior formula. The
+formula was wrong about these bodies and the physics is right: they are
+sheets with no mouth (a membrane root has a gape of zero), moving at
+millimetres per second, and cannot catch or bite anything. Every kill
+count reported from earlier runs came from the formula, and the arena
+now says those kills could not have happened.
+
+So predation in this world starts at zero and has to be earned: a trunk
+with a mouth, a gait that closes distance, a turn that follows. That is
+what the user asked for, and it is also why the biggest remaining lever
+is the physics budget, which sets how fast a new body plan gets its
+chance to be measured and fought.
