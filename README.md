@@ -251,8 +251,12 @@ replays actually show and what higher fidelity would cost.
   current alternatives. Carcasses persist as carrion that anyone with the gut
   for it can scavenge. Each new body is measured once in rapier for its land
   and water speed. Diet classes (herbivore, carnivore, scavenger, omnivore)
-  are what an individual actually ate, not genes. Founders are a few hundred
-  grams, seeded in warm shallow seas, with herbivore guts.
+  are what an individual actually ate, not genes. There are no founding
+  animals: life starts as algae, and heterotrophy has to arise through a
+  heterotrophy gene (absorbing dead matter through the surface at the cost
+  of photosynthesis), then motility (with the occasional flagellum-sized
+  jump), then mouths. A motile sheet keeps photosynthesising. The "add
+  grazers" button on the page is an experiment, not the model.
 - **Carrion and detritus.** Dead animals and dung feed a carrion pool and a
   plant-litter pool that decompose to nutrient at temperature- and
   moisture-dependent rates. Scavenging needs no speed and is the natural

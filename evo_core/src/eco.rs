@@ -57,6 +57,8 @@ pub const INTERFERENCE_PER_100M2: f32 = 0.15;
 pub const FOUNDERS_PER_M2: f32 = 1.0 / 1200.0;
 /// Farthest a hungry walker or swimmer relocates in a day, metres.
 pub const RELOCATE_MAX_M: f32 = 50.0;
+/// Osmotrophy: kg absorbed per m^2 of surface per day per kg/m^2 of dead matter.
+pub const OSMOTROPHY_RATE: f32 = 0.3;
 /// Larval drift from the birth site, metres.
 pub const LARVAL_DRIFT_M: f32 = 15.0;
 /// The seed dispersal gene is in tens of metres.
@@ -265,6 +267,10 @@ pub struct Patch {
     /// supply and locomotion all blend on it instead of switching.
     #[serde(default)]
     pub submersion: f32,
+    /// Fraction of the day's light left under the plant canopy (what a
+    /// swimming photosynthesiser gets), set by the plant tick.
+    #[serde(default)]
+    pub light_left: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -477,7 +483,7 @@ impl EcoWorld {
                 } else {
                     (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 } }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 }, light_left: 1.0 }
             })
             .collect();
         // Shore band: land patches touching water stay wet, the first foothold for plants.
@@ -515,7 +521,9 @@ impl EcoWorld {
         // Founders scale with the sea so small worlds are not overgrazed on day one.
         // Founders per area of sea (about one per 1,200 m^2), not per cell.
         let sea_area = water_n as f32 * patch_area;
-        world.immigrate(((sea_area * FOUNDERS_PER_M2).round() as usize).clamp(12, 200));
+        // No founding animals: life starts as algae and heterotrophy has to
+        // arise by itself (osmotrophy, then motility, then mouths).
+        let _ = sea_area;
         world
     }
 
@@ -921,6 +929,7 @@ impl EcoWorld {
     pub fn tick(&mut self) {
         self.day += 1;
         let a = self.patch_area;
+        let a_area = a;
         let patch_w = a.sqrt();
         let g = self.planet.gravity;
         let cf = co2_factor(self.planet.co2_frac);
@@ -967,9 +976,20 @@ impl EcoWorld {
                 intercepts.push((i, got, leaf_area));
                 nutrient_demand += p.biomass * 0.002;
             }
+            let light_left = if light > 0.0 { (remaining / (light * a * (0.3 * sub + (1.0 - sub)))).clamp(0.0, 1.0) } else { 0.0 };
             let nutrient_share = if nutrient_demand > 0.0 { (patch.nutrient / nutrient_demand).min(1.0) } else { 1.0 };
             let mut nutrient_used = 0.0;
             let mut litter_today = 0.0;
+            // Osmotrophy: organisms absorb dead organic matter through their surface
+            // in proportion to their heterotrophy gene; the pool is shared.
+            let dom_density = patch.dead_matter / a; // kg/m^2
+            let mut dom_demand = 0.0f32;
+            for &i in &order {
+                let p = &self.plants[i];
+                dom_demand += p.genome.heterotrophy.clamp(0.0, 1.0) * p.leaf_area() * dom_density * OSMOTROPHY_RATE;
+            }
+            let dom_share = if dom_demand > 0.0 { (patch.dead_matter * 0.5 / dom_demand).min(1.0) } else { 1.0 };
+            let mut dom_used = 0.0f32;
             for (i, got, leaf_area) in intercepts {
                 let p = &mut self.plants[i];
                 let root = p.root_mass();
@@ -992,14 +1012,18 @@ impl EcoWorld {
                 // Beer-Lambert light budget caps canopy production at ~2 kg/day.
                 // Tough, long-lived leaves photosynthesise slower per area (leaf economics).
                 let tough = p.genome.leaf_toughness.clamp(0.0, 1.0);
-                let photo = got * 0.02 * cf * tf * water_frac * habitat_eff * (0.3 + 0.7 * nutrient_share) * (1.0 - 0.35 * tough);
+                let het = p.genome.heterotrophy.clamp(0.0, 1.0);
+                // Mixotroph's trade-off: absorption machinery displaces chloroplasts.
+                let photo = got * 0.02 * cf * tf * water_frac * habitat_eff * (0.3 + 0.7 * nutrient_share) * (1.0 - 0.35 * tough) * (1.0 - 0.6 * het);
+                let absorbed = het * p.leaf_area() * dom_density * OSMOTROPHY_RATE * dom_share * (0.3 + tf);
+                dom_used += absorbed;
                 // Leaves respire fast, woody and root tissue slowly.
                 let leaf_m = p.leaf_mass();
                 // Transport: feeding leaves through long stems costs upkeep per kg*m.
                 let transport = p.body().transport * (p.biomass / p.body().target_mass).clamp(0.0, 1.0);
                 let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * 0.0005 + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
                 production_today += photo;
-                p.energy += photo - respiration;
+                p.energy += photo + absorbed * 0.6 - respiration;
                 // Leaf economics: thin leaves live weeks, thick ones years
                 // (Wright et al. 2004: lifespan ~ LMA^1.5, a year at 0.1 kg/m^2).
                 // Shed leaves are litter and must be regrown from energy.
@@ -1041,7 +1065,8 @@ impl EcoWorld {
             }
             let pt = &mut self.patches[pi];
             pt.nutrient = (pt.nutrient - nutrient_used).max(0.0);
-            pt.dead_matter += litter_today;
+            pt.dead_matter = (pt.dead_matter - dom_used).max(0.0) + litter_today;
+            pt.light_left = light_left;
         }
         // Seeds hop over the neighbour graph and land where there is room.
         let mut counts: Vec<usize> = vec![0; n_patches];
@@ -1199,6 +1224,21 @@ impl EcoWorld {
             let activity = activity * resp_eff;
             let activity_cost = 0.004 * section * freq * 20.0 * activity * motility * size_f.powf(2.0 / 3.0);
             let mut delta = -(fmr + upkeep + activity_cost);
+            // A motile organism with membranes still photosynthesises (Euglena,
+            // not a sudden animal): the same leaf chemistry as a plant, halved for
+            // a surface that is not held flat to the sun, and displaced by the
+            // heterotrophy gene like a mixotroph's chloroplasts.
+            {
+                let het = self.animals[ai].genome.heterotrophy.clamp(0.0, 1.0);
+                let leaf_now = membrane_area * lin_f * lin_f;
+                if leaf_now > 0.0 && het < 1.0 {
+                    let tf = temp_factor(temp);
+                    // Under the plant canopy's leftover light, like any understorey.
+                    let photo = (1.0 - 0.6 * het) * leaf_now * light * self.patches[patch].light_left * 0.02 * cf * tf * (0.3 * sub + (1.0 - sub)) * 0.5;
+                    delta += photo;
+                    production_today += photo;
+                }
+            }
             cost_today += fmr + upkeep + activity_cost;
             if membrane_area > 0.0 && motility < 1.0 {
                 let light_here = light * if in_water { 0.3 } else { 1.0 };
@@ -1577,6 +1617,17 @@ impl EcoWorld {
 
             // --- reserve, growth, reproduction, death -----------------------------
             let a = &mut self.animals[ai];
+            // Osmotrophy for animals too: a motile sheet absorbs dead matter through
+            // its surface before it has any mouth worth the name.
+            let het = a.genome.heterotrophy.clamp(0.0, 1.0);
+            if het > 0.0 {
+                let surface = (6.0 * (a.mass / 1000.0).powf(2.0 / 3.0)).max(2.0 * a.traits.membrane_area * (a.mass / a.traits.mass.max(1e-3)).powf(2.0 / 3.0));
+                let pool = self.patches[a.patch].dead_matter;
+                let absorbed = (het * surface * (pool / a_area) * OSMOTROPHY_RATE * q).min(pool * 0.2);
+                self.patches[a.patch].dead_matter -= absorbed;
+                delta += absorbed * 0.6;
+                a.ate_plant += absorbed * 0.6;
+            }
             a.intake_rate = (delta + fmr + upkeep + activity_cost).max(0.0); // gross gain today
             a.reserve += delta;
             a.age += 1.0;
@@ -1711,13 +1762,7 @@ impl EcoWorld {
         // ---------------- Immigration keeps the sea from emptying ------------
         // (A rescue, not biology: a planet has no off-map. Kept per area so it
         // does not depend on the cell size; flagged in the model notes.)
-        let floor = ((self.patches.iter().filter(|p| p.water).count() as f32 * self.patch_area * FOUNDERS_PER_M2).round() as usize).max(12);
-        if self.day % 60 == 0 && self.animals.len() < floor {
-            self.immigrate((floor / 4).max(4));
-        }
-        if self.day % 120 == 0 && self.plants.len() < self.patches.len() / 10 {
-            self.seed_plants(self.patches.len() / 8);
-        }
+        // No rescues: a planet has no off-map. Extinction is a result.
 
         self.update_stats();
     }
@@ -2082,6 +2127,9 @@ mod tests {
     #[test]
     fn ecology_runs_and_plants_persist() {
         let mut w = EcoWorld::new(PlanetParams::earth(), 300, 3);
+        // The world starts with algae only; add grazers explicitly so the
+        // physics measurement path is exercised.
+        w.immigrate(20);
         for _ in 0..200 {
             w.measure_pending(2);
             w.tick();

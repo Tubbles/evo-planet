@@ -418,6 +418,56 @@ earlier "hectare patch" experiment and the "home range spill" were symptoms
 of this leak; the spill survives only as the honest geometry of a range
 larger than one cell.
 
+### Origin: algae only, no founders
+The world used to be seeded with a few dozen random grazers and topped up
+whenever the sea emptied. Both are gone: life starts as floating algae
+sheets and nothing else, and extinction is a result, not an error. For
+heterotrophy to arise it needs the cheap first step real biology took:
+a heterotrophy gene (0..1) invests in absorbing dissolved and dead organic
+matter through the surface, at 0.3 kg per m² of surface per day per kg/m²
+of dead matter, and displaces photosynthetic machinery in proportion (a
+mixotroph's trade-off; photosynthesis × (1 − 0.6·h)). A sheet can earn in
+the dark or under a canopy before it has any mouth. Motility still drifts
+in small steps, but one mutation in ten is a jump of up to 0.35, a
+flagellum rather than a slow slide. A seed with motility over 0.5 is born
+motile: it keeps photosynthesising through its membranes (halved, for a
+surface not held flat to the sun, and displaced by heterotrophy), keeps
+absorbing through its surface, filter-feeds at the clearance rate, and can
+begin to graze with whatever mouth its geometry gives it. The first
+algae-only run (4000 days) produced eleven motile seeds and every one
+died: at that point a motile sheet lost photosynthesis the moment it
+moved, which is a sudden animal, not a mixotroph. Fixed as above. The
+second run (5000 days) kept one lineage alive from day 3000: a 153 kg
+raft of 22 m² of membranes, zero speed, "grazing" two kilograms a day.
+Two leaks: a membrane root was given a mouth of its own chord (two
+square metres of bite), and a swimming photosynthesiser got full sun
+while the plants beside it competed under Beer-Lambert. Now only a
+capsule trunk has a mouth (a sheet absorbs or filters), and a motile
+photosynthesiser gets the light left under the patch's canopy, like any
+understorey. The third run (5000 days): about thirty motile seeds
+arose and every one starved; no heterotroph persisted. With the exploits
+closed, the honest answer so far is that the model's sea does not yet
+offer a living to a first heterotroph. The dead-matter pool it could
+absorb stands at 600-1000 kg across the planet, so the limit is not the
+food but the step from sheet to feeder; the candidates below are the
+missing steps.
+
+### Steps that would enrich the origin further (not built)
+- **A microbial loop.** Dead matter should become bacterial biomass
+  (fast, temperature-driven) that filter feeders and osmotrophs eat, not
+  nutrient directly; the first heterotrophs ate bacteria.
+- **Phagocytosis as the first mouth.** Engulfing particles smaller than
+  oneself needs contact, not a trunk: a capture term for a sheet or blob
+  against suspended particles and tiny organisms, scaling with surface.
+- **Size continuum down to cells.** The smallest body is 4 cm; the origin
+  happened at microns. A log-scale size floor with surface-limited
+  physiology would let osmotrophs be small and grazers grow from them.
+- **Light as a vertical resource.** Depth strata in water: surface sheets
+  shade the column; motility toward light is the first behaviour.
+- **Daily rhythm and tides.** Submersion and light vary within a day; a
+  fixed 0.5 shore and constant light flatten the pressures that drove
+  rhythms and vertical migration.
+
 ### Audit tooling
 `cargo run --example shore_probe -- <genome.json>...` runs bodies on the beach
 with motors on and off. `cargo run --example gait_audit -- <days> <out_dir>` re-runs the fastest

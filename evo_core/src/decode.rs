@@ -316,7 +316,9 @@ pub fn body_metrics(pheno: &Phenotype) -> BodyMetrics {
     let trunk_section = PI * root.radius * root.radius;
     BodyMetrics {
         reach,
-        mouth_area: PI * root.r0 * root.r0,
+        // A mouth is the front of a trunk; a sheet (membrane root) has none and
+        // must absorb or filter instead.
+        mouth_area: if root.kind == NodeKind::Capsule { PI * root.r0 * root.r0 } else { 0.0 },
         claws: (pad_section / trunk_section.max(1e-6)).min(3.0),
         plating: rigid_mass / total,
     }

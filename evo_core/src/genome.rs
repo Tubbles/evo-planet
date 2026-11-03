@@ -166,6 +166,12 @@ pub struct Genome {
     /// Halfway breathes poorly in both: the amphibian's bargain.
     #[serde(default)]
     pub breathing: f32,
+    /// Osmotrophy, 0..1: investment in absorbing dissolved and dead organic
+    /// matter through the surface, at the expense of photosynthetic machinery
+    /// (the mixotroph's trade-off). The first step of heterotrophy, before
+    /// any mouth.
+    #[serde(default)]
+    pub heterotrophy: f32,
 }
 
 fn default_seed_mass() -> f32 {
@@ -450,6 +456,7 @@ impl Genome {
             maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
             breathing: 0.0,
+            heterotrophy: 0.0,
         }
     }
 
@@ -493,6 +500,7 @@ impl Genome {
             maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
             breathing: 0.0,
+            heterotrophy: 0.0,
         }
     }
 
@@ -614,6 +622,7 @@ impl Genome {
             maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
             breathing: 0.0,
+            heterotrophy: 0.0,
         }
     }
 
@@ -686,7 +695,9 @@ impl Genome {
             g.repro_frac = nudge(rng, g.repro_frac, 0.15, 0.03, 0.1, 1.0);
         }
         if rng.gen_bool((p * 1.5) as f64) {
-            g.motility = (g.motility + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
+            // Motility drifts, but one mutation in ten is a flagellum: a jump.
+            let step = if rng.gen_bool(0.1) { 0.35 } else { 0.08 };
+            g.motility = (g.motility + rng.gen_range(-step..step)).clamp(0.0, 1.0);
             body = true;
         }
         // Anatomy and life history (animal side).
@@ -716,6 +727,9 @@ impl Genome {
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.breathing = (g.breathing + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
+        }
+        if rng.gen_bool((p * 1.5) as f64) {
+            g.heterotrophy = (g.heterotrophy + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.maturity_frac = nudge(rng, g.maturity_frac, 0.1, 0.02, 0.2, 0.98);
