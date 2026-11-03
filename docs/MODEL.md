@@ -539,9 +539,27 @@ to the water's 5 cm/s) and can hold nearer the light (its effective depth
 shrinks by 1 − motility). The run with that payoff (5000 days): heterotrophy
 mean 0.24, motility mean 0.03, eleven motile seeds, none persisting. The
 payoff is too small against the cost at these particle densities (15 kg of
-bacteria across the planet); the honest state is that no heterotroph has
-yet arisen from algae, and the next lever is the microbial loop's size,
-not another switch. The remaining
+bacteria across the planet); the honest state at that point was that no heterotroph had
+yet arisen from algae.
+
+### The first-day economy, read off a ledger
+Following the first motile seeds day by day (`seed_ledger` example) showed
+why: a 184 g motile sheet took in 1.0 g a day and burned 1.2 g. Of the
+1.2 g, 1.05 g was "a vertebrate's field rate times motility", charged for
+being 62% motile before it had moved a millimetre, while the sessile
+sheet beside it paid 0.74 g of tissue upkeep; and the motile sheet's
+photosynthesis had been halved for "not being held flat to the sun",
+which the plant beside it was not charged. Both were accounting.
+Maintenance is now tissue upkeep only: sheets at a leaf's 0.4%/day, other
+tissue from 0.05%/day (a plant's wood) to 0.3%/day for a fully motile body
+(muscle tone, nerves, osmoregulation), with Q10 and the oxygen limit;
+locomotion is charged as the work actually done (muscle section times
+swing times rate, and the cost of transport on moves). A swimming sheet
+photosynthesises like the plant beside it. The microbial loop itself was
+not the blocker: 25 g of bacteria per 200 m³ patch is in the real range,
+and the seed with a little heterotrophy was already taking 1.5 g a day
+from it. With the ledger fixed, the followed seed grew from 37 g to 78 g
+in its first 80 days with its reserve rising. The 5000-day run is below. The remaining
 switch is in the code, not the biology: an organism is ticked as a plant
 below motility 0.5 and as a mover above it, because the two have different
 data structures. Nothing it pays or earns jumps at that line.

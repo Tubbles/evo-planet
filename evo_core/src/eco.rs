@@ -1059,8 +1059,8 @@ impl EcoWorld {
                 let transport = p.body().transport * (p.biomass / p.body().target_mass).clamp(0.0, 1.0);
                 // The same continuum from the sessile side: a plant with some
                 // motility already pays that share of an animal's field rate.
-                let motile_cost = p.genome.motility.clamp(0.0, 1.0) * 0.006 * p.biomass.max(1e-6).powf(0.75) * 2f32.powf((patch.temp_c - 20.0) / 10.0).clamp(0.15, 3.0);
-                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * 0.0005 + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol) + motile_cost;
+                let mot_tissue = 0.0025 * p.genome.motility.clamp(0.0, 1.0);
+                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * (0.0005 + mot_tissue) + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
                 production_today += photo;
                 p.energy += photo + (absorbed + captured) * 0.6 - respiration;
                 // Leaf economics: thin leaves live weeks, thick ones years
@@ -1268,9 +1268,12 @@ impl EcoWorld {
             // plant's (membranes 0.4%/day, the rest 0.05%/day), plus the
             // vertebrate field rate scaled by motility. A barely motile sheet pays
             // a sheet's bills; a fully motile body pays an animal's.
-            let membrane_mass = membrane_area * lin_f * lin_f * crate::decode::MEMBRANE_AREAL_DENSITY;
-            let tissue = (membrane_mass.min(mass) * 0.004 + (mass - membrane_mass).max(0.0) * 0.0005) * (0.3 + temp_factor(temp));
-            let fmr = tissue + motility * 0.006 * m34 * q / o2.min(1.0).max(0.3);
+            // Maintenance is tissue upkeep: sheets at a leaf's 0.4%/day; other
+            // tissue at 0.05%/day for a plant's wood rising to 0.3%/day for a fully
+            // motile body (muscle tone, nerves, osmoregulation), with Q10 and the
+            // oxygen limit. Locomotion is charged separately as the work done.
+            let membrane_mass = (membrane_area * lin_f * lin_f * crate::decode::MEMBRANE_AREAL_DENSITY).min(mass);
+            let fmr = (membrane_mass * 0.004 + (mass - membrane_mass) * (0.0005 + 0.0025 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3);
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
             // Short of oxygen, the muscles cannot be kept working all day.
             let activity = activity * resp_eff;
@@ -1286,7 +1289,7 @@ impl EcoWorld {
                 if leaf_now > 0.0 && het < 1.0 {
                     let tf = temp_factor(temp);
                     // Under the plant canopy's leftover light, like any understorey.
-                    let photo = (1.0 - 0.6 * het) * leaf_now * light * self.patches[patch].light_left * 0.02 * cf * tf * (0.3 * sub + (1.0 - sub)) * 0.5;
+                    let photo = (1.0 - 0.6 * het) * leaf_now * light * self.patches[patch].light_left * 0.02 * cf * tf * (0.3 * sub + (1.0 - sub));
                     delta += photo;
                     production_today += photo;
                 }
