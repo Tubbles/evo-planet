@@ -152,6 +152,14 @@ of elements). The operators, in the order they run:
    remove one.
 6. **Garbage collect** nodes no longer reachable from the root.
 
+For an animal, the body's genes (node sizes and forms, joints, structure,
+lungs, water store, motility, density) are hit at a fifth of the rate of
+the rest (`BODY_MUTATION_SCALE`): morphology is conserved in life, and
+every changed body is a physics measurement the planet has to afford. At
+the full rate a populated world bred a thousand new bodies a day against
+a few dozen measured, and a body measured never is only ever charged for
+its new part.
+
 A child whose body changed starts a new lineage with some probability
 (one in five for animals, three in a hundred per seed); this is
 bookkeeping for the table and has no effect on the organism.
