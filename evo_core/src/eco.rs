@@ -95,6 +95,13 @@ pub const CLEARANCE_M3_PER_KG_DAY: f32 = 1.2;
 // are the only limits. Performance is a separate problem (cohorts, planned)
 // and is never solved by discarding births.
 pub const TRAIT_EPISODE_S: f32 = 4.0;
+/// An animal's body genes mutate at this share of the rate of its other
+/// genes (controller, life history, physiology). Morphology is conserved in
+/// life, and each changed body is a physics measurement the planet must
+/// afford: at the old rate a populated world bred a thousand new bodies a
+/// day against a few dozen measured, and an unmeasured body pays for its
+/// new part without ever being credited for it.
+pub const BODY_MUTATION_SCALE: f32 = 0.2;
 /// Foraging day, seconds (8 h), over which the gait's measured power is paid.
 pub const FORAGE_S: f32 = 8.0 * 3600.0;
 /// Muscle converts a quarter of its metabolic energy into mechanical work.
@@ -2088,7 +2095,7 @@ impl EcoWorld {
                     if surplus >= cost && self.rng.gen_bool(0.8) {
                         a.reserve -= cost;
                         a.offspring += 1;
-                        let (child, body_changed) = if self.rng.gen_bool(0.75) { a.genome.mutate(&mut self.rng) } else { (a.genome.clone(), false) };
+                        let (child, body_changed) = if self.rng.gen_bool(0.75) { a.genome.mutate_scaled(&mut self.rng, BODY_MUTATION_SCALE) } else { (a.genome.clone(), false) };
                         births.push(Birth { genome: child, patch: a.patch, lineage: a.lineage, body_changed, parent_traits: a.traits, mass0, reserve0: mass0 * 0.3 });
                     }
                     // Beyond two offspring's worth of store, surplus is wasted as heat.

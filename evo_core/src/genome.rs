@@ -677,15 +677,24 @@ impl Genome {
     /// connection parameters, add/remove connections, garbage collect.
     /// Returns (child, body_changed).
     pub fn mutate(&self, rng: &mut StdRng) -> (Genome, bool) {
+        self.mutate_scaled(rng, 1.0)
+    }
+
+    /// Mutate with the body's genes (segment sizes, forms, joints, structure,
+    /// lungs, water store, motility, density) hit at `body_scale` times the
+    /// rate of the rest. Morphology mutates far more rarely than physiology
+    /// in life, and every changed body is a new physics measurement.
+    pub fn mutate_scaled(&self, rng: &mut StdRng, body_scale: f32) -> (Genome, bool) {
         let mut g = self.clone();
         let mut body = false;
         // Scale per-element probability so that on average at least ~1.5
         // mutations hit the genome regardless of size.
         let n_elems: usize = g.nodes.iter().map(|n| 8 + n.connections.len() * 9).sum::<usize>() + 4;
         let p = (1.5 / n_elems as f32).clamp(0.02, 0.35);
+        let pb = p * body_scale;
 
         for i in 0..g.nodes.len() {
-            if g.nodes[i].mutate_params(rng, p * 3.0) {
+            if g.nodes[i].mutate_params(rng, pb * 3.0) {
                 body = true;
             }
         }
@@ -694,11 +703,11 @@ impl Genome {
         if rng.gen_bool((p * 3.0) as f64) {
             g.base_freq = nudge(rng, g.base_freq, 0.2, 0.05, 0.2, 4.0);
         }
-        if rng.gen_bool((p * 3.0) as f64) {
+        if rng.gen_bool((pb * 3.0) as f64) {
             g.lung_frac = nudge(rng, g.lung_frac, 0.25, 0.01, 0.0, 0.6);
             body = true;
         }
-        if rng.gen_bool((p * 3.0) as f64) {
+        if rng.gen_bool((pb * 3.0) as f64) {
             g.water_store = nudge(rng, g.water_store, 0.25, 0.01, 0.0, 0.5);
             body = true;
         }
@@ -720,7 +729,7 @@ impl Genome {
         if rng.gen_bool((p * 2.0) as f64) {
             g.repro_frac = nudge(rng, g.repro_frac, 0.15, 0.03, 0.1, 1.0);
         }
-        if rng.gen_bool((p * 1.5) as f64) {
+        if rng.gen_bool((pb * 1.5) as f64) {
             // Motility drifts, but one mutation in ten is a flagellum: a jump.
             let step = if rng.gen_bool(0.1) { 0.35 } else { 0.08 };
             g.motility = (g.motility + rng.gen_range(-step..step)).clamp(0.0, 1.0);
@@ -751,7 +760,7 @@ impl Genome {
         if rng.gen_bool((p * 1.5) as f64) {
             g.heterotrophy = (g.heterotrophy + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
         }
-        if rng.gen_bool((p * 1.5) as f64) {
+        if rng.gen_bool((pb * 1.5) as f64) {
             g.density = nudge(rng, g.density, 0.12, 5.0, 20.0, 1200.0);
             body = true;
         }
@@ -761,7 +770,7 @@ impl Genome {
         // keeping its oscillator. Two legs become four; a fin becomes a pair.
         // This is how limbs multiply in animals, by duplication of a working
         // module, not by inventing a random one.
-        if g.nodes.len() < MAX_NODES && rng.gen_bool((p * 2.0) as f64) {
+        if g.nodes.len() < MAX_NODES && rng.gen_bool((pb * 2.0) as f64) {
             let hosts: Vec<(usize, usize)> = g
                 .nodes
                 .iter()
@@ -792,7 +801,7 @@ impl Genome {
         }
 
         // Add a node (initially unconnected unless a pointer mutates to it).
-        if g.nodes.len() < MAX_NODES && rng.gen_bool((p * 2.0) as f64) {
+        if g.nodes.len() < MAX_NODES && rng.gen_bool((pb * 2.0) as f64) {
             let n = g.nodes.len();
             g.nodes.push(Node::random(rng, n + 1, true));
             // Give it a chance to be used immediately.
@@ -811,7 +820,7 @@ impl Genome {
         let n_nodes = g.nodes.len();
         for node in g.nodes.iter_mut() {
             for c in node.connections.iter_mut() {
-                if c.mutate(rng, p * 3.0, n_nodes) {
+                if c.mutate(rng, pb * 3.0, n_nodes) {
                     body = true;
                 }
             }
@@ -819,11 +828,11 @@ impl Genome {
 
         // Add / remove connections.
         for node in g.nodes.iter_mut() {
-            if node.connections.len() < MAX_CONNECTIONS_PER_NODE && rng.gen_bool((p * 1.5) as f64) {
+            if node.connections.len() < MAX_CONNECTIONS_PER_NODE && rng.gen_bool((pb * 1.5) as f64) {
                 node.connections.push(Connection::random(rng, n_nodes));
                 body = true;
             }
-            if !node.connections.is_empty() && rng.gen_bool((p * 1.5) as f64) {
+            if !node.connections.is_empty() && rng.gen_bool((pb * 1.5) as f64) {
                 let i = rng.gen_range(0..node.connections.len());
                 node.connections.remove(i);
                 body = true;
