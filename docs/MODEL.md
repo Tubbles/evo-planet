@@ -401,9 +401,14 @@ cells. Time-averaged over days 1200-3000 that gave plants 136, 77 and
 not invariant. One leak named and fixed from that: a hungry animal
 relocated one cell a day, 5 m on fine cells and 20 m on coarse ones;
 relocation is now a distance (up to 50 m of the day's path, in cells of
-the current width). The next run of the same test is the measure of what
-remains; candidates are the four-ring cap on a body's range, the
-per-cell sorting of plants for light, and demographic noise.
+the current width). With that fix the same test gave plants 80, 74 and 39 kg/ha
+and animals 59, 77 and 117 per ha at 25, 100 and 400 m²: the fine and
+medium cuts now agree within about 25%, the coarse cut (150 cells for
+the planet) does not and oscillates hard (1393 to 77 to 781 animals
+between prints). Candidates for what remains at coarse cells: the
+sequential per-cell light allocation among many plants, predation
+sampling three candidates a day from a much larger pool, and the graph
+itself being too coarse for ranges of a few hundred square metres.
 
 One rescue remains and is not biology: when the sea's animals fall below
 about one per 1,200 m² (the founder density), a few immigrants arrive. A
