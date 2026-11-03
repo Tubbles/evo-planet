@@ -136,7 +136,13 @@ export class EcoSim {
         }
     }
     /**
-     * Inject `count` random immigrants into the sea now.
+     * Arena pairs fought per day while any wait (fractions accumulate).
+     * @param {number} pairs_per_day
+     */
+    set_arena_rate(pairs_per_day) {
+        wasm.ecosim_set_arena_rate(this.__wbg_ptr, pairs_per_day);
+    }
+    /**
      * Change the planet under the running world (see EcoWorld::set_planet).
      * @param {string} planet_json
      */
