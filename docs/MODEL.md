@@ -536,7 +536,12 @@ harder (half of all plants over 0.3) and motility rose only to a mean of
 a switch of its own. Motility now pays continuously on the sessile side
 too: a swimming cell meets more particles (2 cm/s per unit motility added
 to the water's 5 cm/s) and can hold nearer the light (its effective depth
-shrinks by 1 − motility). The remaining
+shrinks by 1 − motility). The run with that payoff (5000 days): heterotrophy
+mean 0.24, motility mean 0.03, eleven motile seeds, none persisting. The
+payoff is too small against the cost at these particle densities (15 kg of
+bacteria across the planet); the honest state is that no heterotroph has
+yet arisen from algae, and the next lever is the microbial loop's size,
+not another switch. The remaining
 switch is in the code, not the biology: an organism is ticked as a plant
 below motility 0.5 and as a mover above it, because the two have different
 data structures. Nothing it pays or earns jumps at that line.
