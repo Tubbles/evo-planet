@@ -42,7 +42,9 @@ fn evaluate(g: &Genome, planet: &PlanetParams) -> Scored {
     // dragging) and does not tumble (low angular speed), and progress is made
     // by repeated footfalls of limbs, at least two a second.
     let carried = (1.0 - r.trunk_contact_frac).powi(2);
-    let steady = 1.0 / (1.0 + r.trunk_spin / 2.0);
+    // A carried trunk turns about a radian a second at most; a body that
+    // rolls or tumbles its way forward spins at ten or more.
+    let steady = (-(r.trunk_spin / 3.0).powi(2)).exp();
     let stepping = (r.footfalls as f32 / 6.0 / 2.0).min(1.0);
     let segments = (ph.parts.len() as f32 - 1.0).clamp(0.0, 4.0) / 4.0;
     // Efficiency: energy is food. Walking mammals move for 1 to 5 J per
