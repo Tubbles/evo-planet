@@ -428,9 +428,10 @@ side of the motility continuum and an animal's waterproof skin on the
 other, cutting the loss by up to 95% and costing 30% more maintenance
 when fully expressed. The surface is the compact body's (6 × (mass /
 1000)^(2/3) m²) or both faces of its sheets, whichever is larger. Fresh
-food carries water (4 kg per kg of dry plant, 2.5 per kg of meat); in or
-beside water the deficit is made up each day, on land the cell's wetness
-covers that share of it. A deficit beyond 15% of body mass plus the
+food carries water (4 kg per kg of dry plant, 2.5 per kg of meat); dew
+settles on the body's surface (0.2 kg/m² on a fully humid night); in or
+beside open water the deficit is made up each day. Humid ground is not a
+drink: inland, the water is in the food. A deficit beyond 15% of body mass plus the
 water-store gene's share is death by drying out. Nothing here is a
 threshold on size or form: a sheet on dry land dries in a day because it
 is all surface, a tiny body because surface per kilogram falls with size,

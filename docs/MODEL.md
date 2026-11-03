@@ -803,3 +803,12 @@ maintenance now scales as mass to the three quarters (Kleiber). Osmotrophy
 needs a wet surface. A hungry body relocates as far as its day's path,
 paying the measured cost of transport per cell crossed (the fifty-metre
 cap is gone).
+
+The first run with the water balance killed nothing: 99,000 land animals
+at day 1,600 and not one dried out. The drinking rule had let a body
+refill the share of its deficit equal to the cell's moisture every day,
+which on ordinary land (moisture about 0.5) is an unlimited well. Humid
+air is not a drink. Inland water is now dew on the body's own surface and
+the water in fresh food; open water is drunk only in or beside the sea.
+The same run showed the mats photosynthesising without the nutrient limit
+plants have; they now share it.
