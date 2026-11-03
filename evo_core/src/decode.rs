@@ -51,6 +51,9 @@ pub struct Part {
     pub cpg: Cpg,
     /// Maximum motor torque before fatigue scaling.
     pub max_torque: f32,
+    /// Cross-section of the muscle that moves this part: the segment it hangs
+    /// from (a thigh is swung by the hip, a wing by the chest), m².
+    pub muscle_section: f32,
     /// Cross-section area used for strength.
     pub section_area: f32,
     pub reflected: bool,
@@ -151,7 +154,11 @@ impl<'a> Ctx<'a> {
         let tissue_vol = (1.0 - flat) * cap_vol + flat * sheet_mass / ANIMAL_DENSITY;
         let density = mass / tissue_vol.max(1e-9);
         let section_area = (1.0 - flat) * PI * r_cap * r_cap + flat * (PI * 0.03 * 0.03 + len * 0.004);
-        let max_torque = STRENGTH_PER_AREA * section_area;
+        // The muscle that swings a part sits on its parent (hip, shoulder,
+        // chest), so torque scales with the parent's section, not the part's
+        // own: a thin wing bone is moved by a thick chest.
+        let muscle_section = parent.map(|q| self.parts[q].section_area).unwrap_or(section_area);
+        let max_torque = STRENGTH_PER_AREA * muscle_section;
 
         let mut cpg = node.cpg;
         cpg.phase += phase_shift;
@@ -178,6 +185,7 @@ impl<'a> Ctx<'a> {
             rot_from_parent,
             cpg,
             max_torque,
+            muscle_section,
             section_area,
             reflected,
         });
@@ -261,7 +269,7 @@ pub fn decode(g: &Genome) -> Phenotype {
 
     let total_mass = parts.iter().map(|p| p.mass).sum();
     let membrane_area: f32 = parts.iter().map(|p| p.flat * p.len * 2.0 * p.r0).sum::<f32>().max(0.0);
-    let total_section_area = parts.iter().skip(1).map(|p| p.section_area).sum();
+    let total_section_area = parts.iter().skip(1).map(|p| p.muscle_section).sum();
     let membrane_mass: f32 = parts.iter().map(|p| p.mass * p.flat).sum();
     Phenotype {
         parts,

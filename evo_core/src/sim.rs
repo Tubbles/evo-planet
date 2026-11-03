@@ -60,11 +60,16 @@ pub struct SimConfig {
     /// Added to every joint's bias, radians: the body's posture shift used
     /// to climb or dive.
     pub bias_shift: f32,
+    /// Scales every oscillator's amplitude. 1 is the body as evolved; 0 is
+    /// the "hold" control: muscles hold the rest posture (bias) but do not
+    /// swing, so what oscillation adds (flapping lift, a stroke) can be
+    /// separated from what posture alone does (a held wing glides).
+    pub amp_scale: f32,
 }
 
 impl Default for SimConfig {
     fn default() -> Self {
-        Self { dt: 1.0 / 120.0, settle_time: 1.0, episode_time: 8.0, motors: true, steer: 0.0, bias_shift: 0.0 }
+        Self { dt: 1.0 / 120.0, settle_time: 1.0, episode_time: 8.0, motors: true, steer: 0.0, bias_shift: 0.0, amp_scale: 1.0 }
     }
 }
 
@@ -127,6 +132,9 @@ pub struct EpisodeResult {
     pub climb_speed: f32,
     /// Shore test: metres up the dry beach the body got under its own power.
     pub shore_progress: f32,
+    /// Reach as swept: the farthest any part's end got from the centre of
+    /// mass during the episode, metres. Measured, not read off the rest pose.
+    pub swept_reach: f32,
 }
 
 pub struct CreatureSim {
@@ -172,6 +180,7 @@ pub struct CreatureSim {
     mid_com: Option<Vector3<f32>>,
     yaw_sum: f32,
     yaw_n: u32,
+    swept_reach: f32,
 }
 
 fn part_bounding_radius(p: &crate::decode::Part) -> f32 {
@@ -399,6 +408,7 @@ impl CreatureSim {
             mid_com: None,
             yaw_sum: 0.0,
             yaw_n: 0,
+            swept_reach: 0.0,
         };
         sim.start_com = sim.com();
         if !sim.settled {
@@ -526,9 +536,11 @@ impl CreatureSim {
             let w = 2.0 * PI * f * p.cpg.freq_mult * t;
             let gain = 1.0 + if p.reflected { -self.cfg.steer } else { self.cfg.steer };
             let (t1, t2) = if self.motors_active() {
+                let a1 = p.cpg.amp * self.cfg.amp_scale;
+                let a2 = p.cpg.amp2 * self.cfg.amp_scale;
                 (
-                    (p.cpg.bias + (self.cfg.bias_shift + p.cpg.amp * gain * (w + p.cpg.phase).sin()) * drive).clamp(-lim_x, lim_x),
-                    (p.cpg.amp2 * gain * p.freedom * drive * (w + p.cpg.phase2).sin()).clamp(-lim_z, lim_z),
+                    (p.cpg.bias + (self.cfg.bias_shift + a1 * gain * (w + p.cpg.phase).sin()) * drive).clamp(-lim_x, lim_x),
+                    (a2 * gain * p.freedom * drive * (w + p.cpg.phase2).sin()).clamp(-lim_z, lim_z),
                 )
             } else {
                 (p.cpg.bias.clamp(-lim_x, lim_x), 0.0)
@@ -714,6 +726,22 @@ impl CreatureSim {
             self.total_steps += 1;
             let c = self.com();
             self.com_height_sum += c.y - self.ground_at(c.x);
+            // Reach is what the body sweeps, not what it is drawn as.
+            if self.total_steps % 4 == 0 {
+                for (i, h) in self.handles.iter().enumerate() {
+                    if let Some(rb) = self.bodies.get(*h) {
+                        let p = &self.pheno.parts[i];
+                        let iso = rb.position();
+                        let half = iso.rotation * Vector3::new(0.0, p.len * 0.5, 0.0);
+                        let tip = p.radius * (1.0 - p.flat) + p.r0 * p.flat;
+                        let centre = iso.translation.vector;
+                        let d = ((centre + half) - c).norm().max((centre - half - c).norm()) + tip;
+                        if d > self.swept_reach {
+                            self.swept_reach = d;
+                        }
+                    }
+                }
+            }
             if self.env == Environment::Shore && self.lowest_point() > 0.0 && c.x > self.shore_best {
                 self.shore_best = c.x;
             }
@@ -781,6 +809,7 @@ impl CreatureSim {
             hydration: self.hydration,
             total_mass: self.pheno.total_mass,
             mean_height: if self.total_steps > 0 { self.com_height_sum / self.total_steps as f32 } else { 0.0 },
+            swept_reach: self.swept_reach,
             air_distance: self.landing_distance.unwrap_or(distance),
             sustained_speed: match self.mid_com {
                 Some(m) => {

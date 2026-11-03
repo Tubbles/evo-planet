@@ -119,12 +119,6 @@ pub struct Genome {
     pub water_store: f32,
     /// Tissue density, kg/m^3.
     pub density: f32,
-    /// Diet weights for the ecology layer: carnivory and detritivory in
-    /// [0,1]; herbivory is the remainder. Defaults keep old genomes valid.
-    #[serde(default)]
-    pub diet_carn: f32,
-    #[serde(default)]
-    pub diet_detr: f32,
     /// Plant genes (ignored by animals). Capsule nodes are stems, Membrane
     /// nodes are leaves (r1 = leaf thickness), Pad nodes are roots.
     /// 0 = fully aquatic, 1 = adapted to land. Costs upkeep everywhere.
@@ -161,19 +155,9 @@ pub struct Genome {
     /// Offspring mass as a fraction of adult mass.
     #[serde(default = "default_offspring_frac")]
     pub offspring_frac: f32,
-    /// Weapon investment (jaws, claws): raises attack, costs upkeep.
-    #[serde(default)]
-    pub weapon: f32,
-    /// Armour investment (shell, hide): raises defence, costs upkeep and speed.
-    #[serde(default)]
-    pub armour: f32,
     /// Lifespan multiplier on the allometric baseline.
     #[serde(default = "default_longevity")]
     pub longevity: f32,
-    /// Fraction of asymptotic adult mass at which reproduction starts. Growth
-    /// continues after maturity (indeterminate growth as the default).
-    #[serde(default = "default_maturity_frac")]
-    pub maturity_frac: f32,
     /// Plant leaf toughness (leaf economics spectrum): tough leaves lose less
     /// to grazers and digest worse, but photosynthesise slower per area.
     #[serde(default)]
@@ -216,9 +200,6 @@ fn default_offspring_frac() -> f32 {
 }
 fn default_longevity() -> f32 {
     1.0
-}
-fn default_maturity_frac() -> f32 {
-    0.7
 }
 
 fn gaussian(rng: &mut StdRng) -> f32 {
@@ -484,8 +465,6 @@ impl Genome {
             lung_frac: rng.gen_range(0.02..0.15),
             water_store: rng.gen_range(0.0..0.1),
             density: 1000.0,
-            diet_carn: if rng.gen_bool(0.25) { rng.gen_range(0.3..0.9) } else { rng.gen_range(0.0..0.15) },
-            diet_detr: if rng.gen_bool(0.25) { rng.gen_range(0.3..0.9) } else { rng.gen_range(0.0..0.15) },
             land_tolerance: 0.0,
             seed_mass: default_seed_mass(),
             dispersal: default_dispersal(),
@@ -496,10 +475,7 @@ impl Genome {
             gut_frac: default_gut_frac(),
             fat_frac: default_fat_frac(),
             offspring_frac: default_offspring_frac(),
-            weapon: 0.0,
-            armour: 0.0,
             longevity: 1.0,
-            maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
             breathing: 0.0,
             heterotrophy: 0.0,
@@ -532,8 +508,6 @@ impl Genome {
             lung_frac: 0.0,
             water_store: 0.0,
             density: rng.gen_range(100.0..200.0),
-            diet_carn: 0.0,
-            diet_detr: 0.0,
             land_tolerance: 0.0,
             seed_mass: rng.gen_range(0.001..0.01),
             dispersal: rng.gen_range(0.5..2.5),
@@ -544,10 +518,7 @@ impl Genome {
             gut_frac: default_gut_frac(),
             fat_frac: default_fat_frac(),
             offspring_frac: default_offspring_frac(),
-            weapon: 0.0,
-            armour: 0.0,
             longevity: 1.0,
-            maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
             breathing: 0.0,
             heterotrophy: 0.0,
@@ -666,8 +637,6 @@ impl Genome {
             water_store: 0.0,
             // Dry-mass density of fresh plant tissue (mostly water): herbs ~50, wood ~300.
             density: rng.gen_range(40.0..200.0),
-            diet_carn: 0.0,
-            diet_detr: 0.0,
             land_tolerance: rng.gen_range(0.0..0.2),
             seed_mass: rng.gen_range(0.0005..0.01),
             dispersal: rng.gen_range(0.5..3.0),
@@ -678,23 +647,11 @@ impl Genome {
             gut_frac: default_gut_frac(),
             fat_frac: default_fat_frac(),
             offspring_frac: default_offspring_frac(),
-            weapon: 0.0,
-            armour: 0.0,
             longevity: 1.0,
-            maturity_frac: default_maturity_frac(),
             leaf_toughness: 0.0,
             breathing: 0.0,
             heterotrophy: 0.0,
         }
-    }
-
-    /// Herbivory, carnivory, detritivory weights summing to one.
-    pub fn diet(&self) -> (f32, f32, f32) {
-        let c = self.diet_carn.clamp(0.0, 1.0);
-        let d = self.diet_detr.clamp(0.0, 1.0);
-        let s = c + d;
-        let (c, d) = if s > 1.0 { (c / s, d / s) } else { (c, d) };
-        ((1.0 - c - d).max(0.0), c, d)
     }
 
     /// Number of nodes plus connections, a cheap structural signature.
@@ -730,14 +687,6 @@ impl Genome {
         if rng.gen_bool((p * 3.0) as f64) {
             g.water_store = nudge(rng, g.water_store, 0.25, 0.01, 0.0, 0.5);
             body = true;
-        }
-        // Diet genes drift in small steps with an occasional large jump, so a
-        // lineage can cross a fitness valley (grazer -> hunter) in one go.
-        if rng.gen_bool((p * 2.0) as f64) {
-            g.diet_carn = if rng.gen_bool(0.1) { (g.diet_carn + rng.gen_range(-0.3..0.3f32)).clamp(0.0, 1.0) } else { nudge(rng, g.diet_carn, 0.3, 0.05, 0.0, 1.0) };
-        }
-        if rng.gen_bool((p * 2.0) as f64) {
-            g.diet_detr = if rng.gen_bool(0.1) { (g.diet_detr + rng.gen_range(-0.3..0.3f32)).clamp(0.0, 1.0) } else { nudge(rng, g.diet_detr, 0.3, 0.05, 0.0, 1.0) };
         }
         // Plant genes (no effect on animals).
         if rng.gen_bool((p * 2.5) as f64) {
@@ -776,12 +725,6 @@ impl Genome {
             g.offspring_frac = nudge(rng, g.offspring_frac, 0.2, 0.01, 0.01, 0.5);
         }
         if rng.gen_bool((p * 1.5) as f64) {
-            g.weapon = (g.weapon + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
-        }
-        if rng.gen_bool((p * 1.5) as f64) {
-            g.armour = (g.armour + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
-        }
-        if rng.gen_bool((p * 1.5) as f64) {
             g.longevity = nudge(rng, g.longevity, 0.15, 0.03, 0.3, 3.0);
         }
         if rng.gen_bool((p * 1.5) as f64) {
@@ -792,9 +735,6 @@ impl Genome {
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.heterotrophy = (g.heterotrophy + rng.gen_range(-0.08..0.08f32)).clamp(0.0, 1.0);
-        }
-        if rng.gen_bool((p * 1.5) as f64) {
-            g.maturity_frac = nudge(rng, g.maturity_frac, 0.1, 0.02, 0.2, 0.98);
         }
         if rng.gen_bool((p * 1.5) as f64) {
             g.density = nudge(rng, g.density, 0.12, 5.0, 20.0, 1200.0);

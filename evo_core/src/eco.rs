@@ -604,9 +604,7 @@ impl EcoWorld {
         for _ in 0..count {
             let mut genome = Genome::random_with(&mut self.rng);
             // Everyone starts as a small algae grazer; predation, scavenging
-            // and body size evolve from there.
-            genome.diet_carn = 0.0;
-            genome.diet_detr = 0.0;
+            // and body size evolve from there (diet is what is eaten, not a gene).
             // The first grazers were tiny next to the producers they ate: scale
             // every dimension to about a fifth, a few hundred grams of animal.
             for node in genome.nodes.iter_mut() {
@@ -644,7 +642,7 @@ impl EcoWorld {
                 .parts
                 .iter()
                 .skip(1)
-                .map(|p| p.section_area * (1.0 - p.stiffness) * p.cpg.freq_mult * (p.cpg.amp.abs().min(p.limit) / 0.8).min(1.5))
+                .map(|p| p.muscle_section * (1.0 - p.stiffness) * p.cpg.freq_mult * (p.cpg.amp.abs().min(p.limit) / 0.8).min(1.5))
                 .sum::<f32>(),
             base_freq: pheno.base_freq,
             membrane_area: pheno.membrane_area,
@@ -1218,7 +1216,7 @@ impl EcoWorld {
                 continue;
             }
             // --- read state -------------------------------------------------
-            let (patch, in_water, adult_mass, mass, motility, section, freq, activity, _gut_type, _weapon, _armour, fat_frac, gut_frac, membrane_area, water_speed_raw, land_speed_raw, measured_land, measured_water, eff_plant, eff_meat, prev_intake) = {
+            let (patch, in_water, adult_mass, mass, motility, section, freq, activity, _gut_type, fat_frac, gut_frac, membrane_area, water_speed_raw, land_speed_raw, measured_land, measured_water, eff_plant, eff_meat, prev_intake) = {
                 let a = &self.animals[ai];
                 let (ep, em) = a.efficiencies();
                 (
@@ -1231,8 +1229,6 @@ impl EcoWorld {
                     a.traits.base_freq,
                     a.traits.activity,
                     a.genome.gut_type.clamp(0.0, 1.0),
-                    a.genome.weapon.clamp(0.0, 1.0),
-                    a.genome.armour.clamp(0.0, 1.0),
                     a.genome.fat_frac.clamp(0.02, 0.6),
                     a.genome.gut_frac.clamp(0.02, 0.4),
                     a.traits.membrane_area,
