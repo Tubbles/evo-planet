@@ -218,6 +218,8 @@ pub fn plant_body_json(genome_json: &str, gravity: f32) -> String {
 #[derive(Serialize)]
 struct PartOut {
     kind: &'static str,
+    flat: f32,
+    grip: f32,
     len: f32,
     radius: f32,
     r0: f32,
@@ -261,6 +263,8 @@ impl ReplaySim {
                     NodeKind::Membrane => "membrane",
                     NodeKind::Pad => "pad",
                 },
+                flat: p.flat,
+                grip: p.grip,
                 len: p.len,
                 radius: p.radius,
                 r0: p.r0,

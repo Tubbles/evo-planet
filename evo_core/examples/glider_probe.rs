@@ -12,9 +12,9 @@ fn glider(wing_len: f32, wing_chord: f32, along: f32, incidence_deg: f32, tail: 
     let mut rng = StdRng::seed_from_u64(1);
     let mut g = Genome::random_with(&mut rng);
     let cpg = Cpg { amp: 0.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, freq_mult: 1.0 };
-    let body = Node { kind: NodeKind::Capsule, len: 0.25, r0: 0.025, r1: 0.02, joint: JointKind::Rigid, limit: 0.0, recursive_limit: 1, cpg, connections: vec![] };
-    let wing = Node { kind: NodeKind::Membrane, len: wing_len.max(0.04), r0: wing_chord * 0.5, r1: 0.1, joint: JointKind::Rigid, limit: 0.0, recursive_limit: 1, cpg, connections: vec![] };
-    let tail_n = Node { kind: NodeKind::Membrane, len: 0.15, r0: 0.05, r1: 0.1, joint: JointKind::Rigid, limit: 0.0, recursive_limit: 1, cpg, connections: vec![] };
+    let body = Node { kind: NodeKind::Capsule, flat: 0.0, grip: 0.0, stiffness: 1.0, freedom: 0.0, len: 0.25, r0: 0.025, r1: 0.02, joint: JointKind::Rigid, limit: 0.0, recursive_limit: 1, cpg, connections: vec![] };
+    let wing = Node { kind: NodeKind::Membrane, flat: 1.0, grip: 0.0, stiffness: 1.0, freedom: 0.0, len: wing_len.max(0.04), r0: wing_chord * 0.5, r1: 0.1, joint: JointKind::Rigid, limit: 0.0, recursive_limit: 1, cpg, connections: vec![] };
+    let tail_n = Node { kind: NodeKind::Membrane, flat: 1.0, grip: 0.0, stiffness: 1.0, freedom: 0.0, len: 0.15, r0: 0.05, r1: 0.1, joint: JointKind::Rigid, limit: 0.0, recursive_limit: 1, cpg, connections: vec![] };
     let inc = incidence_deg.to_radians();
     let mut conns = vec![
         Connection { target: 1, along, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0 + inc, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false },

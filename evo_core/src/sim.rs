@@ -13,7 +13,7 @@
 //!   (lung fraction x torso volume x pO2 against muscle section x frequency).
 
 use crate::decode::{Phenotype, MEMBRANE_THICKNESS};
-use crate::genome::{JointKind, NodeKind};
+use crate::genome::NodeKind;
 use crate::planet::{Derived, PlanetParams};
 use rapier3d::na::{Isometry3, Point3, UnitQuaternion, Vector3};
 use rapier3d::prelude::*;
@@ -77,6 +77,8 @@ pub const CD0_PANEL: f32 = 0.09;
 pub const C_ROLLING: f32 = 0.05;
 /// Spin drag coefficient of a part rotating about its own axis.
 pub const C_SPIN: f32 = 1.0;
+/// Passive joint spring per unit stiffness gene, in multiples of muscle strength.
+pub const RIGID_GAIN: f32 = 20.0;
 /// Joint angular speed at which muscle torque reaches zero (Hill), rad/s.
 /// Vertebrate limb joints peak around 10-40 rad/s.
 pub const OMEGA_MAX: f32 = 25.0;
@@ -174,10 +176,7 @@ pub struct CreatureSim {
 }
 
 fn part_bounding_radius(p: &crate::decode::Part) -> f32 {
-    match p.kind {
-        NodeKind::Membrane => (p.len * 0.5).max(p.r0),
-        _ => p.len * 0.5 + p.radius,
-    }
+    (p.len * 0.5 + p.radius * (1.0 - p.flat)).max(p.r0 * p.flat)
 }
 
 /// Oxygen supply over demand, clamped. Supply grows with lung fraction,
@@ -259,7 +258,7 @@ impl CreatureSim {
         let max_y = (0..n)
             .map(|i| isos[i].translation.y + part_bounding_radius(&pheno.parts[i]))
             .fold(f32::NEG_INFINITY, f32::max);
-        let volume: f32 = pheno.parts.iter().map(|p| if p.kind == NodeKind::Membrane { p.mass / crate::decode::ANIMAL_DENSITY } else { p.mass / p.density.max(1.0) }).sum();
+        let volume: f32 = pheno.parts.iter().map(|p| p.mass / p.density.max(1.0)).sum();
         let mean_density = pheno.total_mass / volume.max(1e-6);
         // Shore: start where the water is 1.2 body heights deep, 1-4 m out.
         let x_off = if env == Environment::Shore { -((max_y - min_y) * 1.2 / SHORE_SLOPE).clamp(1.0, -SHORE_START_X) } else { 0.0 };
@@ -303,16 +302,20 @@ impl CreatureSim {
                 .ccd_enabled(true)
                 .build();
             let h = bodies.insert(rb);
-            let friction = match p.kind {
-                NodeKind::Pad => 1.4,
-                NodeKind::Membrane => 0.5,
-                NodeKind::Capsule => 0.8,
-            };
-            let col = match p.kind {
-                NodeKind::Membrane => ColliderBuilder::cuboid(p.r0, p.len * 0.5, MEMBRANE_THICKNESS * 0.5),
-                _ => ColliderBuilder::capsule_y(p.len * 0.5, p.radius),
+            // Friction from the surface gene, a little more for round skin than a
+            // sheet. The collider is a rounded box whose inner box vanishes at
+            // flat = 0 (then it is exactly a capsule) and whose rounding vanishes at
+            // flat = 1 (then it is a thin plate of chord 2*r0).
+            let friction = 0.5 + 0.3 * (1.0 - p.flat) + 0.6 * p.grip;
+            // Contact shape is the nearest of the two (a rounded box with a zero
+            // inner box has no mass in rapier); everything else about the part is
+            // the continuous blend, and its mass is set from that blend.
+            let col = if p.flat > 0.5 {
+                ColliderBuilder::cuboid(p.r0, p.len * 0.5, MEMBRANE_THICKNESS * 0.5)
+            } else {
+                ColliderBuilder::capsule_y(p.len * 0.5, p.radius.max(0.002))
             }
-            .density(p.density)
+            .mass(p.mass)
             .friction(friction)
             .collision_groups(InteractionGroups::new(Group::GROUP_1, Group::ALL))
             .build();
@@ -327,37 +330,29 @@ impl CreatureSim {
             let parent = p.parent.unwrap();
             let frame1 = Isometry3::from_parts(p.anchor_parent.into(), p.rot_from_parent);
             let frame2 = Isometry3::from_parts(Vector3::new(0.0, -p.len * 0.5, 0.0).into(), UnitQuaternion::identity());
+            // One joint: two driven axes, twist locked. `stiffness` adds a passive
+            // spring holding the rest pose (welded at 1); `freedom` opens the second
+            // axis (a hinge at 0, a ball at 1). Both continuous.
             let strength = p.max_torque * fatigue;
-            let stiffness = strength * 3.0;
-            let damping = strength * 0.3;
-            let mask = match p.joint {
-                JointKind::Hinge => JointAxesMask::LOCKED_REVOLUTE_AXES,
-                JointKind::Ball => JointAxesMask::LIN_X | JointAxesMask::LIN_Y | JointAxesMask::LIN_Z | JointAxesMask::ANG_Y,
-                JointKind::Rigid => JointAxesMask::LOCKED_FIXED_AXES,
-            };
+            let rigid = strength * RIGID_GAIN * p.stiffness;
+            let stiffness = strength * 3.0 + rigid;
+            let damping = strength * 0.3 + rigid * 0.1;
+            let mask = JointAxesMask::LIN_X | JointAxesMask::LIN_Y | JointAxesMask::LIN_Z | JointAxesMask::ANG_Y;
             let mut b = GenericJointBuilder::new(mask)
                 .local_frame1(frame1)
                 .local_frame2(frame2)
                 .contacts_enabled(false);
-            match p.joint {
-                JointKind::Hinge => {
-                    b = b
-                        .limits(JointAxis::AngX, [-p.limit, p.limit])
-                        .motor_model(JointAxis::AngX, MotorModel::ForceBased)
-                        .motor_position(JointAxis::AngX, p.cpg.bias.clamp(-p.limit, p.limit), stiffness, damping)
-                        .motor_max_force(JointAxis::AngX, strength);
-                }
-                JointKind::Ball => {
-                    for axis in [JointAxis::AngX, JointAxis::AngZ] {
-                        b = b
-                            .limits(axis, [-p.limit, p.limit])
-                            .motor_model(axis, MotorModel::ForceBased)
-                            .motor_position(axis, 0.0, stiffness, damping)
-                            .motor_max_force(axis, strength);
-                    }
-                }
-                JointKind::Rigid => {}
-            }
+            let lim_x = p.limit * (1.0 - p.stiffness) + 0.02;
+            let lim_z = (p.limit * p.freedom * (1.0 - p.stiffness)).max(0.02);
+            b = b
+                .limits(JointAxis::AngX, [-lim_x, lim_x])
+                .motor_model(JointAxis::AngX, MotorModel::ForceBased)
+                .motor_position(JointAxis::AngX, p.cpg.bias.clamp(-lim_x, lim_x), stiffness, damping)
+                .motor_max_force(JointAxis::AngX, strength + rigid)
+                .limits(JointAxis::AngZ, [-lim_z, lim_z])
+                .motor_model(JointAxis::AngZ, MotorModel::ForceBased)
+                .motor_position(JointAxis::AngZ, 0.0, stiffness, damping)
+                .motor_max_force(JointAxis::AngZ, strength + rigid);
             let jh = impulse_joints.insert(handles[parent], handles[i], b.build(), true);
             joint_handles[i] = Some(jh);
         }
@@ -510,8 +505,8 @@ impl CreatureSim {
         for i in 1..self.pheno.parts.len() {
             let Some(jh) = self.joint_handles[i] else { continue };
             let p = &self.pheno.parts[i];
-            if p.joint == JointKind::Rigid {
-                continue;
+            if p.stiffness >= 0.999 {
+                continue; // welded: the passive spring set at build holds it
             }
             // Hill force-velocity limit: a muscle's torque falls linearly with
             // the joint's angular speed and is gone at OMEGA_MAX, so power is
@@ -522,26 +517,28 @@ impl CreatureSim {
                 _ => 0.0,
             };
             let hill = (1.0 - omega_rel / OMEGA_MAX).clamp(0.05, 1.0);
+            let rigid = p.max_torque * self.fatigue * RIGID_GAIN * p.stiffness;
             let strength = p.max_torque * self.fatigue * hill;
-            let stiffness = strength * 3.0;
-            let damping = strength * 0.3;
+            let stiffness = strength * 3.0 + rigid;
+            let damping = strength * 0.3 + rigid * 0.1;
+            let drive = 1.0 - p.stiffness;
+            let lim_x = p.limit * drive + 0.02;
+            let lim_z = (p.limit * p.freedom * drive).max(0.02);
             let w = 2.0 * PI * f * p.cpg.freq_mult * t;
             let gain = 1.0 + if p.reflected { -self.cfg.steer } else { self.cfg.steer };
             let (t1, t2) = if self.motors_active() {
                 (
-                    (p.cpg.bias + self.cfg.bias_shift + p.cpg.amp * gain * (w + p.cpg.phase).sin()).clamp(-p.limit, p.limit),
-                    (p.cpg.amp2 * gain * (w + p.cpg.phase2).sin()).clamp(-p.limit, p.limit),
+                    (p.cpg.bias + (self.cfg.bias_shift + p.cpg.amp * gain * (w + p.cpg.phase).sin()) * drive).clamp(-lim_x, lim_x),
+                    (p.cpg.amp2 * gain * p.freedom * drive * (w + p.cpg.phase2).sin()).clamp(-lim_z, lim_z),
                 )
             } else {
-                (p.cpg.bias.clamp(-p.limit, p.limit), 0.0)
+                (p.cpg.bias.clamp(-lim_x, lim_x), 0.0)
             };
             if let Some(j) = self.impulse_joints.get_mut(jh) {
                 j.data.set_motor_position(JointAxis::AngX, t1, stiffness, damping);
-                j.data.set_motor_max_force(JointAxis::AngX, strength);
-                if p.joint == JointKind::Ball {
-                    j.data.set_motor_position(JointAxis::AngZ, t2, stiffness, damping);
-                    j.data.set_motor_max_force(JointAxis::AngZ, strength);
-                }
+                j.data.set_motor_max_force(JointAxis::AngX, strength + rigid);
+                j.data.set_motor_position(JointAxis::AngZ, t2, stiffness, damping);
+                j.data.set_motor_max_force(JointAxis::AngZ, strength + rigid);
             }
         }
     }
@@ -568,12 +565,13 @@ impl CreatureSim {
             };
             let rho = rho_air * (1.0 - sub) + rho_water * sub;
 
-            match p.kind {
-                NodeKind::Membrane => {
-                    // 2x2 sub-panels.
+            let flat = p.flat;
+            if flat > 0.0 {
+                {
+                    // Sheet share: 2x2 sub-panels of a plate of chord 2*r0.
                     let normal = iso.rotation * Vector3::z();
                     let chord = iso.rotation * Vector3::x();
-                    let area = p.len * 2.0 * p.r0 * 0.25;
+                    let area = p.len * 2.0 * p.r0 * 0.25 * flat;
                     for (sy, sx) in [(-0.25f32, -0.5f32), (-0.25, 0.5), (0.25, -0.5), (0.25, 0.5)] {
                         let point = center + axis * (sy * p.len) + chord * (sx * p.r0);
                         let v = rb.velocity_at_point(&Point3::from(point));
@@ -589,7 +587,7 @@ impl CreatureSim {
                         // of the part to rest in one step, or light parts in dense
                         // fluid blow up numerically.
                         let mut f = f_normal + f_para;
-                        let f_max = 0.25 * p.mass * speed / self.cfg.dt;
+                        let f_max = 0.25 * p.mass * flat.max(0.05) * speed / self.cfg.dt;
                         let fm = f.norm();
                         if fm > f_max {
                             f *= f_max / fm;
@@ -597,10 +595,13 @@ impl CreatureSim {
                         rb.add_force_at_point(f, Point3::from(point), true);
                     }
                 }
-                _ => {
-                    // Three samples along the axis with anisotropic drag.
-                    let a_axial = PI * p.radius * p.radius;
-                    let a_lat = 2.0 * p.radius * (p.len + 2.0 * p.radius);
+            }
+            if flat < 1.0 {
+                {
+                    // Round share: three samples along the axis with anisotropic drag.
+                    let r_cap = 0.5 * (p.r0 + p.r1);
+                    let a_axial = PI * r_cap * r_cap * (1.0 - flat);
+                    let a_lat = 2.0 * r_cap * (p.len + 2.0 * r_cap) * (1.0 - flat);
                     for sy in [-0.4f32, 0.0, 0.4] {
                         let point = center + axis * (sy * p.len);
                         let v = rb.velocity_at_point(&Point3::from(point));
@@ -612,7 +613,7 @@ impl CreatureSim {
                         let vl = v - va;
                         let mut f = (va * (CD_CAPSULE_AXIAL * a_axial) + vl * (CD_CAPSULE_LATERAL * a_lat))
                             * (-0.5 * rho * speed / 3.0);
-                        let f_max = p.mass / 3.0 * speed / self.cfg.dt;
+                        let f_max = p.mass / 3.0 * (1.0 - flat).max(0.05) * speed / self.cfg.dt;
                         let fm = f.norm();
                         if fm > f_max {
                             f *= f_max / fm;
@@ -632,10 +633,8 @@ impl CreatureSim {
                 let w = *rb.angvel();
                 let wa = w.dot(&axis);
                 if wa.abs() > 1e-3 {
-                    let (r_eff, l_eff) = match p.kind {
-                        NodeKind::Membrane => (p.r0, p.len),
-                        _ => (p.radius, p.len + 2.0 * p.radius),
-                    };
+                    let r_eff = (1.0 - p.flat) * p.radius + p.flat * p.r0;
+                    let l_eff = p.len + 2.0 * p.radius * (1.0 - p.flat);
                     let mut tau = 0.5 * rho * C_SPIN * r_eff.powi(4) * l_eff * wa * wa.abs();
                     let inertia = 0.5 * p.mass * r_eff * r_eff;
                     let tau_max = inertia * wa.abs() / self.cfg.dt;
@@ -668,10 +667,7 @@ impl CreatureSim {
                 // A membrane's collider is 2 cm thick for the solver; the tissue
                 // it stands for is a millimetre of skin, so it displaces its mass
                 // in water, not its collider volume.
-                let volume = match p.kind {
-                    NodeKind::Membrane => p.mass / crate::decode::ANIMAL_DENSITY,
-                    _ => p.mass / p.density,
-                };
+                let volume = p.mass / p.density;
                 let fb = Vector3::new(0.0, rho_water * volume * g * sub, 0.0);
                 let v = *rb.linvel();
                 let damp = -v * (0.8 * p.mass * sub);
@@ -859,6 +855,7 @@ mod tests {
         g.nodes.truncate(1);
         g.nodes[0].connections.clear();
         g.nodes[0].kind = NodeKind::Membrane;
+        g.nodes[0].flat = 1.0;
         g.nodes[0].len = 1.5;
         g.nodes[0].r0 = 0.75;
         g.nodes[0].recursive_limit = 1;

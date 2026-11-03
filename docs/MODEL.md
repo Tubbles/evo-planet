@@ -501,6 +501,39 @@ work, while the sessile sheet beside it pays 0.4% of its leaf mass a day.
 A Euglena does not pay a fish's bills. Maintenance should be a continuum
 tied to activity and tissue, not a kingdom switch; that is the next step.
 
+### No switches in the body: form, joints and kingdom as continua
+Node kinds (capsule, membrane, pad) and joint kinds (hinge, ball, rigid)
+were categories a mutation flipped. They are now four continuous genes
+per node, and every quantity the physics and the ecology read is a blend:
+- **flat** (0 round capsule .. 1 thin sheet of chord 2·r0): mass, tissue
+  volume (buoyancy), muscle section, fluid forces (capsule drag weighted
+  1 − flat, panel lift and drag weighted flat), spin drag, mouth (the
+  trunk's front times 1 − flat), plant leaf share (flat) against stem share
+  (1 − flat) in area, mass, load-bearing section and transport path.
+- **grip** (0 skin .. 1 clawed foot): contact friction, and the claw metric
+  in attack.
+- **stiffness** (0 free .. 1 welded): a passive spring at the joint of
+  twenty times muscle strength per unit gene holding the rest pose, with
+  the driven amplitude and the limits shrinking by 1 − stiffness; muscle
+  cost counts only the driven share; plating is mass held stiff on round
+  parts.
+- **freedom** (0 one driven axis .. 1 two): the second axis's amplitude
+  and limit.
+The contact shape handed to the solver is the nearer of capsule or plate,
+because a rounded box with no inner box has no mass in rapier; its mass is
+set from the blend. Old genomes still carry the labels and resolve to the
+ends of each continuum. Mutation nudges each gene by ±0.1, one time in
+five by ±0.4.
+
+Maintenance is the same continuum across the kingdom line: tissue upkeep
+at a plant's rates (membranes 0.4%/day, the rest 0.05%/day) plus the
+vertebrate field rate scaled by motility, paid identically whether the
+organism sits in the plant tick or the animal tick. A sheet at motility
+0.5 pays half an animal's bills; at 0.05 it pays a sheet's. The remaining
+switch is in the code, not the biology: an organism is ticked as a plant
+below motility 0.5 and as a mover above it, because the two have different
+data structures. Nothing it pays or earns jumps at that line.
+
 ### Audit tooling
 `cargo run --example shore_probe -- <genome.json>...` runs bodies on the beach
 with motors on and off. `cargo run --example gait_audit -- <days> <out_dir>` re-runs the fastest

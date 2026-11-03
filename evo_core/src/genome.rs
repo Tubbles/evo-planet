@@ -79,11 +79,27 @@ pub struct Connection {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
+    /// Nearest category of the continuous form genes below; kept for old
+    /// genomes and for labels. Physics reads `flat`, `grip`, `stiffness`,
+    /// `freedom`, never this.
     pub kind: NodeKind,
     pub len: f32,
     pub r0: f32,
     pub r1: f32,
+    /// Nearest category of `stiffness`/`freedom`; see `kind`.
     pub joint: JointKind,
+    /// Form continuum: 0 a round capsule, 1 a thin sheet (chord 2*r0).
+    #[serde(default = "unset")]
+    pub flat: f32,
+    /// Surface continuum: 0 smooth skin, 1 a gripping, clawed foot.
+    #[serde(default = "unset")]
+    pub grip: f32,
+    /// Joint continuum: 0 a free joint, 1 welded to the parent.
+    #[serde(default = "unset")]
+    pub stiffness: f32,
+    /// Joint continuum: 0 one driven axis (hinge), 1 two (ball).
+    #[serde(default = "unset")]
+    pub freedom: f32,
     /// Half range of joint motion, radians.
     pub limit: f32,
     pub recursive_limit: u8,
@@ -320,40 +336,68 @@ impl Connection {
     }
 }
 
+fn unset() -> f32 {
+    -1.0
+}
+
 impl Node {
+    /// Form gene, resolved from the category for genomes written before it existed.
+    pub fn flat(&self) -> f32 {
+        if self.flat >= 0.0 { self.flat } else if self.kind == NodeKind::Membrane { 1.0 } else { 0.0 }
+    }
+    pub fn grip(&self) -> f32 {
+        if self.grip >= 0.0 { self.grip } else if self.kind == NodeKind::Pad { 1.0 } else { 0.0 }
+    }
+    pub fn stiffness(&self) -> f32 {
+        if self.stiffness >= 0.0 { self.stiffness } else if self.joint == JointKind::Rigid { 1.0 } else { 0.0 }
+    }
+    pub fn freedom(&self) -> f32 {
+        if self.freedom >= 0.0 { self.freedom } else if self.joint == JointKind::Ball { 1.0 } else { 0.0 }
+    }
+    /// Write the resolved continuous genes back and set the nearest labels.
+    pub fn sync(&mut self) {
+        self.flat = self.flat();
+        self.grip = self.grip();
+        self.stiffness = self.stiffness();
+        self.freedom = self.freedom();
+        self.kind = if self.flat > 0.5 { NodeKind::Membrane } else if self.grip > 0.5 { NodeKind::Pad } else { NodeKind::Capsule };
+        self.joint = if self.stiffness > 0.8 { JointKind::Rigid } else if self.freedom > 0.5 { JointKind::Ball } else { JointKind::Hinge };
+    }
+
     fn random(rng: &mut StdRng, n_nodes: usize, allow_connections: bool) -> Self {
-        let kind = match rng.gen_range(0..10) {
-            0..=6 => NodeKind::Capsule,
-            7..=8 => NodeKind::Membrane,
-            _ => NodeKind::Pad,
-        };
-        let (len, r0, r1) = match kind {
-            NodeKind::Capsule => {
-                let r0 = rng.gen_range(0.04..0.16);
-                (rng.gen_range(0.2..0.8), r0, r0 * rng.gen_range(0.5..1.0))
-            }
-            NodeKind::Membrane => (rng.gen_range(0.3..1.2), rng.gen_range(0.1..0.5), 0.01),
-            NodeKind::Pad => {
-                let r = rng.gen_range(0.06..0.2);
-                (rng.gen_range(0.08..0.25), r, r)
-            }
+        // Form genes: mostly round limbs, some sheets, a few feet; joints mostly
+        // free, a few stiff. Continuous, so anything in between can arise.
+        let flat: f32 = match rng.gen_range(0..10) { 0..=6 => rng.gen_range(0.0..0.2), 7..=8 => rng.gen_range(0.8..1.0), _ => rng.gen_range(0.0..1.0) };
+        let grip: f32 = if rng.gen_bool(0.15) { rng.gen_range(0.6..1.0) } else { rng.gen_range(0.0..0.3) };
+        let stiffness: f32 = if rng.gen_bool(0.1) { rng.gen_range(0.8..1.0) } else { rng.gen_range(0.0..0.3) };
+        let freedom: f32 = rng.gen_range(0.0..1.0);
+        let (len, r0, r1) = if flat > 0.5 {
+            (rng.gen_range(0.3..1.2), rng.gen_range(0.1..0.5), 0.01)
+        } else if grip > 0.5 {
+            let r = rng.gen_range(0.06..0.2);
+            (rng.gen_range(0.08..0.25), r, r)
+        } else {
+            let r0 = rng.gen_range(0.04..0.16);
+            (rng.gen_range(0.2..0.8), r0, r0 * rng.gen_range(0.5..1.0))
         };
         let n_conn = if allow_connections { rng.gen_range(0..=2) } else { 0 };
-        Self {
-            kind,
+        let mut node = Self {
+            kind: NodeKind::Capsule,
             len,
             r0,
             r1,
-            joint: match rng.gen_range(0..10) {
-                0..=5 => JointKind::Hinge,
-                6..=8 => JointKind::Ball,
-                _ => JointKind::Rigid,
-            },
+            joint: JointKind::Hinge,
+            flat,
+            grip,
+            stiffness,
+            freedom,
             limit: rng.gen_range(0.3..1.4),
             recursive_limit: rng.gen_range(1..=3),
             cpg: Cpg::random(rng),
             connections: (0..n_conn).map(|_| Connection::random(rng, n_nodes)).collect(),
-        }
+        };
+        node.sync();
+        node
     }
 
     /// Returns true if a body-affecting parameter changed.
@@ -371,22 +415,22 @@ impl Node {
             self.r1 = nudge(rng, self.r1, 0.2, 0.01, MIN_DIM * 0.5, MAX_RADIUS);
             body = true;
         }
-        if rng.gen_bool((p * 0.3) as f64) {
-            self.kind = match rng.gen_range(0..10) {
-                0..=6 => NodeKind::Capsule,
-                7..=8 => NodeKind::Membrane,
-                _ => NodeKind::Pad,
-            };
-            body = true;
+        // Form and joint genes drift; one mutation in five is a larger step.
+        self.sync();
+        for k in 0..4 {
+            if rng.gen_bool((p * 0.6) as f64) {
+                let step = if rng.gen_bool(0.2) { 0.4 } else { 0.1 };
+                let d = rng.gen_range(-step..step);
+                match k {
+                    0 => self.flat = (self.flat + d).clamp(0.0, 1.0),
+                    1 => self.grip = (self.grip + d).clamp(0.0, 1.0),
+                    2 => self.stiffness = (self.stiffness + d).clamp(0.0, 1.0),
+                    _ => self.freedom = (self.freedom + d).clamp(0.0, 1.0),
+                }
+                body = true;
+            }
         }
-        if rng.gen_bool((p * 0.4) as f64) {
-            self.joint = match rng.gen_range(0..10) {
-                0..=5 => JointKind::Hinge,
-                6..=8 => JointKind::Ball,
-                _ => JointKind::Rigid,
-            };
-            body = true;
-        }
+        self.sync();
         if rng.gen_bool(p as f64) {
             self.limit = nudge(rng, self.limit, 0.2, 0.05, 0.1, 1.6);
         }
@@ -400,7 +444,7 @@ impl Node {
     }
 
     pub fn is_membrane(&self) -> bool {
-        self.kind == NodeKind::Membrane
+        self.flat() > 0.5
     }
 }
 
@@ -420,6 +464,8 @@ impl Genome {
         // Root: a torso-sized capsule with at least one connection out.
         let root = &mut nodes[0];
         root.kind = NodeKind::Capsule;
+        root.flat = 0.0;
+        root.grip = 0.0;
         root.len = rng.gen_range(0.4..1.0);
         root.r0 = rng.gen_range(0.09..0.2);
         root.r1 = root.r0 * rng.gen_range(0.6..1.0);
@@ -470,6 +516,10 @@ impl Genome {
             r0: rng.gen_range(0.2..0.6),
             r1: rng.gen_range(0.1..0.4), // thickness gene (x0.01 m)
             joint: JointKind::Rigid,
+            flat: 1.0,
+            grip: 0.0,
+            stiffness: 1.0,
+            freedom: 0.0,
             limit: 0.3,
             recursive_limit: 1,
             cpg: Cpg::random(rng),
@@ -515,6 +565,10 @@ impl Genome {
             r0: rng.gen_range(0.02..0.05),
             r1: rng.gen_range(0.02..0.04),
             joint: JointKind::Rigid,
+            flat: 0.0,
+            grip: 0.0,
+            stiffness: 1.0,
+            freedom: 0.0,
             limit: 0.3,
             recursive_limit: rng.gen_range(1..=3),
             cpg: Cpg::random(rng),
@@ -526,6 +580,10 @@ impl Genome {
             r0: rng.gen_range(0.1..0.5),
             r1: rng.gen_range(0.02..0.12), // leaf thickness gene (x0.01 m)
             joint: JointKind::Rigid,
+            flat: 1.0,
+            grip: 0.0,
+            stiffness: 1.0,
+            freedom: 0.0,
             limit: 0.3,
             recursive_limit: rng.gen_range(1..=2),
             cpg: Cpg::random(rng),
@@ -537,6 +595,10 @@ impl Genome {
             r0: rng.gen_range(0.02..0.04),
             r1: rng.gen_range(0.02..0.03),
             joint: JointKind::Rigid,
+            flat: 0.0,
+            grip: 1.0,
+            stiffness: 1.0,
+            freedom: 0.0,
             limit: 0.3,
             recursive_limit: rng.gen_range(1..=2),
             cpg: Cpg::random(rng),

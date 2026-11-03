@@ -640,8 +640,7 @@ impl EcoWorld {
                 .parts
                 .iter()
                 .skip(1)
-                .filter(|p| p.joint != crate::genome::JointKind::Rigid)
-                .map(|p| p.section_area * p.cpg.freq_mult * (p.cpg.amp.abs().min(p.limit) / 0.8).min(1.5))
+                .map(|p| p.section_area * (1.0 - p.stiffness) * p.cpg.freq_mult * (p.cpg.amp.abs().min(p.limit) / 0.8).min(1.5))
                 .sum::<f32>(),
             base_freq: pheno.base_freq,
             membrane_area: pheno.membrane_area,
@@ -1055,7 +1054,10 @@ impl EcoWorld {
                 let leaf_m = p.leaf_mass();
                 // Transport: feeding leaves through long stems costs upkeep per kg*m.
                 let transport = p.body().transport * (p.biomass / p.body().target_mass).clamp(0.0, 1.0);
-                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * 0.0005 + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
+                // The same continuum from the sessile side: a plant with some
+                // motility already pays that share of an animal's field rate.
+                let motile_cost = p.genome.motility.clamp(0.0, 1.0) * 0.006 * p.biomass.max(1e-6).powf(0.75) * 2f32.powf((patch.temp_c - 20.0) / 10.0).clamp(0.15, 3.0);
+                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * 0.0005 + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol) + motile_cost;
                 production_today += photo;
                 p.energy += photo + (absorbed + captured) * 0.6 - respiration;
                 // Leaf economics: thin leaves live weeks, thick ones years
@@ -1259,7 +1261,13 @@ impl EcoWorld {
 
             // --- costs -------------------------------------------------------
             // Field metabolic rate: Kleiber exponent, ectotherm anchor, oxygen limit.
-            let fmr = 0.006 * m34 * q / o2.min(1.0).max(0.3);
+            // Maintenance is a continuum, not a kingdom: tissue upkeep like a
+            // plant's (membranes 0.4%/day, the rest 0.05%/day), plus the
+            // vertebrate field rate scaled by motility. A barely motile sheet pays
+            // a sheet's bills; a fully motile body pays an animal's.
+            let membrane_mass = membrane_area * lin_f * lin_f * crate::decode::MEMBRANE_AREAL_DENSITY;
+            let tissue = (membrane_mass.min(mass) * 0.004 + (mass - membrane_mass).max(0.0) * 0.0005) * (0.3 + temp_factor(temp));
+            let fmr = tissue + motility * 0.006 * m34 * q / o2.min(1.0).max(0.3);
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
             // Short of oxygen, the muscles cannot be kept working all day.
             let activity = activity * resp_eff;

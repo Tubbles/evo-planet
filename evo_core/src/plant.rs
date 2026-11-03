@@ -10,7 +10,7 @@
 //! its strength under the weight above it.
 
 use crate::decode::{decode, Phenotype};
-use crate::genome::{Genome, NodeKind};
+use crate::genome::Genome;
 use rapier3d::na::{Isometry3, UnitQuaternion, Vector3};
 use serde::Serialize;
 
@@ -24,6 +24,8 @@ pub const LEAF_DENSITY: f32 = 250.0;
 #[derive(Clone, Debug, Serialize)]
 pub struct PlantPart {
     pub kind: &'static str,
+    #[serde(default)]
+    pub flat: f32,
     pub len: f32,
     pub radius: f32,
     pub r0: f32,
@@ -191,36 +193,26 @@ pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
         let axis = iso.rotation * Vector3::y();
         let top = iso.translation.y + axis.y * p.len * 0.5 + p.radius;
         let below_ground = iso.translation.y < 0.0;
-        let (kind, mass, thickness) = match p.kind {
-            NodeKind::Membrane => {
-                // Real leaves are 0.1-2 mm thick (SLA 2.5-40 m^2/kg at this density).
-                let thickness = (p.r1 * 0.002).clamp(0.0001, 0.002);
-                let area = p.len * 2.0 * p.r0;
-                let m = area * thickness * LEAF_DENSITY;
-                if !below_ground {
-                    leaf_area_total += area;
-                    leaf_mass += m;
-                    leaves.push((iso, p.r0, p.len * 0.5));
-                } else {
-                    root_mass += m;
-                }
-                ("leaf", m, thickness)
+        // A part is `flat` leaf and `1 - flat` stem; whatever is below ground is root.
+        let flat = p.flat;
+        // Real leaves are 0.1-2 mm thick (SLA 2.5-40 m^2/kg at this density).
+        let thickness = (p.r1 * 0.002).clamp(0.0001, 0.002);
+        let area = flat * p.len * 2.0 * p.r0;
+        let leaf_m = area * thickness * LEAF_DENSITY;
+        let r_cap = 0.5 * (p.r0 + p.r1);
+        let stem_m = (1.0 - flat) * (std::f32::consts::PI * r_cap * r_cap * p.len + 4.0 / 3.0 * std::f32::consts::PI * r_cap.powi(3)) * g.density;
+        let mass = leaf_m + stem_m;
+        let kind = if below_ground { "root" } else if flat > 0.5 { "leaf" } else { "stem" };
+        if below_ground {
+            root_mass += mass;
+        } else {
+            leaf_area_total += area;
+            leaf_mass += leaf_m;
+            stem_mass += stem_m;
+            if area > 0.0 {
+                leaves.push((iso, p.r0 * flat, p.len * 0.5));
             }
-            NodeKind::Pad => {
-                let m = p.mass / p.density * g.density;
-                root_mass += m;
-                ("root", m, 0.0)
-            }
-            NodeKind::Capsule => {
-                let m = p.mass / p.density * g.density;
-                if below_ground {
-                    root_mass += m;
-                } else {
-                    stem_mass += m;
-                }
-                ("stem", m, 0.0)
-            }
-        };
+        }
         masses[i] = mass;
         tops[i] = top;
         if !below_ground {
@@ -230,6 +222,7 @@ pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
         let q = iso.rotation;
         parts.push(PlantPart {
             kind,
+            flat,
             len: p.len,
             radius: p.radius,
             r0: p.r0,
@@ -267,7 +260,7 @@ pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
     for j in 0..n {
         let pos_j = isos[j].translation.vector;
         for &i in ancestors[j].iter().chain(std::iter::once(&j)) {
-            if pheno.parts[i].kind != NodeKind::Capsule || isos[i].translation.y < 0.0 {
+            if isos[i].translation.y < 0.0 {
                 continue;
             }
             let b = base_of(i);
@@ -282,12 +275,15 @@ pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
     }
     let mut worst: f32 = 0.0;
     for (i, p) in pheno.parts.iter().enumerate() {
-        if p.kind != NodeKind::Capsule || isos[i].translation.y < 0.0 {
+        if isos[i].translation.y < 0.0 {
             continue;
         }
-        let section = std::f32::consts::PI * p.radius * p.radius;
+        // A sheet has almost no section to carry load; its share is 1 - flat.
+        let r_cap = 0.5 * (p.r0 + p.r1);
+        let r_eff = r_cap * (1.0 - p.flat) + 0.002 * p.flat;
+        let section = std::f32::consts::PI * r_eff * r_eff;
         let stress = moment[i] / (section * STEM_STRENGTH);
-        let second_moment = std::f32::consts::PI * p.radius.powi(4) / 4.0;
+        let second_moment = std::f32::consts::PI * r_eff.powi(4) / 4.0;
         let critical = std::f32::consts::PI.powi(2) * STEM_MODULUS * second_moment / 4.0;
         worst = worst.max(stress).max(buckle[i] / critical);
     }
@@ -295,11 +291,11 @@ pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
     // Transport: every leaf is fed through the stems on its path to the base.
     let mut transport = 0.0;
     for j in 0..n {
-        if pheno.parts[j].kind != NodeKind::Membrane || isos[j].translation.y < 0.0 {
+        if pheno.parts[j].flat <= 0.0 || isos[j].translation.y < 0.0 {
             continue;
         }
-        let path: f32 = ancestors[j].iter().filter(|&&k| pheno.parts[k].kind == NodeKind::Capsule).map(|&k| pheno.parts[k].len).sum();
-        transport += masses[j] * path;
+        let path: f32 = ancestors[j].iter().map(|&k| pheno.parts[k].len * (1.0 - pheno.parts[k].flat)).sum();
+        transport += masses[j] * pheno.parts[j].flat * path;
     }
     let target_mass = (leaf_mass + stem_mass + root_mass).max(1e-4);
     PlantBody {

@@ -203,10 +203,10 @@ swimmers have evolved in the ecology; `docs/MODEL.md` records what the
 replays actually show and what higher fidelity would cost.
 
 - **Plants** use the same graph genome as animals, read by a different
-  decoder (`evo_core/src/plant.rs`): capsule nodes are stems and branches,
-  membrane nodes are leaves (the membrane's spare radius gene is leaf
-  thickness, so specific leaf area evolves), pad nodes are roots. The root
-  node stands vertically; parts below ground count as root mass. The decoder
+  decoder (`evo_core/src/plant.rs`): each node's flatness gene makes it
+  that much leaf (chord 2·r0, the spare radius gene being leaf thickness,
+  so specific leaf area evolves) and the rest stem; parts below ground are
+  root. The root node stands vertically. The decoder
   runs a static cantilever check over every stem (weight above × lever over
   section × strength, scaled by gravity) and returns a growth cap: the
   fraction of full size the stems can carry. Plant genes added to the genome:

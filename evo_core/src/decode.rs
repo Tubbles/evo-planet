@@ -32,6 +32,13 @@ pub struct Part {
     pub mass: f32,
     pub density: f32,
     pub joint: JointKind,
+    /// Form continuum (0 capsule .. 1 sheet), grip (0..1), joint stiffness
+    /// (0 free .. 1 welded) and freedom (0 one axis .. 1 two). Physics reads
+    /// these; `kind` and `joint` are the nearest labels.
+    pub flat: f32,
+    pub grip: f32,
+    pub stiffness: f32,
+    pub freedom: f32,
     pub limit: f32,
     /// Anchor on the parent, in the parent's local frame.
     pub anchor_parent: Vector3<f32>,
@@ -62,7 +69,7 @@ impl Phenotype {
         self.parts.len()
     }
     pub fn membrane_count(&self) -> usize {
-        self.parts.iter().filter(|p| p.kind == NodeKind::Membrane).count()
+        self.parts.iter().filter(|p| p.flat > 0.5).count()
     }
     /// Membrane area per kilogram, the wing-loading proxy used as a
     /// behaviour descriptor.
@@ -124,25 +131,20 @@ impl<'a> Ctx<'a> {
         let len = (node.len * scale).clamp(0.01, 3.0);
         let r0 = (node.r0 * scale).clamp(0.004, 0.8);
         let r1 = (node.r1 * scale).clamp(0.004, 0.8);
-        let radius = match node.kind {
-            NodeKind::Membrane => r0,
-            _ => 0.5 * (r0 + r1),
-        };
-        let (mass, density) = match node.kind {
-            NodeKind::Membrane => {
-                let area = len * 2.0 * r0;
-                let m = area * MEMBRANE_AREAL_DENSITY;
-                (m, m / (area * MEMBRANE_THICKNESS))
-            }
-            _ => {
-                let v = capsule_volume(len, radius);
-                (v * ANIMAL_DENSITY, ANIMAL_DENSITY)
-            }
-        };
-        let section_area = match node.kind {
-            NodeKind::Membrane => PI * 0.03 * 0.03 + len * 0.004, // thin spar
-            _ => PI * radius * radius,
-        };
+        let flat = node.flat();
+        let grip = node.grip();
+        let stiffness = node.stiffness();
+        let freedom = node.freedom();
+        // A part is a blend of a capsule of mean radius and a sheet of chord
+        // 2*r0: mass, tissue volume (for buoyancy) and muscle section all blend.
+        let r_cap = 0.5 * (r0 + r1);
+        let radius = (1.0 - flat) * r_cap + flat * r0;
+        let cap_vol = capsule_volume(len, r_cap);
+        let sheet_mass = len * 2.0 * r0 * MEMBRANE_AREAL_DENSITY;
+        let mass = (1.0 - flat) * cap_vol * ANIMAL_DENSITY + flat * sheet_mass;
+        let tissue_vol = (1.0 - flat) * cap_vol + flat * sheet_mass / ANIMAL_DENSITY;
+        let density = mass / tissue_vol.max(1e-9);
+        let section_area = (1.0 - flat) * PI * r_cap * r_cap + flat * (PI * 0.03 * 0.03 + len * 0.004);
         let max_torque = STRENGTH_PER_AREA * section_area;
 
         let mut cpg = node.cpg;
@@ -161,6 +163,10 @@ impl<'a> Ctx<'a> {
             mass,
             density,
             joint: if parent.is_none() { JointKind::Rigid } else { node.joint },
+            flat,
+            grip,
+            stiffness: if parent.is_none() { 1.0 } else { stiffness },
+            freedom,
             limit: node.limit,
             anchor_parent,
             rot_from_parent,
@@ -181,10 +187,7 @@ impl<'a> Ctx<'a> {
             let roll = if c.reflect { -c.roll } else { c.roll };
             let y = -len * 0.5 + c.along * len;
             let (nx, nz) = (around.cos(), around.sin());
-            let surface_r = match node.kind {
-                NodeKind::Membrane => 0.0,
-                _ => radius,
-            };
+            let surface_r = radius * (1.0 - flat);
             let anchor = Vector3::new(nx * surface_r, y, nz * surface_r);
             let normal = Vector3::new(nx, 0.0, nz);
             // Tilt the child from the outward normal toward this part's tip.
@@ -224,14 +227,17 @@ pub fn decode(g: &Genome) -> Phenotype {
     // not the 600 g capsule its radius would imply) and has no lung cavity.
     let lung = g.lung_frac.clamp(0.0, 0.6);
     let water = g.water_store.clamp(0.0, 0.5);
-    let torso_volume = if parts[0].kind == NodeKind::Membrane {
-        parts[0].mass / parts[0].density.max(1.0)
-    } else {
-        let v = capsule_volume(parts[0].len, parts[0].radius);
+    let torso_volume = {
+        let f = parts[0].flat;
+        let r_cap = 0.5 * (parts[0].r0 + parts[0].r1);
+        let v = capsule_volume(parts[0].len, r_cap);
         let torso_density = ANIMAL_DENSITY * (1.0 - 0.9 * lung) * (1.0 + water);
-        parts[0].density = torso_density;
-        parts[0].mass = v * torso_density;
-        v
+        let sheet_mass = parts[0].len * 2.0 * parts[0].r0 * MEMBRANE_AREAL_DENSITY;
+        let mass = (1.0 - f) * v * torso_density + f * sheet_mass;
+        let vol = (1.0 - f) * v + f * sheet_mass / ANIMAL_DENSITY;
+        parts[0].mass = mass;
+        parts[0].density = mass / vol.max(1e-9);
+        vol
     };
 
     // Clamp neighbouring mass ratios to about 10:1 for solver stability by
@@ -248,12 +254,7 @@ pub fn decode(g: &Genome) -> Phenotype {
     }
 
     let total_mass = parts.iter().map(|p| p.mass).sum();
-    let membrane_area: f32 = parts
-        .iter()
-        .filter(|p| p.kind == NodeKind::Membrane)
-        .map(|p| p.len * 2.0 * p.r0)
-        .sum::<f32>()
-        .max(0.0);
+    let membrane_area: f32 = parts.iter().map(|p| p.flat * p.len * 2.0 * p.r0).sum::<f32>().max(0.0);
     let total_section_area = parts.iter().skip(1).map(|p| p.section_area).sum();
     Phenotype {
         parts,
@@ -309,16 +310,12 @@ pub fn body_metrics(pheno: &Phenotype) -> BodyMetrics {
     let mut rigid_mass = 0.0;
     for (i, p) in pheno.parts.iter().enumerate() {
         let d = (isos[i].translation.vector - com).norm();
-        let extent = match p.kind {
-            NodeKind::Membrane => p.len * 0.5,
-            _ => p.len * 0.5 + p.radius,
-        };
+        let extent = p.len * 0.5 + p.radius * (1.0 - p.flat);
         reach = reach.max(d + extent);
-        if p.kind == NodeKind::Pad {
-            pad_section += p.section_area;
-        }
-        if i > 0 && p.joint == JointKind::Rigid && p.kind == NodeKind::Capsule {
-            rigid_mass += p.mass;
+        // Claws: gripping surface; plating: mass held rigid on round parts.
+        pad_section += p.section_area * p.grip;
+        if i > 0 {
+            rigid_mass += p.mass * p.stiffness * (1.0 - p.flat);
         }
     }
     let root = &pheno.parts[0];
@@ -327,7 +324,7 @@ pub fn body_metrics(pheno: &Phenotype) -> BodyMetrics {
         reach,
         // A mouth is the front of a trunk; a sheet (membrane root) has none and
         // must absorb or filter instead.
-        mouth_area: if root.kind == NodeKind::Capsule { PI * root.r0 * root.r0 } else { 0.0 },
+        mouth_area: PI * root.r0 * root.r0 * (1.0 - root.flat),
         claws: (pad_section / trunk_section.max(1e-6)).min(3.0),
         plating: rigid_mass / total,
     }
