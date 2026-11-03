@@ -972,7 +972,9 @@ impl EcoWorld {
         // Wings are only worth testing on a body light enough to be lifted:
         // wing loading below 50 kg/m^2 (bats and birds span 1-20).
         let winged = t.membrane_area > 0.0 && t.membrane_area / t.mass.max(1e-3) >= 0.02;
-        if winged && !t.measured_air && !self.pending.iter().any(|(i, e)| *i == idx && *e == Environment::Air) {
+        // The queue is rebuilt from scratch each day and a body is requested
+        // once per rebuild, so no duplicate check (which was quadratic) is needed.
+        if winged && !t.measured_air {
             self.pending.push((idx, Environment::Air));
         }
         for env in order {
@@ -980,7 +982,7 @@ impl EcoWorld {
                 Environment::Water => t.measured_water,
                 _ => t.measured_land,
             };
-            if !done && !self.pending.iter().any(|(i, e)| *i == idx && *e == env) {
+            if !done {
                 self.pending.push((idx, env));
             }
         }
