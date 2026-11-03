@@ -770,3 +770,36 @@ and a sheet absorbing dead matter at the surface never needed to move.
 The ecology now charges the measured power and cost of transport, and
 measures a day's batch on every core. Whether that is enough is the next
 run's question.
+
+## Why the planet grew flakes, and the water it was missing
+
+The next run answered: no. Over 1,200 days (600 cells, seed 4, 32 bodies
+measured a day) the land filled with 146,000 animals of 20 g and 2.3
+parts; the best land speed was 0.21 m/s; only 16 of 174 land cells were
+still green. The ledger shows the attractor and the reason selection
+could not leave it.
+
+1. Motile sheets lived on dry land as mats: photosynthesis, osmotrophy of
+   the dead-matter pool through their surface, and a carrion loop of
+   their own corpses. Nothing charged a wet surface for being in air.
+   Animals had no water balance at all; plants did.
+2. Maintenance was linear in mass, so a gram of a tiny body cost what a
+   gram of a large one did, while intake through a mouth or a surface
+   scales with area. Small won on every term.
+3. Measurement starved: 15,834 bodies measured against 246,679 waiting.
+   A mutated body inherits its parent's speed as a neutral prior but pays
+   the mass of its new part at once, so under a backlog every added
+   segment is a pure cost and selection removes it. The backlog itself
+   selected for pills.
+
+The changes are real systems, not thresholds. A land animal now loses
+water through its skin per square metre (1 kg/m²/day in dry air, scaled
+by the cell's dryness, warmth and the land tolerance gene, which is now
+the one integument gene for a plant's cuticle and an animal's skin),
+drinks from the cell's wetness, eats the water in fresh food, and dies
+past a 15% deficit plus its water store. A 20 g unwaterproofed body dries
+out on ordinary land in a day or two; a 1 kg body does not. Bulk tissue
+maintenance now scales as mass to the three quarters (Kleiber). Osmotrophy
+needs a wet surface. A hungry body relocates as far as its day's path,
+paying the measured cost of transport per cell crossed (the fifty-metre
+cap is gone).

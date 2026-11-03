@@ -7,7 +7,7 @@
 
 use evo_core::planet::PlanetParams;
 
-fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32, arena_per_day: f32) {
+fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32, arena_per_day: f32, dump_dir: Option<&str>) {
     use evo_core::eco::EcoWorld;
     let mut w = EcoWorld::new_with_area(planet.clone(), patches, seed, patch_area);
     w.arena_rate = arena_per_day;
@@ -36,11 +36,22 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
     let el = start.elapsed().as_secs_f32();
     println!("{} days in {:.1} s ({:.0} days/s)", days, el, days as f32 / el);
     println!("\nland lineages by gait (speed x clearance x stepping limbs):");
-    for l in w.lineages_filtered("animal", "land", "gait", 4) {
+    for l in w.lineages_filtered("animal", "land", "gait", 6) {
         println!(
             "  lineage {:>5}: n={:>4} mass {:>6.2} kg | land {:.2} m/s | limbs {:.1} clearance {:.2} m COT {:.1} | upright {:.2} parts {:.1}",
             l.id, l.count, l.mean_mass, l.land_speed, l.limbs, l.clearance, l.cot, l.upright, l.parts
         );
+        // Write a representative genome of each so it can be replayed in the page.
+        if let Some(dir) = dump_dir {
+            if let Some((g, _)) = w.representative_in(l.id, "land") {
+                let path = format!("{}/lineage_{}.json", dir, l.id);
+                if let Ok(s) = serde_json::to_string(&g) {
+                    let _ = std::fs::create_dir_all(dir);
+                    let _ = std::fs::write(&path, s);
+                    println!("      genome written to {path}");
+                }
+            }
+        }
     }
     println!();
     for l in w.lineages(6) {
@@ -67,9 +78,14 @@ fn main() {
     let mut arena_per_day = 1.0f32;
     let mut planet_sel = "0".to_string();
     let mut seed = 1u64;
+    let mut dump_dir: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--dump-gaits" => {
+                dump_dir = Some(args[i + 1].clone());
+                i += 1;
+            }
             "--planet" => {
                 planet_sel = args[i + 1].clone();
                 i += 1;
@@ -121,5 +137,5 @@ fn main() {
         .find(|(k, p)| k.to_string() == planet_sel || p.name.to_lowercase().contains(&planet_sel.to_lowercase()))
         .map(|(_, p)| p.clone())
         .unwrap_or_else(PlanetParams::earth);
-    run_eco(planet, days, grid, seed, evals_per_day, patch_area, arena_per_day);
+    run_eco(planet, days, grid, seed, evals_per_day, patch_area, arena_per_day, dump_dir.as_deref());
 }

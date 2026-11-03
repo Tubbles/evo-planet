@@ -404,8 +404,9 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  MB["maintenance: tissue rates × temperature (Q10) × oxygen"] --> DL[daily balance]
-  AC["activity: driven muscle section × swing × rate"] --> DL
+  MB["maintenance: tissue rates, bulk tissue as mass to the three quarters (Kleiber) × temperature (Q10) × oxygen × waterproofing upkeep"] --> DL[daily balance]
+  AC["activity: measured gait power over the foraging day"] --> DL
+  WB["water: evaporation per m² of skin in air, less drink (patch wetness) and the water in food"] --> DT
   PH["photosynthesis at the surface mat, shared by area"] --> DL
   RG["range: π × reach² + 2 × reach × path, over as many cells as it covers"] --> FR["Holling type II intake of plants, carrion and bacteria, with interference"]
   FR --> GT["stomach and digestion by gut type"]
@@ -415,9 +416,26 @@ flowchart LR
   DL --> RV["reserve, capped by fat capacity"]
   RV --> GW["growth (West, Brown and Enquist)"]
   GW --> RP["reproduction at the maturity fraction of full size"]
-  RV --> DT["death: starved, old, suffocated, killed"]
-  HG[hungry] --> MV["relocate within range to the best cell it can enter"]
+  RV --> DT["death: starved, dried out, old, suffocated, killed"]
+  HG[hungry] --> MV["relocate as far as the day's path to the best cell it can enter, paying the cost of transport per cell crossed"]
 ```
+
+Water is a second balance beside energy. A body in air loses
+`EVAPORATION_KG_PER_M2_DAY` (1 kg) per square metre of surface per day,
+scaled by the air's dryness (one minus the cell's moisture), by warmth and
+by the integument: the land tolerance gene is a plant's cuticle on one
+side of the motility continuum and an animal's waterproof skin on the
+other, cutting the loss by up to 95% and costing 30% more maintenance
+when fully expressed. The surface is the compact body's (6 × (mass /
+1000)^(2/3) m²) or both faces of its sheets, whichever is larger. Fresh
+food carries water (4 kg per kg of dry plant, 2.5 per kg of meat); in or
+beside water the deficit is made up each day, on land the cell's wetness
+covers that share of it. A deficit beyond 15% of body mass plus the
+water-store gene's share is death by drying out. Nothing here is a
+threshold on size or form: a sheet on dry land dries in a day because it
+is all surface, a tiny body because surface per kilogram falls with size,
+and either can live on land once its skin is waterproofed or the ground
+is wet.
 
 ### 7.3 Energy accounting
 
