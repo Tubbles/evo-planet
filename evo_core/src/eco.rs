@@ -379,6 +379,14 @@ pub struct EcoStats {
     pub aquatic: usize,
     pub land_plants: usize,
     pub land_animals: usize,
+    /// Animals on dry land (not the intertidal shore), and their mean mass.
+    #[serde(default)]
+    pub inland_animals: usize,
+    #[serde(default)]
+    pub inland_mass: f32,
+    /// Plant biomass on land, kg.
+    #[serde(default)]
+    pub land_plant_biomass: f32,
     pub land_herbivores: usize,
     pub land_patches: usize,
     pub vegetated_land: usize,
@@ -2221,6 +2229,16 @@ impl EcoWorld {
         s.mean_parts = 0.0;
         let na = self.animals.len().max(1) as f32;
         s.land_plants = self.plants.iter().filter(|p| !self.patches[p.patch].water).count();
+        s.land_plant_biomass = self.plants.iter().filter(|p| !self.patches[p.patch].water).map(|p| p.biomass).sum();
+        s.inland_animals = 0;
+        s.inland_mass = 0.0;
+        for a in &self.animals {
+            if self.patches[a.patch].submersion <= 0.0 {
+                s.inland_animals += 1;
+                s.inland_mass += a.mass;
+            }
+        }
+        s.inland_mass /= s.inland_animals.max(1) as f32;
         s.land_patches = self.patches.iter().filter(|p| !p.water).count();
         {
             let mut veg = vec![false; self.patches.len()];

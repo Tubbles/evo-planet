@@ -149,7 +149,10 @@ impl ArenaSim {
         add_ground(&mut bodies, &mut colliders, ground_y, 0.0);
         let reach_p = body_metrics(&pred).reach;
         let reach_q = body_metrics(&prey).reach;
-        let dist = 2.0 * (reach_p + reach_q) + 1.0;
+        // The start is in body sizes, so a pair of small bodies gets the
+        // same chase in body lengths as a pair of large ones (a fixed metre
+        // made every slow small predator fail by distance alone).
+        let dist = 4.0 * (reach_p + reach_q) + 0.05;
         let zero = Vector3::zeros();
         let bp = build_creature(&mut bodies, &mut colliders, &mut impulse_joints, &pred, env, &derived, ground_y, 0.0, spawn_y, 0.0, 0.0, 0.0, zero);
         let bq = build_creature(&mut bodies, &mut colliders, &mut impulse_joints, &prey, env, &derived, ground_y, 0.0, spawn_y, dist, prey_side, prey_yaw, zero);
