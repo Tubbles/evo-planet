@@ -12,7 +12,9 @@ fn main() {
     }
     let mut outs = w.arena_outcomes();
     outs.sort_by(|a, b| b.3.eaten.partial_cmp(&a.3.eaten).unwrap());
-    println!("day {}: {} animals, {} pairs fought, kills today {}", w.day, w.animals.len(), outs.len(), w.stats.kills);
+    let fought = outs.iter().filter(|o| o.3.bouts > 0).count();
+    let settled = outs.len() - fought;
+    println!("day {}: {} animals, {} pairs fought, {} settled without a bout (no mouth, no claws), {} waiting, kills today {}", w.day, w.animals.len(), fought, settled, w.stats.arena_pending, w.stats.kills);
     let n = outs.len().max(1) as f32;
     let (mut e, mut f, mut s) = (0.0, 0.0, 0.0);
     let mut any_eaten = 0;

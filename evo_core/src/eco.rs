@@ -1035,6 +1035,11 @@ impl EcoWorld {
         if self.arena_cache.contains_key(&key) || !self.arena_seen.insert(key) {
             return;
         }
+        if a.traits.mouth_area <= 0.0 && a.traits.claws <= 0.0 {
+            // Nothing to bite or hold with: the fight is decided without a bout.
+            self.arena_cache.insert(key, crate::arena::ArenaOutcome { eaten: 0.0, fled: 0.0, survived: 1.0, bouts: 0 });
+            return;
+        }
         let (sp, sq) = if env == Environment::Water { (a.traits.turn_sign_water, b.traits.turn_sign_water) } else { (a.traits.turn_sign_land, b.traits.turn_sign_land) };
         self.arena_pending.push(ArenaRequest { pred: a.lineage, prey: b.lineage, env, genome_pred: a.genome.clone(), genome_prey: b.genome.clone(), sign_pred: sp, sign_prey: sq });
     }
@@ -1671,9 +1676,17 @@ impl EcoWorld {
                     // body types; until that pair has been through it, the
                     // attack-versus-defence form stands in as the prior.
                     let medium = if sub >= 0.5 || self.patches[prey.patch].water { Environment::Water } else { Environment::Land };
-                    let p_capture = match self.arena_outcome(self.animals[ai].lineage, prey.lineage, medium) {
-                        Some(o) => o.eaten,
-                        None => hump / (1.0 + (-(attack - defence) / scale).exp()),
+                    // No mouth and no claws means nothing to bite or hold with:
+                    // no attempt, no fight. That is the arena's own rule applied
+                    // before the arena, not a tuning.
+                    let can_bite = self.animals[ai].traits.mouth_area > 0.0 || claws > 0.0;
+                    let p_capture = if !can_bite {
+                        0.0
+                    } else {
+                        match self.arena_outcome(self.animals[ai].lineage, prey.lineage, medium) {
+                            Some(o) => o.eaten,
+                            None => hump / (1.0 + (-(attack - defence) / scale).exp()),
+                        }
                     };
                     let p_success = encounter * p_capture;
                     // Fritsch et al.: energy gained per kill falls with relative prey
