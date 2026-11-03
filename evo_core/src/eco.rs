@@ -500,6 +500,9 @@ pub struct EcoWorld {
     /// are waiting, which in a populated world is always.
     pub arena_rate: f32,
     arena_credit: f32,
+    /// A predator lineage's record: summed eaten share and number of pairs
+    /// fought, the prior for its pairs not yet fought.
+    arena_record: HashMap<u32, (f32, u32)>,
     pub stats: EcoStats,
     pub history: Vec<[f32; 7]>,
 }
@@ -585,6 +588,7 @@ impl EcoWorld {
             arena_seen: HashSet::new(),
             arena_rate: 1.0,
             arena_credit: 0.0,
+            arena_record: HashMap::new(),
             stats: EcoStats::default(),
             history: Vec::new(),
         };
@@ -1006,6 +1010,9 @@ impl EcoWorld {
             let seed = (req.pred as u64) << 32 | req.prey as u64;
             let out = crate::arena::run_pair(&pp, &pq, &self.planet, req.env, req.sign_pred, req.sign_prey, seed);
             self.arena_cache.insert(key, out);
+            let rec = self.arena_record.entry(req.pred).or_insert((0.0, 0));
+            rec.0 += out.eaten;
+            rec.1 += 1;
             self.stats.arena_pairs = self.arena_cache.len();
             done += crate::arena::PAIR_COST;
         }
@@ -1019,6 +1026,12 @@ impl EcoWorld {
     fn arena_outcome(&self, pred: u32, prey: u32, env: Environment) -> Option<crate::arena::ArenaOutcome> {
         let env = if env == Environment::Water { Environment::Water } else { Environment::Land };
         self.arena_cache.get(&(pred, prey, env)).copied()
+    }
+
+    /// A predator lineage's own record (mean eaten share over the pairs it
+    /// has fought), once it has fought a few: the prior for pairs it has not.
+    fn arena_record(&self, pred: u32) -> Option<f32> {
+        self.arena_record.get(&pred).filter(|r| r.1 >= 3).map(|r| r.0 / r.1 as f32)
     }
 
     /// Every fought-out pair: (predator lineage, prey lineage, medium, outcome).
@@ -1685,7 +1698,9 @@ impl EcoWorld {
                     } else {
                         match self.arena_outcome(self.animals[ai].lineage, prey.lineage, medium) {
                             Some(o) => o.eaten,
-                            None => hump / (1.0 + (-(attack - defence) / scale).exp()),
+                            // Not fought yet: the predator's own record over its
+                            // other prey, or the formula if it has none.
+                            None => self.arena_record(self.animals[ai].lineage).unwrap_or_else(|| hump / (1.0 + (-(attack - defence) / scale).exp())),
                         }
                     };
                     let p_success = encounter * p_capture;
