@@ -495,6 +495,11 @@ pub struct EcoWorld {
     /// yet, in order of first attack.
     arena_pending: Vec<ArenaRequest>,
     arena_seen: HashSet<(u32, u32, Environment)>,
+    /// Arena pairs fought per day while any wait (a fraction accumulates), on
+    /// top of the body budget; the arena otherwise starves whenever bodies
+    /// are waiting, which in a populated world is always.
+    pub arena_rate: f32,
+    arena_credit: f32,
     pub stats: EcoStats,
     pub history: Vec<[f32; 7]>,
 }
@@ -578,6 +583,8 @@ impl EcoWorld {
             arena_cache: HashMap::new(),
             arena_pending: Vec::new(),
             arena_seen: HashSet::new(),
+            arena_rate: 1.0,
+            arena_credit: 0.0,
             stats: EcoStats::default(),
             history: Vec::new(),
         };
@@ -980,12 +987,16 @@ impl EcoWorld {
             }
         }
         // Then the arena: pairs of creature types whose first attack has
-        // happened and that were not yet fought out. A pair costs
-        // `PAIR_COST` units of the same budget, and at most one pair a day
-        // runs when bodies are still waiting.
-        let arena_budget = if self.pending.is_empty() { budget.max(crate::arena::PAIR_COST) } else { budget };
-        while done + crate::arena::PAIR_COST <= arena_budget {
-            let Some(req) = self.arena_pending.pop() else { break };
+        // happened and that were not yet fought out. The arena has its own
+        // allowance of `arena_rate` pairs a day (a pair costs about
+        // `PAIR_COST` body episodes), because the body queue is never empty
+        // in a populated world and would otherwise starve it.
+        if !self.arena_pending.is_empty() {
+            self.arena_credit += self.arena_rate;
+        }
+        while self.arena_credit >= 1.0 {
+            let Some(req) = self.arena_pending.pop() else { self.arena_credit = 0.0; break };
+            self.arena_credit -= 1.0;
             let key = (req.pred, req.prey, req.env);
             if self.arena_cache.contains_key(&key) {
                 continue;

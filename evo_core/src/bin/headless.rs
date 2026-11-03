@@ -1,15 +1,16 @@
 //! Headless planet ecology runner.
 //!
 //! Usage: evo_headless [--planet N|name] [--days N] [--grid PATCHES] [--seed N]
-//!        [--patch-area M2] [--evals-per-day N] [--list-planets]
+//!        [--patch-area M2] [--evals-per-day N] [--arena-per-day F] [--list-planets]
 //!
 //! `--eco` is accepted and ignored: the ecology is the only mode.
 
 use evo_core::planet::PlanetParams;
 
-fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32) {
+fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32, arena_per_day: f32) {
     use evo_core::eco::EcoWorld;
     let mut w = EcoWorld::new_with_area(planet.clone(), patches, seed, patch_area);
+    w.arena_rate = arena_per_day;
     let d = planet.derive();
     println!(
         "Ecology on {} | {} patches of {:.0} m2 on a sphere | g={:.1} | pO2 x{:.2} | NPP x{:.2} | aridity {:.2} | sea {:.0}% | highest peak {:.0} m ({:.0} C)",
@@ -55,6 +56,7 @@ fn main() {
     let mut grid = 1500usize;
     let mut evals_per_day = 8usize;
     let mut patch_area = evo_core::eco::PATCH_AREA;
+    let mut arena_per_day = 1.0f32;
     let mut planet_sel = "0".to_string();
     let mut seed = 1u64;
     let mut i = 0;
@@ -79,6 +81,10 @@ fn main() {
             }
             "--patch-area" => {
                 patch_area = args[i + 1].parse().unwrap_or(patch_area);
+                i += 1;
+            }
+            "--arena-per-day" => {
+                arena_per_day = args[i + 1].parse().unwrap_or(arena_per_day);
                 i += 1;
             }
             "--evals-per-day" => {
@@ -107,5 +113,5 @@ fn main() {
         .find(|(k, p)| k.to_string() == planet_sel || p.name.to_lowercase().contains(&planet_sel.to_lowercase()))
         .map(|(_, p)| p.clone())
         .unwrap_or_else(PlanetParams::earth);
-    run_eco(planet, days, grid, seed, evals_per_day, patch_area);
+    run_eco(planet, days, grid, seed, evals_per_day, patch_area, arena_per_day);
 }

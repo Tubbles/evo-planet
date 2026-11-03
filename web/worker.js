@@ -22,6 +22,9 @@ onmessage = (e) => {
     stopAll();
     runId = m.runId;
     eco = new EcoSim(JSON.stringify(m.planet), m.patches, BigInt(m.seed));
+    // One arena pair (ten two-body bouts) costs a few hundred milliseconds;
+    // in the browser fight one every four days so the world keeps moving.
+    eco.set_arena_rate(0.25);
     postMessage({ type: 'eco_terrain', runId, terrain: JSON.parse(eco.terrain_json(m.detail || 5)) });
     paused = false;
     lastSnap = 0; dayStart = performance.now(); daysSince = 0;

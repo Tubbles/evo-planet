@@ -51,7 +51,11 @@ impl EcoSim {
         Ok(EcoSim { world: evo_core::eco::EcoWorld::new(planet, patches, seed) })
     }
 
-    /// Inject `count` random immigrants into the sea now.
+    /// Arena pairs fought per day while any wait (fractions accumulate).
+    pub fn set_arena_rate(&mut self, pairs_per_day: f32) {
+        self.world.arena_rate = pairs_per_day.max(0.0);
+    }
+
     /// Change the planet under the running world (see EcoWorld::set_planet).
     pub fn set_planet(&mut self, planet_json: &str) -> Result<(), JsValue> {
         let planet: PlanetParams = serde_json::from_str(planet_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
