@@ -871,7 +871,7 @@ impl CreatureSim {
             if self.env == Environment::Shore && self.lowest_point() > 0.0 && c.x > self.shore_best {
                 self.shore_best = c.x;
             }
-            if self.mid_com.is_none() && self.time >= self.cfg.settle_time + 0.5 * (self.cfg.episode_time - self.cfg.settle_time) {
+            if self.mid_com.is_none() && self.time >= self.settle_duration() + 0.5 * self.cfg.episode_time {
                 self.mid_com = Some(self.com());
             }
             if self.mid_com.is_some() {
@@ -940,7 +940,7 @@ impl CreatureSim {
             sustained_speed: match self.mid_com {
                 Some(m) => {
                     let d = self.com() - m;
-                    let half = 0.5 * (self.cfg.episode_time - self.cfg.settle_time);
+                    let half = 0.5 * self.cfg.episode_time;
                     if half > 0.0 { (d.x * d.x + d.z * d.z).sqrt() / half } else { 0.0 }
                 }
                 None => 0.0,
@@ -949,7 +949,7 @@ impl CreatureSim {
             shore_progress: self.shore_best,
             climb_speed: match self.mid_com {
                 Some(m) => {
-                    let half = 0.5 * (self.cfg.episode_time - self.cfg.settle_time);
+                    let half = 0.5 * self.cfg.episode_time;
                     if half > 0.0 { (self.com().y - m.y) / half } else { 0.0 }
                 }
                 None => 0.0,
