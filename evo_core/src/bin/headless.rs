@@ -35,11 +35,19 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
     }
     let el = start.elapsed().as_secs_f32();
     println!("{} days in {:.1} s ({:.0} days/s)", days, el, days as f32 / el);
+    println!("\nland lineages by gait (speed x clearance x stepping limbs):");
+    for l in w.lineages_filtered("animal", "land", "gait", 4) {
+        println!(
+            "  lineage {:>5}: n={:>4} mass {:>6.2} kg | land {:.2} m/s | limbs {:.1} clearance {:.2} m COT {:.1} | upright {:.2} parts {:.1}",
+            l.id, l.count, l.mean_mass, l.land_speed, l.limbs, l.clearance, l.cot, l.upright, l.parts
+        );
+    }
+    println!();
     for l in w.lineages(6) {
         if l.kind == "animal" {
             println!(
-                "  animal lineage {:>4}: n={:>3} mass {:>6.2} kg | ate plant {:.2} meat {:.2} carrion {:.2} | gut {:.2} claws {:.2} plating {:.2} reach {:.2} m upright {:.2} | land {:.2} m/s water {:.2} m/s air {:.2} m/s glide {:.1} m lift {:.2} m turn {:.2} rad/s climb {:.2} m/s shore {:.2} m lungs {:.2} | {:.2} BL/s | on shore {:.0}% | parts {:.1} | membranes {:.2} m² | aquatic {:.0}%",
-                l.id, l.count, l.mean_mass, l.herb, l.carn, l.detr, l.gut, l.weapon, l.armour, l.reach, l.upright, l.land_speed, l.water_speed, l.air_speed, l.glide, l.lift, l.turn, l.climb, l.shore, l.breathing, l.speed_bl, l.shore_share * 100.0, l.parts, l.membrane_area, l.aquatic_share * 100.0
+                "  animal lineage {:>4}: n={:>3} mass {:>6.2} kg | ate plant {:.2} meat {:.2} carrion {:.2} | gut {:.2} claws {:.2} plating {:.2} reach {:.2} m upright {:.2} | land {:.2} m/s water {:.2} m/s air {:.2} m/s glide {:.1} m lift {:.2} m limbs {:.1} clear {:.2} m COT {:.1} turn {:.2} rad/s climb {:.2} m/s shore {:.2} m lungs {:.2} | {:.2} BL/s | on shore {:.0}% | parts {:.1} | membranes {:.2} m² | aquatic {:.0}%",
+                l.id, l.count, l.mean_mass, l.herb, l.carn, l.detr, l.gut, l.weapon, l.armour, l.reach, l.upright, l.land_speed, l.water_speed, l.air_speed, l.glide, l.lift, l.limbs, l.clearance, l.cot, l.turn, l.climb, l.shore, l.breathing, l.speed_bl, l.shore_share * 100.0, l.parts, l.membrane_area, l.aquatic_share * 100.0
             );
         } else {
             println!(

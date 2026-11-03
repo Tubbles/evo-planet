@@ -723,3 +723,50 @@ with a mouth, a gait that closes distance, a turn that follows. That is
 what the user asked for, and it is also why the biggest remaining lever
 is the physics budget, which sets how fast a new body plan gets its
 chance to be measured and fought.
+
+## Gaits: what the physics can do, found by search (2026-11-03)
+
+The planet had never produced a body with a gait: pills and sheets only,
+in every run. The first question was whether this physics and genome
+can represent an upright multi-segment gait at all. `examples/gait_search`
+searches genomes directly on the land episode (an audit tool, not the
+planet) and the answer came in stages, each one a measure the episode
+did not have:
+
+1. Scored on speed, the search found a heavy pill thrashing two arms
+   (3 m in a lunge, then nothing).
+2. With belly contact and segment count in the score, it found giants
+   (300 to 2,600 kg) tumbling at 6 to 10 m/s with the trunk held off the
+   ground by enormous limbs.
+3. With footfalls and trunk spin added, still giants: many limbs make
+   many footfalls, and a Gaussian penalty on spin was needed before
+   rolling stopped winning.
+4. The missing physics was energy. Nothing charged for the work the
+   joints did, so flailing was free. Episodes now measure joint work from
+   the motor model (torque against angular rate, each axis, each step)
+   and report cost of transport in J/(kg m); an energy audit (mechanical
+   energy gained minus work) confirms the physics does not leak (it
+   dissipates 7 to 36 kJ per 5 s episode in these bodies).
+5. Scored on efficiency as well, with distinct stepping limbs and trunk
+   clearance, the search (population 160, 100 generations, two seeds)
+   found `docs/gaits/stepper_seed12.json`: 7 parts, 270 kg, 2.0 m/s,
+   four stepping limbs, trunk carried 0.36 m clear (more than its own
+   diameter), spin 1.6 rad/s, cost of transport 1.4 J/(kg m). The replay
+   (`stepper_seed12_a.png`, `_b.png`) shows a trunk on a two-segment
+   leg with a knee plus three thinner limbs, stepping forward steadily:
+   11.8 m in 8.8 s. `stilt_seed11.json` is a 10-part body on a jointed
+   stilt at 2.1 m/s; `shuffler_seed9.json` a trunk on two stubby feet.
+
+So the physics can walk, once walking is what pays. Two measurement
+bugs were found on the way: the sustained-speed window started early and
+divided by the wrong span (speeds overstated by 1.4x), and the solver's
+joint impulses are not populated for these joints, so work had to come
+from the motor model.
+
+What this does not show: that the planet finds such bodies. In the
+ecology nothing charged for the gait either (activity cost was a guess
+from muscle section), measurement starved behind 100,000 births a day,
+and a sheet absorbing dead matter at the surface never needed to move.
+The ecology now charges the measured power and cost of transport, and
+measures a day's batch on every core. Whether that is enough is the next
+run's question.

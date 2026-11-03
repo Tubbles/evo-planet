@@ -180,6 +180,14 @@ pub struct Traits {
     pub cot_land: f32,
     #[serde(default)]
     pub cot_water: f32,
+    /// The land gait's signature: how many limbs step, how high the trunk is
+    /// carried (metres), and how much the trunk tumbles (rad/s).
+    #[serde(default)]
+    pub stepping_limbs: f32,
+    #[serde(default)]
+    pub trunk_clearance: f32,
+    #[serde(default)]
+    pub trunk_spin: f32,
     /// Nimbleness: yaw rate gained from asymmetric drive (rad/s) and vertical
     /// speed gained from a posture shift (m/s), per environment. Zero unless
     /// the body locomotes at all.
@@ -423,6 +431,13 @@ pub struct LineageSummary {
     /// Powered lift from the wing stroke over holding still, metres.
     #[serde(default)]
     pub lift: f32,
+    /// Land gait signature means: stepping limbs, trunk clearance (m), cost of transport.
+    #[serde(default)]
+    pub limbs: f32,
+    #[serde(default)]
+    pub clearance: f32,
+    #[serde(default)]
+    pub cot: f32,
     /// Mean glide distance beyond a thrown stone from a 10 m launch, metres.
     #[serde(default)]
     pub glide: f32,
@@ -630,6 +645,9 @@ fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut tr
             traits.land_speed = speed;
             traits.power_land = if r.exploded { 0.0 } else { r.work / TRAIT_EPISODE_S };
             traits.cot_land = if r.exploded { 0.0 } else { r.cost_of_transport };
+            traits.stepping_limbs = r.stepping_limbs as f32;
+            traits.trunk_clearance = r.trunk_clearance;
+            traits.trunk_spin = r.trunk_spin;
             traits.turn_land = turn;
             traits.turn_sign_land = turn_sign;
             traits.measured_land = true;
@@ -2236,6 +2254,9 @@ impl EcoWorld {
             upright: 0.0,
             air_speed: 0.0,
             lift: 0.0,
+            limbs: 0.0,
+            clearance: 0.0,
+            cot: 0.0,
             glide: 0.0,
             turn: 0.0,
             climb: 0.0,
@@ -2268,6 +2289,7 @@ impl EcoWorld {
             match sort {
                 "mass" => l.mean_mass,
                 "speed" => l.land_speed.max(l.water_speed).max(l.air_speed),
+                "gait" => l.land_speed * l.clearance * l.limbs,
                 "height" => l.height,
                 "parts" => l.parts,
                 "land" => 1.0 - l.aquatic_share,
@@ -2316,6 +2338,9 @@ impl EcoWorld {
                     s.water_speed += a.traits.water_speed / c;
                     s.air_speed += a.traits.air_speed / c;
                     s.lift += a.traits.flap_lift / c;
+                    s.limbs += a.traits.stepping_limbs / c;
+                    s.clearance += a.traits.trunk_clearance / c;
+                    s.cot += a.traits.cot_land / c;
                     s.glide += a.traits.glide_distance / c;
                     s.turn += (if self.patches[a.patch].water { a.traits.turn_water } else { a.traits.turn_land.max(a.traits.turn_air) }) / c;
                     s.climb += a.traits.climb_water.max(a.traits.climb_air) / c;
