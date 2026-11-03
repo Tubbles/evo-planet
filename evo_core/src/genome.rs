@@ -702,7 +702,8 @@ impl Genome {
             g.water_store = nudge(rng, g.water_store, 0.25, 0.01, 0.0, 0.5);
             body = true;
         }
-        // Plant genes (no effect on animals).
+        // Integument against air: a plant's cuticle, an animal's waterproof
+        // skin. One gene on both sides of the motility continuum.
         if rng.gen_bool((p * 2.5) as f64) {
             g.land_tolerance = (g.land_tolerance + rng.gen_range(-0.12..0.12f32)).clamp(0.0, 1.0);
             body = true;

@@ -55,8 +55,20 @@ pub const PLANT_CAP_PER_M2_LAND: f32 = 0.08;
 pub const INTERFERENCE_PER_100M2: f32 = 0.15;
 /// Founding grazers per square metre of sea.
 pub const FOUNDERS_PER_M2: f32 = 1.0 / 1200.0;
-/// Farthest a hungry walker or swimmer relocates in a day, metres.
-pub const RELOCATE_MAX_M: f32 = 50.0;
+/// Evaporation from a wet body surface in dry air, kg of water per m² per
+/// day (a few millimetres a day in still air; a frog's skin, a worm's).
+/// Scaled by the air's dryness, by warmth and by the integument's
+/// waterproofing (the land tolerance gene, the same gene a plant's cuticle
+/// uses). A compact body carries little surface per kilogram; a sheet is
+/// nearly all surface and dries out on land in a day.
+pub const EVAPORATION_KG_PER_M2_DAY: f32 = 1.0;
+/// Water deficit that kills, as a fraction of body mass (mammals die near
+/// 15%; the water-store gene adds to this by carrying more).
+pub const LETHAL_WATER_LOSS: f32 = 0.15;
+/// Fresh plant and animal tissue is mostly water: kilograms of water per
+/// kilogram of dry food eaten.
+pub const WATER_PER_KG_PLANT: f32 = 4.0;
+pub const WATER_PER_KG_MEAT: f32 = 2.5;
 /// Growth yield of decomposers on dead matter (fraction becoming bacteria).
 pub const BACTERIAL_YIELD: f32 = 0.4;
 /// Phagocytosis: fraction of the suspended particles passing a surface that
@@ -234,6 +246,9 @@ pub struct Animal {
     pub ate_carrion: f32,
     /// Yesterday's energy gain, used as the foraging decision baseline.
     pub intake_rate: f32,
+    /// Water deficit, kg (zero when hydrated, negative when drying out).
+    #[serde(default)]
+    pub water: f32,
 }
 
 impl Animal {
@@ -255,6 +270,7 @@ impl Animal {
             ate_meat: 0.0,
             ate_carrion: 0.0,
             intake_rate: 0.0,
+            water: 0.0,
         }
     }
 
@@ -389,6 +405,9 @@ pub struct EcoStats {
     pub deaths_old: u64,
     #[serde(default)]
     pub deaths_suffocated: u64,
+    /// Dried out on land: water lost through the skin faster than drunk or eaten.
+    #[serde(default)]
+    pub deaths_dried: u64,
     /// Sum of log10(predator mass / prey mass) over all kills; mean = sum / kills.
     pub ppmr_log_sum: f32,
     pub kills_by_larger: u64,
@@ -1510,7 +1529,14 @@ impl EcoWorld {
             // motile body (muscle tone, nerves, osmoregulation), with Q10 and the
             // oxygen limit. Locomotion is charged separately as the work done.
             let membrane_mass = (self.animals[ai].traits.membrane_mass * size_f).min(mass);
-            let fmr = (membrane_mass * 0.004 + (mass - membrane_mass) * (0.0005 + 0.0025 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3);
+            // Kleiber: the bulk tissue's rate goes as mass to the three
+            // quarters (the rates above are per kilogram at one kilogram), so
+            // a gram of a large body costs less to keep than a gram of a small
+            // one. A sheet is all surface and keeps a leaf's per-area rate.
+            // A waterproofed integument (the land tolerance gene) costs upkeep,
+            // as a plant's cuticle does.
+            let waterproof = self.animals[ai].genome.land_tolerance.clamp(0.0, 1.0);
+            let fmr = (membrane_mass * 0.004 + (mass - membrane_mass).max(0.0).powf(0.75) * (0.0005 + 0.0025 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3) * (1.0 + 0.3 * waterproof);
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
             // Short of oxygen, the muscles cannot be kept working all day.
             let activity = activity * resp_eff;
@@ -1877,6 +1903,25 @@ impl EcoWorld {
                 a.ate_carrion += food_carrion;
             }
 
+            // --- water: loss through the skin in air, against drink and food ----
+            // Evaporation is per square metre of body surface, so it is the
+            // surface-to-mass ratio that decides who can live on dry land: a
+            // sheet or a tiny body dries out in a day unless its integument is
+            // waterproofed (the land tolerance gene) or the ground is wet.
+            {
+                let moisture = self.patches[patch].moisture;
+                let tf = temp_factor(temp);
+                let a = &mut self.animals[ai];
+                let surface = (6.0 * (a.mass / 1000.0).powf(2.0 / 3.0)).max(2.0 * a.traits.membrane_area * (a.mass / a.traits.mass.max(1e-3)).powf(2.0 / 3.0));
+                let loss = surface * EVAPORATION_KG_PER_M2_DAY * (1.0 - sub) * (1.0 - moisture) * (0.5 + tf) * (1.0 - 0.95 * waterproof);
+                let food_water = food_plant * WATER_PER_KG_PLANT + (food_carrion + food_meat) * WATER_PER_KG_MEAT;
+                a.water = (a.water - loss + food_water).min(0.0);
+                // Drinking: in or beside water the deficit is made up; on land
+                // the patch's wetness (dew, pools, streams) covers that share.
+                let drink = if sub > 0.0 { 1.0 } else { moisture };
+                a.water *= 1.0 - drink;
+            }
+
             // --- movement: when hungry, toward the best reachable neighbour --------
             let hungry = delta < 0.0 && self.animals[ai].reserve < 0.5 * (0.05 * mass + fat_frac * mass.powf(1.19));
             if hungry && self.rng.gen_bool(0.6) {
@@ -1887,30 +1932,36 @@ impl EcoWorld {
                 let can_glide_over = measured_air && glide_ratio * launch_h >= patch_w;
                 let flier = measured_air && air_speed_raw * motility > 0.5;
                 // Relocation is a distance: a flier an hour's flight, a crawler or
-                // swimmer up to RELOCATE_MAX_M of its day's path, in cells of this width.
-                let reloc_m = if flier { air_speed_raw * motility * 3600.0 } else { path.min(RELOCATE_MAX_M) };
+                // swimmer its day's path, in cells of this width; the move is paid
+                // per cell crossed at the gait's measured cost of transport.
+                let reloc_m = if flier { air_speed_raw * motility * 3600.0 } else { path };
                 let range_hops = ((reloc_m / patch_w).round() as usize).clamp(1, 12);
-                let candidates: Vec<usize> = if range_hops > 1 {
-                    // Breadth-first over the neighbour graph up to range_hops.
+                // Breadth-first over the neighbour graph up to range_hops, each
+                // cell with the number of cells crossed to reach it.
+                let candidates: Vec<(usize, usize)> = {
                     let mut seen = vec![patch];
                     let mut frontier = vec![patch];
-                    for _ in 0..range_hops {
+                    let mut out: Vec<(usize, usize)> = Vec::new();
+                    for hop in 1..=range_hops {
                         let mut next = Vec::new();
                         for &q in &frontier {
                             for &k in &self.neighbours[q] {
                                 if !seen.contains(&k) {
                                     seen.push(k);
                                     next.push(k);
+                                    out.push((k, hop));
                                 }
                             }
                         }
+                        if next.is_empty() {
+                            break;
+                        }
                         frontier = next;
                     }
-                    seen.into_iter().filter(|&k| k != patch).collect()
-                } else {
-                    self.neighbours[patch].clone()
+                    out
                 };
-                for cand in candidates {
+                let mut best_hops = 1usize;
+                for (cand, hops) in candidates {
                     let cand_sub = self.patches[cand].submersion;
                     // Entry needs demonstrated ability in that habitat; unmeasured
                     // young stay where they are until their body has been tested.
@@ -1939,19 +1990,21 @@ impl EcoWorld {
                     };
                     if best.map(|(_, v)| value > v).unwrap_or(true) {
                         best = Some((cand, value));
+                        best_hops = hops;
                     }
                 }
                 if let Some((target, _)) = best {
                     let target_water = self.patches[target].water;
                     let use_speed = (if target_water { water_speed_raw } else { land_speed_raw.max(air_speed_raw) }) * motility * lin_f;
                     // The move costs the measured cost of transport (J per kg per
-                    // metre, Tucker's form when unmeasured), one cell width.
+                    // metre, Tucker's form when unmeasured) over the cells crossed.
                     let t = &self.animals[ai].traits;
                     let cot = if target_water { t.cot_water } else { t.cot_land };
+                    let dist = best_hops as f32 * patch_w;
                     delta -= if cot > 0.0 {
-                        cot * mass * (g / 9.81) * patch_w / MUSCLE_EFFICIENCY / J_PER_KG_DRY
+                        cot * mass * (g / 9.81) * dist / MUSCLE_EFFICIENCY / J_PER_KG_DRY
                     } else {
-                        0.00001 * mass.powf(0.7) * (g / 9.81) * patch_w / (0.3 + use_speed).min(3.0)
+                        0.00001 * mass.powf(0.7) * (g / 9.81) * dist / (0.3 + use_speed).min(3.0)
                     };
                     self.animals[ai].patch = target;
                 }
@@ -1965,7 +2018,10 @@ impl EcoWorld {
             if het > 0.0 {
                 let surface = (6.0 * (a.mass / 1000.0).powf(2.0 / 3.0)).max(2.0 * a.traits.membrane_area * (a.mass / a.traits.mass.max(1e-3)).powf(2.0 / 3.0));
                 let pool = self.patches[a.patch].dead_matter;
-                let absorbed = (het * surface * (pool / a_area) * OSMOTROPHY_RATE * q).min(pool * 0.2);
+                // Dissolved matter is taken up through a wet surface: in water,
+                // or on land in proportion to how wet the ground is.
+                let wet = sub + (1.0 - sub) * self.patches[a.patch].moisture;
+                let absorbed = (het * surface * wet * (pool / a_area) * OSMOTROPHY_RATE * q).min(pool * 0.2);
                 self.patches[a.patch].dead_matter -= absorbed;
                 // Phagocytosis: particles swept past the surface by water and by moving.
                 let particles = self.patches[a.patch].bacteria / (a_area * 2.0);
@@ -2017,6 +2073,9 @@ impl EcoWorld {
                 deaths.push(ai);
             } else if a.reserve < 0.0 {
                 self.stats.deaths_starved += 1;
+                deaths.push(ai);
+            } else if a.water < -(LETHAL_WATER_LOSS + a.genome.water_store.clamp(0.0, 0.5)) * a.mass {
+                self.stats.deaths_dried += 1;
                 deaths.push(ai);
             } else if a.age > a.lifespan() {
                 self.stats.deaths_old += 1;

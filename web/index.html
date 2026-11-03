@@ -394,7 +394,7 @@ function renderEco(dps) {
     ['Animals on land', `${st.land_animals} (${st.land_herbivores} herbivores) · best land speed ${fmt(st.best_land_speed, 2)} m/s`, st.land_herbivores > 0 ? 'good' : ''],
     ['Kingdom transitions', `plant → animal ${st.plant_to_animal} · animal → plant ${st.animal_to_plant}`, (st.plant_to_animal + st.animal_to_plant) > 0 ? 'good' : ''],
     ['Energy flows / day', `plants fix ${fmt(st.primary_production, 1)} kg · grazed ${fmt(st.grazing_intake, 2)} · hunted ${fmt(st.predation_intake, 2)} · scavenged ${fmt(st.scavenging_intake, 2)} · animal cost ${fmt(st.metabolic_cost, 2)}`],
-    ['Deaths', `starved ${st.deaths_starved} · old age ${st.deaths_old} · killed ${st.kills}${st.deaths_suffocated ? ` · suffocated ${st.deaths_suffocated}` : ''}`],
+    ['Deaths', `starved ${st.deaths_starved} · old age ${st.deaths_old} · killed ${st.kills}${st.deaths_suffocated ? ` · suffocated ${st.deaths_suffocated}` : ''}${st.deaths_dried ? ` · dried out ${st.deaths_dried}` : ''}`],
     ['Food-web checks', `predator:prey mass ratio 10^${fmt(st.kills ? st.ppmr_log_sum / st.kills : 0, 2)} (field ≈ 10^1.6) · ${st.kills ? fmt(100 * st.kills_by_larger / st.kills, 0) : 0} % of kills by the larger · satiated ${fmt(st.satiated_frac * 100, 0)} % (field ≈ 88 %) · leaf toughness ${fmt(st.mean_toughness, 2)}`],
     ['Immigrants', `${st.immigrants}`],
     ['Body measurements', `${st.trait_evals} physics episodes · ${st.pending_evals} queued`, st.pending_evals > 60 ? 'warn' : ''],
