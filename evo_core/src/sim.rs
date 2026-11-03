@@ -12,7 +12,7 @@
 //! * CPG-driven position motors whose strength is scaled by an oxygen budget
 //!   (lung fraction x torso volume x pO2 against muscle section x frequency).
 
-use crate::decode::{Phenotype, MEMBRANE_THICKNESS};
+use crate::decode::{Part, Phenotype, MEMBRANE_THICKNESS};
 use crate::genome::NodeKind;
 use crate::planet::{Derived, PlanetParams};
 use rapier3d::na::{Isometry3, Point3, UnitQuaternion, Vector3};
@@ -214,35 +214,67 @@ pub fn hydration_factor(pheno: &Phenotype, derived: &Derived, env: Environment) 
     }
 }
 
-impl CreatureSim {
-    pub fn new(pheno: Phenotype, planet: &PlanetParams, env: Environment, cfg: SimConfig) -> Self {
-        let derived = planet.derive();
-        let mut bodies = RigidBodySet::new();
-        let mut colliders = ColliderSet::new();
-        let mut impulse_joints = ImpulseJointSet::new();
+/// Ground: flat, or for the shore a plane tilted so its top face passes
+/// through the origin and rises with +X.
+pub fn add_ground(bodies: &mut RigidBodySet, colliders: &mut ColliderSet, ground_y: f32, slope: f32) {
+    let theta = slope.atan();
+    let ground = RigidBodyBuilder::fixed()
+        .translation(vector![theta.sin(), ground_y - theta.cos(), 0.0])
+        .rotation(vector![0.0, 0.0, theta])
+        .build();
+    let gh = bodies.insert(ground);
+    colliders.insert_with_parent(ColliderBuilder::cuboid(500.0, 1.0, 500.0).friction(0.9).build(), gh, bodies);
+}
 
-        let (ground_y, water_level, spawn_y) = match env {
-            Environment::Land => (0.0, None, 0.0),
-            Environment::Water => (-WATER_DEPTH, Some(0.0), -WATER_DEPTH * 0.5),
-            Environment::Air => (0.0, None, AIR_DROP_HEIGHT),
-            Environment::Shore => (0.0, Some(0.0), 0.0),
-        };
-        let slope = if env == Environment::Shore { SHORE_SLOPE } else { 0.0 };
+/// Everything the fluid and ground forces need to know about the world.
+#[derive(Clone, Copy, Debug)]
+pub struct WorldCtx {
+    pub rho_air: f32,
+    pub rho_water: f32,
+    pub g: f32,
+    pub water_level: Option<f32>,
+    pub ground_y: f32,
+    pub slope: f32,
+    pub dt: f32,
+}
 
-        // Ground: flat, or for the shore a plane tilted so its top face passes
-        // through the origin and rises with +X.
-        let theta = slope.atan();
-        let ground = RigidBodyBuilder::fixed()
-            .translation(vector![theta.sin(), ground_y - theta.cos(), 0.0])
-            .rotation(vector![0.0, 0.0, theta])
-            .build();
-        let gh = bodies.insert(ground);
-        colliders.insert_with_parent(
-            ColliderBuilder::cuboid(500.0, 1.0, 500.0).friction(0.9).build(),
-            gh,
-            &mut bodies,
-        );
+/// Motor drive for one step.
+#[derive(Clone, Copy, Debug)]
+pub struct Drive {
+    pub active: bool,
+    pub steer: f32,
+    pub bias_shift: f32,
+    pub amp_scale: f32,
+}
 
+/// A creature's bodies, colliders and joints inserted into a physics world.
+pub struct Built {
+    pub handles: Vec<RigidBodyHandle>,
+    pub joint_handles: Vec<Option<ImpulseJointHandle>>,
+    pub fatigue: f32,
+}
+
+/// Insert one body into a world: parts placed from the root (which lies
+/// along +X, turned by `yaw` about the vertical), set down where it would
+/// rest for the environment (on the ground, floating, on the bed, mid-water,
+/// or at drop height), shifted to (`origin_x`, `origin_z`), with its joints
+/// and motors. Shared by the single-body episode and the two-body arena.
+#[allow(clippy::too_many_arguments)]
+pub fn build_creature(
+    bodies: &mut RigidBodySet,
+    colliders: &mut ColliderSet,
+    impulse_joints: &mut ImpulseJointSet,
+    pheno: &Phenotype,
+    env: Environment,
+    derived: &Derived,
+    ground_y: f32,
+    slope: f32,
+    spawn_y: f32,
+    origin_x: f32,
+    origin_z: f32,
+    yaw: f32,
+    launch: Vector3<f32>,
+) -> Built {
         // Place parts: root lies horizontally along +X.
         let n = pheno.parts.len();
         let mut isos: Vec<Isometry3<f32>> = Vec::with_capacity(n);
@@ -296,19 +328,23 @@ impl CreatureSim {
             }
             Environment::Air => spawn_y - min_y,
         };
+        // Turn the whole body about the vertical to face `yaw`, then set it down.
+        let turn = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), yaw);
         for iso in isos.iter_mut() {
+            iso.translation.vector = turn * iso.translation.vector;
+            iso.rotation = turn * iso.rotation;
             iso.translation.y += lift;
-            iso.translation.x += x_off;
+            iso.translation.x += x_off + origin_x;
+            iso.translation.z += origin_z;
         }
 
-        let fatigue = fatigue_factor(&pheno, &derived);
-        let hydration = hydration_factor(&pheno, &derived, env);
+        let fatigue = fatigue_factor(pheno, derived);
 
-        let mut handles = Vec::with_capacity(n);
+        let mut handles: Vec<RigidBodyHandle> = Vec::with_capacity(n);
         for (i, p) in pheno.parts.iter().enumerate() {
             let rb = RigidBodyBuilder::dynamic()
                 .position(isos[i])
-                .linvel(if env == Environment::Air { vector![AIR_LAUNCH_SPEED, 0.0, 0.0] } else { vector![0.0, 0.0, 0.0] })
+                .linvel(launch)
                 .linear_damping(0.05)
                 .angular_damping(0.2)
                 .ccd_enabled(true)
@@ -331,7 +367,7 @@ impl CreatureSim {
             .friction(friction)
             .collision_groups(InteractionGroups::new(Group::GROUP_1, Group::ALL))
             .build();
-            colliders.insert_with_parent(col, h, &mut bodies);
+            colliders.insert_with_parent(col, h, bodies);
             handles.push(h);
         }
 
@@ -374,6 +410,251 @@ impl CreatureSim {
             let jh = impulse_joints.insert(handles[parent], handles[i], b.build(), true);
             joint_handles[i] = Some(jh);
         }
+
+        Built { handles, joint_handles, fatigue }
+}
+
+/// Set every joint's motor target for this step from the oscillators.
+#[allow(clippy::too_many_arguments)]
+pub fn update_motors(
+    bodies: &RigidBodySet,
+    joints: &mut ImpulseJointSet,
+    parts: &[Part],
+    handles: &[RigidBodyHandle],
+    joint_handles: &[Option<ImpulseJointHandle>],
+    base_freq: f32,
+    fatigue: f32,
+    time: f32,
+    dr: Drive,
+) {
+    let t = time;
+    let f = base_freq;
+    for i in 1..parts.len() {
+        let Some(jh) = joint_handles[i] else { continue };
+        let p = &parts[i];
+        if p.stiffness >= 0.999 {
+            continue; // welded: the passive spring set at build holds it
+        }
+        // Hill force-velocity limit: a muscle's torque falls linearly with
+        // the joint's angular speed and is gone at OMEGA_MAX, so power is
+        // bounded. Without it a joint delivers full torque at any speed and
+        // a body can be spun at ten revolutions a second by one motor.
+        let omega_rel = match (bodies.get(handles[i]), p.parent.and_then(|q| bodies.get(handles[q]))) {
+            (Some(c), Some(q)) => (c.angvel() - q.angvel()).norm(),
+            _ => 0.0,
+        };
+        let hill = (1.0 - omega_rel / OMEGA_MAX).clamp(0.05, 1.0);
+        let rigid = p.max_torque * fatigue * RIGID_GAIN * p.stiffness;
+        let strength = p.max_torque * fatigue * hill;
+        let stiffness = strength * 3.0 + rigid;
+        let damping = strength * 0.3 + rigid * 0.1;
+        let drive = 1.0 - p.stiffness;
+        let lim_x = p.limit * drive + 0.02;
+        let lim_z = (p.limit * p.freedom * drive).max(0.02);
+        let w = 2.0 * PI * f * p.cpg.freq_mult * t;
+        let gain = 1.0 + if p.reflected { -dr.steer } else { dr.steer };
+        let (t1, t2, t3) = if dr.active {
+            let a1 = p.cpg.amp * dr.amp_scale;
+            let a2 = p.cpg.amp2 * dr.amp_scale;
+            let a3 = p.cpg.amp3 * dr.amp_scale;
+            (
+                (p.cpg.bias + (dr.bias_shift + a1 * gain * (w + p.cpg.phase).sin()) * drive).clamp(-lim_x, lim_x),
+                (a2 * gain * p.freedom * drive * (w + p.cpg.phase2).sin()).clamp(-lim_z, lim_z),
+                (a3 * gain * p.freedom * drive * (w + p.cpg.phase3).sin()).clamp(-lim_z, lim_z),
+            )
+        } else {
+            (p.cpg.bias.clamp(-lim_x, lim_x), 0.0, 0.0)
+        };
+        if let Some(j) = joints.get_mut(jh) {
+            j.data.set_motor_position(JointAxis::AngX, t1, stiffness, damping);
+            j.data.set_motor_max_force(JointAxis::AngX, strength + rigid);
+            j.data.set_motor_position(JointAxis::AngZ, t2, stiffness, damping);
+            j.data.set_motor_max_force(JointAxis::AngZ, strength + rigid);
+            j.data.set_motor_position(JointAxis::AngY, t3, stiffness, damping);
+            j.data.set_motor_max_force(JointAxis::AngY, strength + rigid);
+        }
+    }
+}
+
+/// Fluid, spin, rolling and buoyancy forces on every part of one body.
+pub fn apply_fluid_forces(ctx: &WorldCtx, bodies: &mut RigidBodySet, parts: &[Part], handles: &[RigidBodyHandle]) {
+    let (rho_air, rho_water, g, water_level) = (ctx.rho_air, ctx.rho_water, ctx.g, ctx.water_level);
+    for i in 0..parts.len() {
+        let p = &parts[i];
+        let h = handles[i];
+        let Some(rb) = bodies.get_mut(h) else { continue };
+        rb.reset_forces(false);
+        let iso = *rb.position();
+        let center = iso.translation.vector;
+        let axis = iso.rotation * Vector3::y();
+
+        // Submersion fraction and local fluid density.
+        let r_b = part_bounding_radius(p);
+        let sub = match water_level {
+            Some(wl) => ((wl - (center.y - r_b)) / (2.0 * r_b)).clamp(0.0, 1.0),
+            None => 0.0,
+        };
+        let rho = rho_air * (1.0 - sub) + rho_water * sub;
+
+        let flat = p.flat;
+        if flat > 0.0 {
+            {
+                // Sheet share: 2x2 sub-panels of a plate of chord 2*r0.
+                let normal = iso.rotation * Vector3::z();
+                let chord = iso.rotation * Vector3::x();
+                let area = p.len * 2.0 * p.r0 * 0.25 * flat;
+                let full_area = p.len * 2.0 * p.r0;
+                for (sy, sx) in [(-0.25f32, -0.5f32), (-0.25, 0.5), (0.25, -0.5), (0.25, 0.5)] {
+                    let point = center + axis * (sy * p.len) + chord * (sx * p.r0);
+                    let v = rb.velocity_at_point(&Point3::from(point));
+                    let speed = v.norm();
+                    if speed < 1e-4 {
+                        continue;
+                    }
+                    let vhat = v / speed;
+                    let s = vhat.dot(&normal); // sin(alpha), signed
+                    let q = 0.5 * rho * area * speed * speed;
+                    // Two regimes, blended across the stall. Attached flow at
+                    // small incidence: lift perpendicular to the relative wind
+                    // (thin-aerofoil slope 2*pi, reduced for the panel's aspect
+                    // ratio along the wind), plus induced drag along it. This is
+                    // what makes a flapping wing push: the lift vector tilts with
+                    // the stroke. Separated flow past the stall: the flat-plate
+                    // normal force (Lu et al.), which is what a parachute, a paddle
+                    // and a leaf in a gale feel.
+                    let alpha = s.clamp(-1.0, 1.0).asin();
+                    let wind_in_plane = vhat - normal * s;
+                    let wip_n = wind_in_plane.norm();
+                    let f_attached = if wip_n > 1e-4 {
+                        let w = wind_in_plane / wip_n;
+                        let chord_eff = (w.dot(&chord).abs() * 2.0 * p.r0 + w.dot(&axis).abs() * p.len).max(1e-3);
+                        let ar = (full_area / chord_eff).powi(2) / full_area; // span² / area
+                        let cl = 2.0 * PI * alpha.sin() * ar / (ar + 2.0);
+                        let cdi = cl * cl / (PI * ar * 0.9);
+                        // Lift is perpendicular to the wind, in the plane of wind
+                        // and normal, on the same side as the plate force.
+                        let perp = normal - vhat * s;
+                        let lift_dir = perp / perp.norm().max(1e-6);
+                        lift_dir * (-q * cl) - vhat * (q * cdi)
+                    } else {
+                        Vector3::zeros()
+                    };
+                    let f_stalled = normal * (-q * C_P_ALPHA * s);
+                    let stall = ((alpha.abs() - STALL_ANGLE) / STALL_WIDTH).clamp(0.0, 1.0);
+                    let f_lift = f_attached * (1.0 - stall) + f_stalled * stall;
+                    let f_para = v * (-0.5 * rho * area * CD0_PANEL * speed);
+                    // Explicit drag must not exceed what brings this sample's share
+                    // of the part to rest in one step, or light parts in dense
+                    // fluid blow up numerically.
+                    let mut f = f_lift + f_para;
+                    let f_max = 0.25 * p.mass * flat.max(0.05) * speed / ctx.dt;
+                    let fm = f.norm();
+                    if fm > f_max {
+                        f *= f_max / fm;
+                    }
+                    rb.add_force_at_point(f, Point3::from(point), true);
+                }
+            }
+        }
+        if flat < 1.0 {
+            {
+                // Round share: three samples along the axis with anisotropic drag.
+                let r_cap = 0.5 * (p.r0 + p.r1);
+                let a_axial = PI * r_cap * r_cap * (1.0 - flat);
+                let a_lat = 2.0 * r_cap * (p.len + 2.0 * r_cap) * (1.0 - flat);
+                for sy in [-0.4f32, 0.0, 0.4] {
+                    let point = center + axis * (sy * p.len);
+                    let v = rb.velocity_at_point(&Point3::from(point));
+                    let speed = v.norm();
+                    if speed < 1e-4 {
+                        continue;
+                    }
+                    let va = axis * v.dot(&axis);
+                    let vl = v - va;
+                    let mut f = (va * (CD_CAPSULE_AXIAL * a_axial) + vl * (CD_CAPSULE_LATERAL * a_lat))
+                        * (-0.5 * rho * speed / 3.0);
+                    let f_max = p.mass / 3.0 * (1.0 - flat).max(0.05) * speed / ctx.dt;
+                    let fm = f.norm();
+                    if fm > f_max {
+                        f *= f_max / fm;
+                    }
+                    rb.add_force_at_point(f, Point3::from(point), true);
+                }
+            }
+        }
+
+        // Spin drag about the part's own axis: the point samples above lie on
+        // the axis and see no velocity from axial rotation, so without this a
+        // disc could spin up without limit. A rotating cylinder of radius r
+        // and length L in a fluid: torque ~ 0.5 rho C r^4 L w|w| (plus the
+        // caps), opposed to the spin and capped so it cannot reverse it in one
+        // step (inertia about the axis ~ 0.5 m r^2).
+        {
+            let w = *rb.angvel();
+            let wa = w.dot(&axis);
+            if wa.abs() > 1e-3 {
+                let r_eff = (1.0 - p.flat) * p.radius + p.flat * p.r0;
+                let l_eff = p.len + 2.0 * p.radius * (1.0 - p.flat);
+                let mut tau = 0.5 * rho * C_SPIN * r_eff.powi(4) * l_eff * wa * wa.abs();
+                let inertia = 0.5 * p.mass * r_eff * r_eff;
+                let tau_max = inertia * wa.abs() / ctx.dt;
+                if tau.abs() > tau_max {
+                    tau = tau.signum() * tau_max;
+                }
+                rb.add_torque(axis * (-tau), true);
+            }
+        }
+
+        // Rolling resistance: a part resting on the ground loses horizontal
+        // momentum at C_ROLLING * g, which stops passive rolling after a
+        // topple while costing a walker little.
+        if sub <= 0.0 {
+            let half = axis * (p.len * 0.5);
+            let low = (center + half).y.min((center - half).y) - p.radius;
+            if low < ctx.ground_y + ctx.slope * center.x + 0.02 {
+                let v = *rb.linvel();
+                let vh = Vector3::new(v.x, 0.0, v.z);
+                let sp = vh.norm();
+                if sp > 1e-4 {
+                    let f = (C_ROLLING * p.mass * g).min(p.mass * sp / ctx.dt);
+                    rb.add_force(-vh / sp * f, true);
+                }
+            }
+        }
+
+        // Buoyancy and submersion damping.
+        if sub > 0.0 {
+            // A membrane's collider is 2 cm thick for the solver; the tissue
+            // it stands for is a millimetre of skin, so it displaces its mass
+            // in water, not its collider volume.
+            let volume = p.mass / p.density;
+            let fb = Vector3::new(0.0, rho_water * volume * g * sub, 0.0);
+            let v = *rb.linvel();
+            let damp = -v * (0.8 * p.mass * sub);
+            rb.add_force(fb + damp, true);
+        }
+    }
+}
+
+impl CreatureSim {
+    pub fn new(pheno: Phenotype, planet: &PlanetParams, env: Environment, cfg: SimConfig) -> Self {
+        let derived = planet.derive();
+        let mut bodies = RigidBodySet::new();
+        let mut colliders = ColliderSet::new();
+        let mut impulse_joints = ImpulseJointSet::new();
+
+        let (ground_y, water_level, spawn_y) = match env {
+            Environment::Land => (0.0, None, 0.0),
+            Environment::Water => (-WATER_DEPTH, Some(0.0), -WATER_DEPTH * 0.5),
+            Environment::Air => (0.0, None, AIR_DROP_HEIGHT),
+            Environment::Shore => (0.0, Some(0.0), 0.0),
+        };
+        let slope = if env == Environment::Shore { SHORE_SLOPE } else { 0.0 };
+        add_ground(&mut bodies, &mut colliders, ground_y, slope);
+        let launch = if env == Environment::Air { vector![AIR_LAUNCH_SPEED, 0.0, 0.0] } else { vector![0.0, 0.0, 0.0] };
+        let built = build_creature(&mut bodies, &mut colliders, &mut impulse_joints, &pheno, env, &derived, ground_y, slope, spawn_y, 0.0, 0.0, 0.0, launch);
+        let Built { handles, joint_handles, fatigue } = built;
+        let hydration = hydration_factor(&pheno, &derived, env);
 
         let mut params = IntegrationParameters::default();
         params.dt = cfg.dt;
@@ -519,215 +800,17 @@ impl CreatureSim {
     }
 
     fn update_motors(&mut self) {
-        let t = self.time;
-        let f = self.pheno.base_freq;
-        for i in 1..self.pheno.parts.len() {
-            let Some(jh) = self.joint_handles[i] else { continue };
-            let p = &self.pheno.parts[i];
-            if p.stiffness >= 0.999 {
-                continue; // welded: the passive spring set at build holds it
-            }
-            // Hill force-velocity limit: a muscle's torque falls linearly with
-            // the joint's angular speed and is gone at OMEGA_MAX, so power is
-            // bounded. Without it a joint delivers full torque at any speed and
-            // a body can be spun at ten revolutions a second by one motor.
-            let omega_rel = match (self.bodies.get(self.handles[i]), p.parent.and_then(|q| self.bodies.get(self.handles[q]))) {
-                (Some(c), Some(q)) => (c.angvel() - q.angvel()).norm(),
-                _ => 0.0,
-            };
-            let hill = (1.0 - omega_rel / OMEGA_MAX).clamp(0.05, 1.0);
-            let rigid = p.max_torque * self.fatigue * RIGID_GAIN * p.stiffness;
-            let strength = p.max_torque * self.fatigue * hill;
-            let stiffness = strength * 3.0 + rigid;
-            let damping = strength * 0.3 + rigid * 0.1;
-            let drive = 1.0 - p.stiffness;
-            let lim_x = p.limit * drive + 0.02;
-            let lim_z = (p.limit * p.freedom * drive).max(0.02);
-            let w = 2.0 * PI * f * p.cpg.freq_mult * t;
-            let gain = 1.0 + if p.reflected { -self.cfg.steer } else { self.cfg.steer };
-            let (t1, t2, t3) = if self.motors_active() {
-                let a1 = p.cpg.amp * self.cfg.amp_scale;
-                let a2 = p.cpg.amp2 * self.cfg.amp_scale;
-                let a3 = p.cpg.amp3 * self.cfg.amp_scale;
-                (
-                    (p.cpg.bias + (self.cfg.bias_shift + a1 * gain * (w + p.cpg.phase).sin()) * drive).clamp(-lim_x, lim_x),
-                    (a2 * gain * p.freedom * drive * (w + p.cpg.phase2).sin()).clamp(-lim_z, lim_z),
-                    (a3 * gain * p.freedom * drive * (w + p.cpg.phase3).sin()).clamp(-lim_z, lim_z),
-                )
-            } else {
-                (p.cpg.bias.clamp(-lim_x, lim_x), 0.0, 0.0)
-            };
-            if let Some(j) = self.impulse_joints.get_mut(jh) {
-                j.data.set_motor_position(JointAxis::AngX, t1, stiffness, damping);
-                j.data.set_motor_max_force(JointAxis::AngX, strength + rigid);
-                j.data.set_motor_position(JointAxis::AngZ, t2, stiffness, damping);
-                j.data.set_motor_max_force(JointAxis::AngZ, strength + rigid);
-                j.data.set_motor_position(JointAxis::AngY, t3, stiffness, damping);
-                j.data.set_motor_max_force(JointAxis::AngY, strength + rigid);
-            }
-        }
+        let drive = Drive { active: self.motors_active(), steer: self.cfg.steer, bias_shift: self.cfg.bias_shift, amp_scale: self.cfg.amp_scale };
+        update_motors(&self.bodies, &mut self.impulse_joints, &self.pheno.parts, &self.handles, &self.joint_handles, self.pheno.base_freq, self.fatigue, self.time, drive);
+    }
+
+    pub fn world_ctx(&self) -> WorldCtx {
+        WorldCtx { rho_air: self.derived.air_density, rho_water: self.derived.water_density, g: -self.gravity.y, water_level: self.water_level, ground_y: self.ground_y, slope: self.slope, dt: self.cfg.dt }
     }
 
     fn apply_fluid_forces(&mut self) {
-        let rho_air = self.derived.air_density;
-        let rho_water = self.derived.water_density;
-        let g = -self.gravity.y;
-        let water_level = self.water_level;
-        for i in 0..self.pheno.parts.len() {
-            let p = &self.pheno.parts[i];
-            let h = self.handles[i];
-            let Some(rb) = self.bodies.get_mut(h) else { continue };
-            rb.reset_forces(false);
-            let iso = *rb.position();
-            let center = iso.translation.vector;
-            let axis = iso.rotation * Vector3::y();
-
-            // Submersion fraction and local fluid density.
-            let r_b = part_bounding_radius(p);
-            let sub = match water_level {
-                Some(wl) => ((wl - (center.y - r_b)) / (2.0 * r_b)).clamp(0.0, 1.0),
-                None => 0.0,
-            };
-            let rho = rho_air * (1.0 - sub) + rho_water * sub;
-
-            let flat = p.flat;
-            if flat > 0.0 {
-                {
-                    // Sheet share: 2x2 sub-panels of a plate of chord 2*r0.
-                    let normal = iso.rotation * Vector3::z();
-                    let chord = iso.rotation * Vector3::x();
-                    let area = p.len * 2.0 * p.r0 * 0.25 * flat;
-                    let full_area = p.len * 2.0 * p.r0;
-                    for (sy, sx) in [(-0.25f32, -0.5f32), (-0.25, 0.5), (0.25, -0.5), (0.25, 0.5)] {
-                        let point = center + axis * (sy * p.len) + chord * (sx * p.r0);
-                        let v = rb.velocity_at_point(&Point3::from(point));
-                        let speed = v.norm();
-                        if speed < 1e-4 {
-                            continue;
-                        }
-                        let vhat = v / speed;
-                        let s = vhat.dot(&normal); // sin(alpha), signed
-                        let q = 0.5 * rho * area * speed * speed;
-                        // Two regimes, blended across the stall. Attached flow at
-                        // small incidence: lift perpendicular to the relative wind
-                        // (thin-aerofoil slope 2*pi, reduced for the panel's aspect
-                        // ratio along the wind), plus induced drag along it. This is
-                        // what makes a flapping wing push: the lift vector tilts with
-                        // the stroke. Separated flow past the stall: the flat-plate
-                        // normal force (Lu et al.), which is what a parachute, a paddle
-                        // and a leaf in a gale feel.
-                        let alpha = s.clamp(-1.0, 1.0).asin();
-                        let wind_in_plane = vhat - normal * s;
-                        let wip_n = wind_in_plane.norm();
-                        let f_attached = if wip_n > 1e-4 {
-                            let w = wind_in_plane / wip_n;
-                            let chord_eff = (w.dot(&chord).abs() * 2.0 * p.r0 + w.dot(&axis).abs() * p.len).max(1e-3);
-                            let ar = (full_area / chord_eff).powi(2) / full_area; // span² / area
-                            let cl = 2.0 * PI * alpha.sin() * ar / (ar + 2.0);
-                            let cdi = cl * cl / (PI * ar * 0.9);
-                            // Lift is perpendicular to the wind, in the plane of wind
-                            // and normal, on the same side as the plate force.
-                            let perp = normal - vhat * s;
-                            let lift_dir = perp / perp.norm().max(1e-6);
-                            lift_dir * (-q * cl) - vhat * (q * cdi)
-                        } else {
-                            Vector3::zeros()
-                        };
-                        let f_stalled = normal * (-q * C_P_ALPHA * s);
-                        let stall = ((alpha.abs() - STALL_ANGLE) / STALL_WIDTH).clamp(0.0, 1.0);
-                        let f_lift = f_attached * (1.0 - stall) + f_stalled * stall;
-                        let f_para = v * (-0.5 * rho * area * CD0_PANEL * speed);
-                        // Explicit drag must not exceed what brings this sample's share
-                        // of the part to rest in one step, or light parts in dense
-                        // fluid blow up numerically.
-                        let mut f = f_lift + f_para;
-                        let f_max = 0.25 * p.mass * flat.max(0.05) * speed / self.cfg.dt;
-                        let fm = f.norm();
-                        if fm > f_max {
-                            f *= f_max / fm;
-                        }
-                        rb.add_force_at_point(f, Point3::from(point), true);
-                    }
-                }
-            }
-            if flat < 1.0 {
-                {
-                    // Round share: three samples along the axis with anisotropic drag.
-                    let r_cap = 0.5 * (p.r0 + p.r1);
-                    let a_axial = PI * r_cap * r_cap * (1.0 - flat);
-                    let a_lat = 2.0 * r_cap * (p.len + 2.0 * r_cap) * (1.0 - flat);
-                    for sy in [-0.4f32, 0.0, 0.4] {
-                        let point = center + axis * (sy * p.len);
-                        let v = rb.velocity_at_point(&Point3::from(point));
-                        let speed = v.norm();
-                        if speed < 1e-4 {
-                            continue;
-                        }
-                        let va = axis * v.dot(&axis);
-                        let vl = v - va;
-                        let mut f = (va * (CD_CAPSULE_AXIAL * a_axial) + vl * (CD_CAPSULE_LATERAL * a_lat))
-                            * (-0.5 * rho * speed / 3.0);
-                        let f_max = p.mass / 3.0 * (1.0 - flat).max(0.05) * speed / self.cfg.dt;
-                        let fm = f.norm();
-                        if fm > f_max {
-                            f *= f_max / fm;
-                        }
-                        rb.add_force_at_point(f, Point3::from(point), true);
-                    }
-                }
-            }
-
-            // Spin drag about the part's own axis: the point samples above lie on
-            // the axis and see no velocity from axial rotation, so without this a
-            // disc could spin up without limit. A rotating cylinder of radius r
-            // and length L in a fluid: torque ~ 0.5 rho C r^4 L w|w| (plus the
-            // caps), opposed to the spin and capped so it cannot reverse it in one
-            // step (inertia about the axis ~ 0.5 m r^2).
-            {
-                let w = *rb.angvel();
-                let wa = w.dot(&axis);
-                if wa.abs() > 1e-3 {
-                    let r_eff = (1.0 - p.flat) * p.radius + p.flat * p.r0;
-                    let l_eff = p.len + 2.0 * p.radius * (1.0 - p.flat);
-                    let mut tau = 0.5 * rho * C_SPIN * r_eff.powi(4) * l_eff * wa * wa.abs();
-                    let inertia = 0.5 * p.mass * r_eff * r_eff;
-                    let tau_max = inertia * wa.abs() / self.cfg.dt;
-                    if tau.abs() > tau_max {
-                        tau = tau.signum() * tau_max;
-                    }
-                    rb.add_torque(axis * (-tau), true);
-                }
-            }
-
-            // Rolling resistance: a part resting on the ground loses horizontal
-            // momentum at C_ROLLING * g, which stops passive rolling after a
-            // topple while costing a walker little.
-            if sub <= 0.0 {
-                let half = axis * (p.len * 0.5);
-                let low = (center + half).y.min((center - half).y) - p.radius;
-                if low < self.ground_y + self.slope * center.x + 0.02 {
-                    let v = *rb.linvel();
-                    let vh = Vector3::new(v.x, 0.0, v.z);
-                    let sp = vh.norm();
-                    if sp > 1e-4 {
-                        let f = (C_ROLLING * p.mass * g).min(p.mass * sp / self.cfg.dt);
-                        rb.add_force(-vh / sp * f, true);
-                    }
-                }
-            }
-
-            // Buoyancy and submersion damping.
-            if sub > 0.0 {
-                // A membrane's collider is 2 cm thick for the solver; the tissue
-                // it stands for is a millimetre of skin, so it displaces its mass
-                // in water, not its collider volume.
-                let volume = p.mass / p.density;
-                let fb = Vector3::new(0.0, rho_water * volume * g * sub, 0.0);
-                let v = *rb.linvel();
-                let damp = -v * (0.8 * p.mass * sub);
-                rb.add_force(fb + damp, true);
-            }
-        }
+        let ctx = self.world_ctx();
+        apply_fluid_forces(&ctx, &mut self.bodies, &self.pheno.parts, &self.handles);
     }
 
     pub fn step(&mut self) {

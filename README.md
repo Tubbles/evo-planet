@@ -120,6 +120,15 @@ battery of rapier episodes:
   held wing is powered lift: metres of mean height the flapping adds.
   Still aloft at the end is sustained flight.
 - **Reach** is the farthest any part end sweeps during these episodes.
+- **Predation is fought out.** When a predator first considers a prey of
+  a given body type, the pair goes into a two-body arena in their medium:
+  the predator steers at the prey, the prey steers away, ten bouts from
+  perturbed starts. A bout is eaten when the mouth (the trunk's front,
+  with a gape of its diameter) or a clawed foot holds the prey for a
+  second, fled when no bite landed and the prey is farther away at the
+  end, survived otherwise. The three shares are cached per pair of types
+  and reused; the old attack-against-defence form is only the prior
+  while a pair waits its turn.
 
 Fluid forces blend by flatness: capsule drag on three axial samples, and
 on four sub-panels per sheet, attached-flow lift below the stall

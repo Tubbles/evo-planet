@@ -12,6 +12,7 @@
 //! only measures what a body can do and the ecology decides what that is
 //! worth.
 
+pub mod arena;
 pub mod decode;
 pub mod eco;
 pub mod genome;

@@ -158,6 +158,12 @@ pub struct Traits {
     /// body holding its wings still. Zero for a pure glider.
     #[serde(default)]
     pub flap_lift: f32,
+    /// Which way positive steer turns the body in each medium (+1 or -1, 0
+    /// before the turn test), so the arena can steer it at a target.
+    #[serde(default)]
+    pub turn_sign_land: f32,
+    #[serde(default)]
+    pub turn_sign_water: f32,
     /// Nimbleness: yaw rate gained from asymmetric drive (rad/s) and vertical
     /// speed gained from a posture shift (m/s), per environment. Zero unless
     /// the body locomotes at all.
@@ -313,6 +319,11 @@ pub struct EcoStats {
     /// (powered flight, the flapping test with its controls).
     #[serde(default)]
     pub powered: usize,
+    /// Pairs of body types fought out in the arena, and pairs waiting.
+    #[serde(default)]
+    pub arena_pairs: usize,
+    #[serde(default)]
+    pub arena_pending: usize,
     /// Animals with carnivory above 0.15 (counted in whichever class dominates).
     pub omnivores: usize,
     /// Realised diet means: fraction of lifetime intake from kills and from carrion.
@@ -463,6 +474,15 @@ pub struct EcoWorld {
     next_lineage: u32,
     trait_cache: HashMap<String, Traits>,
     pending: Vec<(usize, Environment)>,
+    /// Genome behind each body key, so a cached body type can be rebuilt
+    /// for the arena.
+    body_genomes: HashMap<String, Genome>,
+    /// Fought-out outcomes per (predator type, prey type, medium): the
+    /// shares of eaten, fled and survived over `arena::BOUTS` bouts.
+    arena_cache: HashMap<(String, String, Environment), crate::arena::ArenaOutcome>,
+    /// Pairs that met and have not been fought yet, in meeting order.
+    arena_pending: Vec<(String, String, Environment)>,
+    arena_seen: HashSet<(String, String, Environment)>,
     pub stats: EcoStats,
     pub history: Vec<[f32; 7]>,
 }
@@ -543,6 +563,10 @@ impl EcoWorld {
             next_lineage: 1,
             trait_cache: HashMap::new(),
             pending: Vec::new(),
+            body_genomes: HashMap::new(),
+            arena_cache: HashMap::new(),
+            arena_pending: Vec::new(),
+            arena_seen: HashSet::new(),
             stats: EcoStats::default(),
             history: Vec::new(),
         };
@@ -828,6 +852,7 @@ impl EcoWorld {
             }
             let genome = self.animals[idx].genome.clone();
             let key = self.animals[idx].key.clone();
+            self.body_genomes.entry(key.clone()).or_insert_with(|| genome.clone());
             let mut traits = self.trait_cache.get(&key).copied().unwrap_or(self.animals[idx].traits);
             let already = match env {
                 Environment::Water => traits.measured_water,
@@ -863,11 +888,15 @@ impl EcoWorld {
                 let speed = if r.exploded { 0.0 } else { (r.sustained_speed - passive).max(0.0) };
                 // Nimbleness, only for bodies that locomote: the same body driven
                 // asymmetrically (turning) and with a shifted posture (climb/dive).
+                let mut turn_sign = 0.0f32;
                 let (turn, climb) = if speed > 0.01 && !r.exploded && env != Environment::Shore {
                     let pheno2 = decode(&genome);
                     let st = SimConfig { episode_time: TRAIT_EPISODE_S, steer: 0.6, ..Default::default() };
                     let rs = CreatureSim::run_episode(pheno2.clone(), &self.planet, env, st);
                     let turn = if rs.exploded { 0.0 } else { (rs.yaw_rate - r.yaw_rate).abs() };
+                    if !rs.exploded {
+                        turn_sign = (rs.yaw_rate - r.yaw_rate).signum();
+                    }
                     let climb = if env == Environment::Land {
                         0.0
                     } else {
@@ -887,6 +916,7 @@ impl EcoWorld {
                     Environment::Water => {
                         traits.water_speed = speed;
                         traits.turn_water = turn;
+                        traits.turn_sign_water = turn_sign;
                         traits.climb_water = climb;
                         traits.measured_water = true;
                         traits.reach = traits.reach.max(r.swept_reach);
@@ -919,6 +949,7 @@ impl EcoWorld {
                     _ => {
                         traits.land_speed = speed;
                         traits.turn_land = turn;
+                        traits.turn_sign_land = turn_sign;
                         traits.measured_land = true;
                         // Reach is what the body swept in the episode, not the
                         // rest pose it was drawn in.
@@ -938,8 +969,50 @@ impl EcoWorld {
                 }
             }
         }
+        // Then the arena: pairs of body types that met and were not yet
+        // fought out. A pair costs `PAIR_COST` units of the same budget.
+        while done + crate::arena::PAIR_COST <= budget.max(if self.pending.is_empty() { crate::arena::PAIR_COST } else { 0 }) {
+            let Some(pair) = self.arena_pending.pop() else { break };
+            if self.arena_cache.contains_key(&pair) {
+                continue;
+            }
+            let (Some(gp), Some(gq)) = (self.body_genomes.get(&pair.0), self.body_genomes.get(&pair.1)) else { continue };
+            let pp = decode(gp);
+            let pq = decode(gq);
+            let (sp, sq) = {
+                let tp = self.trait_cache.get(&pair.0).copied().unwrap_or_default();
+                let tq = self.trait_cache.get(&pair.1).copied().unwrap_or_default();
+                if pair.2 == Environment::Water { (tp.turn_sign_water, tq.turn_sign_water) } else { (tp.turn_sign_land, tq.turn_sign_land) }
+            };
+            let seed = {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                pair.0.hash(&mut h);
+                pair.1.hash(&mut h);
+                h.finish()
+            };
+            let out = crate::arena::run_pair(&pp, &pq, &self.planet, pair.2, sp, sq, seed);
+            self.arena_cache.insert(pair, out);
+            self.stats.arena_pairs = self.arena_cache.len();
+            done += crate::arena::PAIR_COST;
+        }
         self.stats.pending_evals = self.pending.len();
+        self.stats.arena_pending = self.arena_pending.len();
         done
+    }
+
+    /// The fought-out outcome for a predator type against a prey type in a
+    /// medium, if the pair has been through the arena; otherwise queue it.
+    fn arena_outcome(&mut self, pred_key: &str, prey_key: &str, env: Environment) -> Option<crate::arena::ArenaOutcome> {
+        let env = if env == Environment::Water { Environment::Water } else { Environment::Land };
+        let pair = (pred_key.to_string(), prey_key.to_string(), env);
+        if let Some(o) = self.arena_cache.get(&pair) {
+            return Some(*o);
+        }
+        if self.arena_seen.insert(pair.clone()) {
+            self.arena_pending.push(pair);
+        }
+        None
     }
 
     /// Larval drift: a random walk that stays in the birth patch's medium
@@ -1570,7 +1643,16 @@ impl EcoWorld {
                     // smaller; much larger prey is possible but rare).
                     let z = (mass / pm).log10();
                     let hump = (-(z - 1.0).powi(2) / 2.0).exp();
-                    let p_success = encounter * hump / (1.0 + (-(attack - defence) / scale).exp());
+                    // The capture itself is fought out in the arena per pair of
+                    // body types; until that pair has been through it, the
+                    // attack-versus-defence form stands in as the prior.
+                    let medium = if sub >= 0.5 || self.patches[prey.patch].water { Environment::Water } else { Environment::Land };
+                    let (my_key, prey_key) = (self.animals[ai].key.clone(), prey.key.clone());
+                    let p_capture = match self.arena_outcome(&my_key, &prey_key, medium) {
+                        Some(o) => o.eaten,
+                        None => hump / (1.0 + (-(attack - defence) / scale).exp()),
+                    };
+                    let p_success = encounter * p_capture;
                     // Fritsch et al.: energy gained per kill falls with relative prey
                     // size, to zero for prey ten times larger (subduing cost, waste).
                     let xi = (0.4 + 0.4 * z).clamp(0.0, 1.0);

@@ -299,6 +299,31 @@ Three quantities are read from anatomy rather than measured: mouth area,
 claws and plating. They enter the ecology as what a body *is*, in the
 same way mass does.
 
+### 5.1 The arena: predation fought out
+
+Whether one body type can eat another is not a formula either. When a
+predator first considers a prey of a given body type in a given medium
+(land or water), the pair is queued for the arena (`arena.rs`): both
+bodies in one physics world, the predator steering at the prey and the
+prey steering away through a bearing controller on the turn their own
+tests measured (its sign comes from the turn test). A bout ends when the
+predator has held the prey for one second with its mouth (the front of
+the trunk, with a gape of the trunk's diameter, on a prey part that fits
+in it) or with a clawed foot in contact: **eaten**. If time runs out
+(6 s) with no bite ever landed and the prey farther away than it started:
+**fled**. Otherwise: **survived**. A pair is fought ten times from
+perturbed starts (the prey's facing within half a radian of straight
+away, its side offset within half its reach) and the three shares are
+cached per (predator type, prey type, medium) and reused for every later
+meeting of the same types. Until a pair has been through the arena, the
+older attack-against-defence form stands in as a prior. One pair costs
+about 24 single-body episodes of the physics budget.
+
+Nothing about size, speed, weapons or armour enters the arena except
+through the bodies themselves: a mouth too small for a thick prey finds
+no purchase, a slow chaser never arrives, a prey that cannot turn is
+caught from behind.
+
 ## 6. The world (`terrain.rs`, `planet.rs`, `eco.rs`)
 
 The planet is a Fibonacci sphere of cells, six neighbours each. The cell
@@ -366,7 +391,7 @@ flowchart LR
   FR --> GT["stomach and digestion by gut type"]
   GT --> DL
   OS["absorption and capture by surface"] --> DL
-  PR["predation: encounter by range; attack against defence; size-ratio hump (Brose); kill return (Fritsch)"] --> GT
+  PR["predation: encounter by range; capture share fought out in the arena per pair of body types (prior: attack against defence); kill return (Fritsch)"] --> GT
   DL --> RV["reserve, capped by fat capacity"]
   RV --> GW["growth (West, Brown and Enquist)"]
   GW --> RP["reproduction at the maturity fraction of full size"]
