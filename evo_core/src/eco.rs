@@ -1850,8 +1850,11 @@ impl EcoWorld {
                     // Encounter: detection distance scales with prey body length, so
                     // small prey are found at a fraction of the rate of large prey.
                     // Encounter: the predator meets the prey that its day's range
-                    // covers, detecting small ones at a fraction of the rate.
-                    let encounter = (range_area / a).min(1.0) * (pm / mass).powf(1.0 / 3.0).min(1.0);
+                    // covers, detecting a prey smaller than itself at a fraction of
+                    // the rate set by how large it looks (its reach against the
+                    // predator's own, at the prey's current size).
+                    let looks = (prey.traits.reach * p_lin / reach_now.max(1e-3)).min(1.0);
+                    let encounter = (range_area / a).min(1.0) * looks;
                     // Capture: attack versus defence, times a hump in log size ratio
                     // (Brose 2006: small ectotherm predators do best on prey 10-100x
                     // smaller; much larger prey is possible but rare).
