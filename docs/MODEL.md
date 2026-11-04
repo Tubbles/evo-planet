@@ -943,3 +943,16 @@ wilting (water below 0.3) killing unadapted tissue. With that, every
 interior cell is green by day 600 (62 kg of plants inland against 0.4).
 The sheets and the gene flow were real faults, but this one was the
 wall.
+
+## The frontier
+
+With the interior green, run 15 still showed 0 inland animals at day
+1,500: the larval walk kept the shore's young to wet cells, so nothing
+born on the shore could be born inland. Young now disperse as seeds do.
+Run 16 (worlds restored from run 15's checkpoints) is the first with
+animals inland: 12 in one seed, 8 in the other, and the frontier's toll
+in the same line, 2,372 dried out and 2,164 suffocated in a day's
+ledger against 91,364 dead of age. Sheets with gills die on dry land in
+a day, as they should. What lives there next has to be compact,
+waterproofed and lung-breathing, and the interior is 135 kg of plants
+with no one eating them.
