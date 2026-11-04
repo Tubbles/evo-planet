@@ -73,7 +73,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut days = 1500u64;
     let mut grid = 1500usize;
-    let mut evals_per_day = 32usize;
+    let mut evals_per_day = 96usize;
     let mut patch_area = evo_core::eco::PATCH_AREA;
     let mut arena_per_day = 1.0f32;
     let mut planet_sel = "0".to_string();

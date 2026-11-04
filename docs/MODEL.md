@@ -812,3 +812,27 @@ air is not a drink. Inland water is now dew on the body's own surface and
 the water in fresh food; open water is drunk only in or beside the sea.
 The same run showed the mats photosynthesising without the nutrient limit
 plants have; they now share it.
+
+## The land that was not there
+
+Run 3 (scale-free arena starts, body genes mutating at a fifth) ended at
+day 2,000 with 136,873 animals "on land" and the new ledger column
+answering where: 0 inland. Every land animal was on the intertidal
+shore. The probe `land_probe` then showed why: of the 600-cell world's
+174 land cells, 141 were shore and 33 interior, and the interior held 0.4
+kg of plants, stunted seedlings at the land cap of eight per cell. There
+was no land to walk on and nothing on it to eat.
+
+Three causes, three changes. The terrain's fine noise octaves shattered
+the coast at the cell scale; terrain is now drawn at the grid's own
+resolution (`elevation_at_res`), which gives the same seed 72 interior
+cells at 600 and 505 at 3,000. The land plant cap was six times the
+water cap's reciprocal for no stated reason; it is now the same. And the
+measurement queue's prior was neutral on one side only: a mutated body
+got its parent's speed but paid its own mass, so a backlog selected
+against every added segment; an unmeasured body is now its parent's body
+on both sides until measured.
+
+Land tolerance in plants rises slowly (0.01 to 0.05 in 1,200 days on the
+shore, where seed rain from the sea swamps it); the inland flora is the
+next thing to watch.

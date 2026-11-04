@@ -276,8 +276,12 @@ motors off; the air launch has no settling).
 Every ability an organism has in the ecology comes from physics episodes
 with a control. A body is measured when it is born and again at half its
 adult mass; a body identical to its parent's inherits the parent's
-measurements, and a changed body uses them as a neutral prior until its
-own episodes run.
+measurements, and a changed body is accounted as its parent's body on
+both sides of the ledger (mass and cost as well as speed) until its own
+episodes run: a prior that is neutral, so a queue of unmeasured bodies
+cannot select against new parts by charging for them before they are
+credited (which is what the first populated runs did: 246,679 bodies
+waiting, every added segment a pure cost, pills everywhere).
 
 | Ability | Episode | Control | Definition |
 |---|---|---|---|
@@ -357,8 +361,12 @@ caught from behind.
 The planet is a Fibonacci sphere of cells, six neighbours each. The cell
 is a run parameter (100 m² by default); every rule is per square metre
 or per metre, so the cell size must change nothing but resolution.
-Terrain is ridged noise; sea level is the elevation quantile matching the
-water-coverage dial; temperature falls with latitude and 6.5 °C per
+Terrain is fractal noise (continents, ridged mountain belts on land,
+detail) drawn at the grid's own scale: octaves narrower than about three
+cells are left out, so a coarse world has continents with an interior
+instead of a coast shattered into one-cell islands (at full detail a
+600-cell world's land was 81% shore). Sea level is the elevation quantile
+matching the water-coverage dial; temperature falls with latitude and 6.5 °C per
 kilometre. Shore cells carry a submersion that swings with a spring-neap
 tide and blends breathing, light, water and locomotion between sea and
 land.
@@ -524,8 +532,8 @@ lineage tables.
 
 | Guard | Where | Binds when |
 |---|---|---|
-| plant density caps | 0.48 per m² at sea, 0.08 per m² on land | always, in a full sea |
-| measurement budget | a batch per day, run on every core (32 bodies per day headless by default; a few per slice in the browser, single-threaded) | whenever births outrun it (badly, in the unguarded run) |
+| plant density caps | 0.48 per m² in water and on land | always, in a full sea; on land it filled cells with stunted seedlings when it was 0.08 |
+| measurement budget | a batch per day, run on every core (96 bodies per day headless by default, about 0.05 s of one core each; a few per slice in the browser, single-threaded) | whenever births outrun it (badly, in the unguarded run) |
 | maximum nodes and parts | 10 nodes, 24 parts | rarely |
 | prey candidates per day | 3 | at high prey density |
 
