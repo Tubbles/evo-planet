@@ -1490,6 +1490,9 @@ impl EcoWorld {
         }
         let mut births: Vec<Birth> = Vec::new();
         let mut killed: Vec<usize> = Vec::new();
+        // Flag per animal, so the checks below stay constant time (a list scan
+        // made a day of grazing deaths quadratic).
+        let mut killed_flag: Vec<bool> = vec![false; self.animals.len()];
         let (mut graze_today, mut prey_today, mut carrion_today, mut cost_today, mut mats_today) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
         let n_animals = self.animals.len();
         let mut animals_in: Vec<Vec<usize>> = vec![Vec::new(); n_patches];
@@ -1522,7 +1525,7 @@ impl EcoWorld {
             v
         };
         for &ai in &order {
-            if killed.contains(&ai) {
+            if killed_flag[ai] {
                 continue;
             }
             // --- read state -------------------------------------------------
@@ -1798,7 +1801,7 @@ impl EcoWorld {
             // grazer is not). The continuum has no kingdom line for a mouth.
             let mut sheet_targets: Vec<(usize, f32)> = Vec::new();
             for &j in &animals_in[patch] {
-                if j == ai || killed.contains(&j) {
+                if j == ai || killed_flag[j] {
                     continue;
                 }
                 let s = &self.animals[j];
@@ -1850,10 +1853,10 @@ impl EcoWorld {
             if space > 0.0 && motility > 0.0 && speed_here > 0.0 {
                 // Prey in this cell, plus prey in the ring cells the day's range covers
                 // (each kept with probability equal to that cell's coverage).
-                let mut candidates: Vec<usize> = animals_in[patch].iter().copied().filter(|&j| j != ai && !killed.contains(&j)).collect();
+                let mut candidates: Vec<usize> = animals_in[patch].iter().copied().filter(|&j| j != ai && !killed_flag[j]).collect();
                 for &(j, cover) in &ring_cells {
                     for &k in &animals_in[j] {
-                        if k != ai && !killed.contains(&k) && self.rng.gen_bool(cover as f64) {
+                        if k != ai && !killed_flag[k] && self.rng.gen_bool(cover as f64) {
                             candidates.push(k);
                         }
                     }
@@ -1958,6 +1961,7 @@ impl EcoWorld {
                                 self.stats.kills_by_larger += 1;
                             }
                             killed.push(j);
+                            killed_flag[j] = true;
                             self.animals[ai].kills += 1;
                             self.stats.kills += 1;
                         }
@@ -2001,6 +2005,7 @@ impl EcoWorld {
                             // Grazed below a tenth of its size, a sheet is gone.
                             if s.mass < 0.1 * s.traits.mass {
                                 killed.push(*j);
+                                killed_flag[*j] = true;
                             }
                         }
                         space -= food_plant;
