@@ -387,7 +387,9 @@ instead of a coast shattered into one-cell islands (at full detail a
 matching the water-coverage dial; temperature falls with latitude and 6.5 °C per
 kilometre. Shore cells carry a submersion that swings with a spring-neap
 tide and blends breathing, light, water and locomotion between sea and
-land.
+land. An inland basin (a land cell lower than every neighbour, none of
+them sea) holds a lake, with shores of its own; smooth 600-cell worlds
+have none, finer ones a few.
 
 | Structure | Fields |
 |---|---|
@@ -433,6 +435,13 @@ flowchart LR
   GR --> SD["seeds above the maturity fraction of full size"]
   EN --> LS["leaf shedding by leaf lifespan"]
 ```
+
+A seed's random walk runs through its parent's medium: a submerged
+plant's spores drift through water and strand on the shore, a land
+plant's seeds blow over land and the shore, a shore plant's go either
+way. A free walk had let every sea alga rain seeds on the interior, a
+gene flow that swamped land adaptation where it began (land tolerance
+rose 0.01 to 0.05 in 1,200 days).
 
 ### 7.2 Animals, per individual
 
@@ -492,6 +501,16 @@ Every quantity is kilograms of dry biomass equivalent per day.
 The audit examples (`seed_ledger`, `gait_audit`, `flier_audit`,
 `origin_probe`, `flap_probe3`) print the per-individual ledgers behind
 the aggregate numbers.
+
+### 7.4 Checkpoints
+
+A world can be saved (`EcoWorld::save`, bincode) with everything the
+physics has measured, everything the arena has found, and everyone
+alive, and restored to carry on (`EcoWorld::load`): bodies are decoded
+again, the day's queues rebuilt, the random stream reseeded from the
+day. `evo_headless --save FILE` writes one at every ledger line;
+`--load FILE` continues from it. A restored run is not the same run, but
+it is the same world.
 
 ## 8. Interfaces
 
