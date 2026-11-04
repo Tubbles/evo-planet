@@ -111,7 +111,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Bite | mouth, gape, prey thickness | bite = mouth point within gape/2 of a prey part whose thickness ≤ gape; claw = clawed part tip within its radius + 1 mm of a prey part |
 | Outcome of a bout | hold time, distance | eaten = bite or claw contact held 1 s; fled = no bite ever and farther than the start after 12 s; otherwise survived |
 | Pair result | 10 bouts | eaten, fled, survived shares over 10 perturbed bouts, cached per (predator lineage, prey lineage, medium) |
-| When fought | attacks | a pair is queued at its first actual attack attempt; 1 pair per day headless (about 24 single-body episodes) |
+| When fought | attacks | a pair is queued at its first actual attack attempt (the queue holds at most 512 pairs; a living member of each lineage stands for it when fought); 1 pair per day headless (about 24 single-body episodes) |
 
 ## Planet and cells
 

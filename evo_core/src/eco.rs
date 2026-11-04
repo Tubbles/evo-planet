@@ -581,17 +581,18 @@ pub struct TerrainMesh {
 /// A pair of creature types waiting for the arena: the two bodies that met
 /// first stand for their lineages, with the turn signs their tests gave.
 #[derive(Clone, Debug)]
+/// A pair of lineages waiting for the arena. The bodies are looked up when
+/// the pair is fought (a living member of each lineage), not carried in the
+/// queue: two genomes per request ran a crowded world out of memory.
 struct ArenaRequest {
     pred: u32,
     prey: u32,
     env: Environment,
-    genome_pred: Genome,
-    genome_prey: Genome,
-    sign_pred: f32,
-    sign_prey: f32,
-    travel_pred: [f32; 3],
-    travel_prey: [f32; 3],
 }
+
+/// Requests the arena queue holds at most; beyond it a new pair waits for
+/// its next attack to be queued again.
+const ARENA_QUEUE_MAX: usize = 512;
 
 pub struct EcoWorld {
     pub planet: PlanetParams,
@@ -1374,10 +1375,21 @@ impl EcoWorld {
             if self.arena_cache.contains_key(&key) {
                 continue;
             }
-            let pp = decode(&req.genome_pred);
-            let pq = decode(&req.genome_prey);
+            // A living member of each lineage stands for it; a lineage that
+            // has died out since the attack leaves the pair unfought.
+            let (Some(a), Some(b)) = (self.animals.iter().find(|x| x.lineage == req.pred), self.animals.iter().find(|x| x.lineage == req.prey)) else {
+                self.arena_seen.remove(&key);
+                continue;
+            };
+            let (sp, sq, tp, tq) = if req.env == Environment::Water {
+                (a.traits.turn_sign_water, b.traits.turn_sign_water, a.traits.heading_water, b.traits.heading_water)
+            } else {
+                (a.traits.turn_sign_land, b.traits.turn_sign_land, a.traits.heading_land, b.traits.heading_land)
+            };
+            let pp = decode(&a.genome);
+            let pq = decode(&b.genome);
             let seed = (req.pred as u64) << 32 | req.prey as u64;
-            let out = crate::arena::run_pair(&pp, &pq, &self.planet, req.env, (req.sign_pred, req.travel_pred), (req.sign_prey, req.travel_prey), seed);
+            let out = crate::arena::run_pair(&pp, &pq, &self.planet, req.env, (sp, tp), (sq, tq), seed);
             self.arena_cache.insert(key, out);
             let rec = self.arena_record.entry(req.pred).or_insert((0.0, 0));
             rec.0 += out.eaten;
@@ -1431,12 +1443,11 @@ impl EcoWorld {
             self.arena_cache.insert(key, crate::arena::ArenaOutcome { eaten: 0.0, fled: 0.0, survived: 1.0, bouts: 0 });
             return;
         }
-        let (sp, sq, tp, tq) = if env == Environment::Water {
-            (a.traits.turn_sign_water, b.traits.turn_sign_water, a.traits.heading_water, b.traits.heading_water)
-        } else {
-            (a.traits.turn_sign_land, b.traits.turn_sign_land, a.traits.heading_land, b.traits.heading_land)
-        };
-        self.arena_pending.push(ArenaRequest { pred: a.lineage, prey: b.lineage, env, genome_pred: a.genome.clone(), genome_prey: b.genome.clone(), sign_pred: sp, sign_prey: sq, travel_pred: tp, travel_prey: tq });
+        if self.arena_pending.len() >= ARENA_QUEUE_MAX {
+            self.arena_seen.remove(&key);
+            return;
+        }
+        self.arena_pending.push(ArenaRequest { pred: a.lineage, prey: b.lineage, env });
     }
 
     /// Larval drift: a random walk through the birth cell's medium, as a
