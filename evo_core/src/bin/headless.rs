@@ -45,8 +45,8 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
             for l in w.lineages(3) {
                 if l.kind == "animal" {
                     println!(
-                        "    top lineage {:>5}: n={:>6} mass {:.3} kg parts {:.1} | mouth {:.5} m² membranes {:.3} m² | land {:.2} water {:.2} m/s | diet plant {:.2} meat {:.2} carrion {:.2} | intake {:.3} /kg/day | on shore {:.0}% aquatic {:.0}%",
-                        l.id, l.count, l.mean_mass, l.parts, l.mouth, l.membrane_area, l.land_speed, l.water_speed, l.herb, l.carn, l.detr, l.intake, l.shore_share * 100.0, l.aquatic_share * 100.0
+                        "    top lineage {:>5}: n={:>6} mass {:.3} kg parts {:.1} flat {:.2} | mouth {:.5} m² membranes {:.3} m² | land {:.2} water {:.2} m/s | diet plant {:.2} meat {:.2} carrion {:.2} | intake {:.3} /kg/day | lungs {:.2} skin {:.2} | on shore {:.0}% aquatic {:.0}%",
+                        l.id, l.count, l.mean_mass, l.parts, l.flat, l.mouth, l.membrane_area, l.land_speed, l.water_speed, l.herb, l.carn, l.detr, l.intake, l.breathing, l.waterproof, l.shore_share * 100.0, l.aquatic_share * 100.0
                     );
                 }
             }

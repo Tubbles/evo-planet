@@ -484,6 +484,11 @@ pub struct LineageSummary {
     pub water_speed: f32,
     pub parts: f32,
     pub membrane_area: f32,
+    /// Mean waterproofing (land tolerance) and trunk flatness.
+    #[serde(default)]
+    pub waterproof: f32,
+    #[serde(default)]
+    pub flat: f32,
     /// Mouth cross-section, m², and mean gross intake per kilogram per day.
     #[serde(default)]
     pub mouth: f32,
@@ -2661,6 +2666,8 @@ impl EcoWorld {
             water_speed: 0.0,
             parts: 0.0,
             membrane_area: 0.0,
+            waterproof: 0.0,
+            flat: 0.0,
             mouth: 0.0,
             intake: 0.0,
             lung_frac: 0.0,
@@ -2775,6 +2782,8 @@ impl EcoWorld {
                     s.mouth += a.traits.mouth_area / c;
                     s.intake += a.intake_rate / a.mass.max(1e-3) / c;
                     s.lung_frac += a.genome.lung_frac / c;
+                    s.waterproof += a.genome.land_tolerance / c;
+                    s.flat += a.genome.nodes[a.genome.root].flat() / c;
                 }
                 s
             })
