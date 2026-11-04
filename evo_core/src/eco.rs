@@ -1497,16 +1497,25 @@ impl EcoWorld {
                 // Water: submerged plants are never water-limited; on land,
                 // uptake needs land-adapted roots against transpiration demand.
                 // Thin leaves (high SLA) transpire more per area.
+                // Roots take up what the soil's moisture lets them; leaves
+                // transpire by area, less the cuticle and stomata the land
+                // tolerance gene builds. Photosynthesis follows the water
+                // (stomata close as the plant dries).
                 let water_frac = if sub >= 1.0 {
                     1.0
                 } else {
-                    let uptake = root * patch.moisture * 0.6 * (0.3 + 0.7 * tol);
-                    let demand = leaf_area * (0.002 + 0.015 * aridity) * (0.5 + tf) * (0.5 + (sla / 20.0).min(2.0));
+                    let uptake = root * patch.moisture * 0.6;
+                    let demand = leaf_area * (0.002 + 0.015 * aridity) * (0.5 + tf) * (0.5 + (sla / 20.0).min(2.0)) * (1.0 - 0.8 * tol);
                     let dry = if demand > 0.0 { (uptake / demand).min(1.0) } else { 1.0 };
                     sub + (1.0 - sub) * dry
                 };
-                // Unadapted tissue desiccates in air; adaptation costs upkeep.
-                let habitat_eff = sub + (1.0 - sub) * (0.25 + 0.75 * tol);
+                // Wilting: tissue that stays dry dies, unless it is the kind
+                // that survives drying (the same gene). A fixed factor used to
+                // take three quarters of an unadapted plant's photosynthesis in
+                // air regardless of how wet the ground was; that was a wall at
+                // the shore, not a water balance.
+                let wilt = ((0.3 - water_frac).max(0.0) / 0.3) * (1.0 - sub);
+                let habitat_eff = 1.0;
                 // 0.02 kg dry mass per m^2 of fully lit leaf per day; the patch's
                 // Beer-Lambert light budget caps canopy production at ~2 kg/day.
                 // Tough, long-lived leaves photosynthesise slower per area (leaf economics).
@@ -1539,7 +1548,7 @@ impl EcoWorld {
                 let mot_tissue = 0.0025 * p.genome.motility.clamp(0.0, 1.0);
                 let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * (0.0005 + mot_tissue) + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
                 production_today += photo;
-                p.energy += photo + (absorbed + captured) * 0.6 - respiration;
+                p.energy += photo + (absorbed + captured) * 0.6 - respiration - p.biomass * 0.02 * wilt * (1.0 - 0.8 * tol);
                 // Leaf economics: thin leaves live weeks, thick ones years
                 // (Wright et al. 2004: lifespan ~ LMA^1.5, a year at 0.1 kg/m^2).
                 // Shed leaves are litter and must be regrown from energy.
