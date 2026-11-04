@@ -818,6 +818,20 @@ impl EcoWorld {
                 Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 }, light_left: 1.0, bacteria: 0.0, motile_area: 0.0 }
             })
             .collect();
+        // Fresh water: an inland basin (a land cell lower than every
+        // neighbour, none of them sea) holds a lake. Lakes are where plants
+        // and animals went ashore in life, a wet foothold with no sea's seed
+        // rain swamping what adapts there; their shores are inland shores.
+        for i in 0..n {
+            if patches[i].water || neighbours[i].iter().any(|&j| patches[j].water) {
+                continue;
+            }
+            if neighbours[i].iter().all(|&j| patches[j].elevation > patches[i].elevation) {
+                patches[i].water = true;
+                patches[i].submersion = 1.0;
+                patches[i].moisture = 1.0;
+            }
+        }
         // Shore band: land patches touching water stay wet, the first foothold for plants.
         for i in 0..n {
             if patches[i].water {
@@ -985,6 +999,16 @@ impl EcoWorld {
             };
             p.shore = false;
             p.submersion = if water { 1.0 } else { 0.0 };
+        }
+        for i in 0..n {
+            if self.patches[i].water || self.neighbours[i].iter().any(|&j| self.patches[j].water) {
+                continue;
+            }
+            if self.neighbours[i].iter().all(|&j| self.patches[j].elevation > self.patches[i].elevation) {
+                self.patches[i].water = true;
+                self.patches[i].submersion = 1.0;
+                self.patches[i].moisture = 1.0;
+            }
         }
         for i in 0..n {
             if !self.patches[i].water && self.neighbours[i].iter().any(|&j| self.patches[j].water) {
@@ -1256,15 +1280,24 @@ impl EcoWorld {
         p
     }
 
-    /// Random walk of `hops` steps over the neighbour graph.
+    /// A seed's random walk of `hops` steps, through its parent's medium: a
+    /// submerged plant's spores drift through water and strand on the shore;
+    /// a land plant's seeds blow over land and the shore; a shore plant's
+    /// go either way. (A free walk let every sea alga rain seeds on the
+    /// interior, a gene flow that swamped land adaptation where it began.)
     fn disperse(&mut self, from: usize, reach: f32) -> usize {
+        let class = |sub: f32| -> i8 { if sub >= 1.0 { 2 } else if sub > 0.0 { 1 } else { 0 } };
+        let home = class(self.patches[from].submersion);
         let mut p = from;
         let mut hops = reach.floor() as usize;
         if self.rng.gen_bool((reach.fract()) as f64) {
             hops += 1;
         }
         for _ in 0..hops {
-            let nb = &self.neighbours[p];
+            let nb: Vec<usize> = self.neighbours[p].iter().copied().filter(|&k| (class(self.patches[k].submersion) - home).abs() <= 1).collect();
+            if nb.is_empty() {
+                break;
+            }
             p = nb[self.rng.gen_range(0..nb.len())];
         }
         p
