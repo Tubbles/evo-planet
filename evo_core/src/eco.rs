@@ -1484,6 +1484,14 @@ impl EcoWorld {
 
     pub fn tick(&mut self) {
         self.day += 1;
+        // The trait cache gains an entry per distinct genome born and would
+        // otherwise grow with the cumulative birth count (a booming pond of
+        // sub-milligram bodies filled the machine's memory this way). Keep
+        // only the genomes of living animals, once the dead ones dominate.
+        if self.trait_cache.len() > 2 * self.animals.len() + 1024 {
+            let live: std::collections::HashSet<u64> = self.animals.iter().map(|a| a.key).collect();
+            self.trait_cache.retain(|k, _| live.contains(k));
+        }
         let a = self.patch_area;
         let a_area = a;
         let patch_w = a.sqrt();
