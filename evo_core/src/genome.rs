@@ -181,7 +181,7 @@ pub struct Genome {
 }
 
 fn default_seed_mass() -> f32 {
-    0.000002
+    0.00000002
 }
 fn default_dispersal() -> f32 {
     1.5
@@ -530,7 +530,7 @@ impl Genome {
             water_store: 0.0,
             density: rng.gen_range(100.0..200.0),
             land_tolerance: 0.0,
-            seed_mass: rng.gen_range(0.000001..0.00001),
+            seed_mass: rng.gen_range(0.00000001..0.0000001),
             dispersal: rng.gen_range(0.5..2.5),
             lifespan: rng.gen_range(40.0..400.0),
             repro_frac: rng.gen_range(0.4..0.9),
@@ -659,7 +659,7 @@ impl Genome {
             // Dry-mass density of fresh plant tissue (mostly water): herbs ~50, wood ~300.
             density: rng.gen_range(40.0..200.0),
             land_tolerance: rng.gen_range(0.0..0.2),
-            seed_mass: rng.gen_range(0.0000005..0.00001),
+            seed_mass: rng.gen_range(0.000000005..0.0000001),
             dispersal: rng.gen_range(0.5..3.0),
             lifespan: rng.gen_range(60.0..1200.0),
             repro_frac: rng.gen_range(0.4..0.9),
@@ -725,7 +725,7 @@ impl Genome {
             body = true;
         }
         if rng.gen_bool((p * 2.0) as f64) {
-            g.seed_mass = nudge(rng, g.seed_mass, 0.3, 0.000001, 0.0000005, 0.002);
+            g.seed_mass = nudge(rng, g.seed_mass, 0.3, 0.00000001, 0.000000005, 0.00002);
         }
         if rng.gen_bool((p * 2.0) as f64) {
             g.dispersal = nudge(rng, g.dispersal, 0.3, 0.1, 0.1, 12.0);

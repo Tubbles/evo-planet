@@ -112,7 +112,7 @@ fn effective_leaf_area(leaves: &[(Isometry3<f32>, f32, f32)], total: f32) -> f32
             hi = hi.sup(&w);
         }
     }
-    let extent = (hi - lo).max().max(0.02);
+    let extent = (hi - lo).max().max(0.0002);
     let cell = extent / G as f32;
     let mut counts = vec![0u16; G * G];
     let mut touched: Vec<usize> = Vec::new();
@@ -201,7 +201,7 @@ pub fn decode_plant_with_caps(g: &Genome, gravity: f32, max_len: f32, max_radius
         // A part is `flat` leaf and `1 - flat` stem; whatever is below ground is root.
         let flat = p.flat;
         // Real leaves are 0.1-2 mm thick (SLA 2.5-40 m^2/kg at this density).
-        let thickness = (p.r1 * 0.002).clamp(0.0001, 0.002);
+        let thickness = crate::decode::sheet_thickness(p.r1);
         let area = flat * p.len * 2.0 * p.r0;
         let leaf_m = area * thickness * LEAF_DENSITY;
         let r_cap = 0.5 * (p.r0 + p.r1);
@@ -302,7 +302,7 @@ pub fn decode_plant_with_caps(g: &Genome, gravity: f32, max_len: f32, max_radius
         let path: f32 = ancestors[j].iter().map(|&k| pheno.parts[k].len * (1.0 - pheno.parts[k].flat)).sum();
         transport += masses[j] * pheno.parts[j].flat * path;
     }
-    let target_mass = (leaf_mass + stem_mass + root_mass).max(1e-4);
+    let target_mass = (leaf_mass + stem_mass + root_mass).max(1e-9);
     PlantBody {
         part_count: parts.len(),
         parts,

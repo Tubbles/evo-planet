@@ -1617,7 +1617,7 @@ impl EcoWorld {
                     let lma = 1.0 / sla;
                     let leaf_lifespan = (365.0 * (lma / 0.1).powf(1.5)).clamp(20.0, 2000.0);
                     let shed = leaf_m / leaf_lifespan;
-                    p.biomass = (p.biomass - shed).max(1e-5);
+                    p.biomass = (p.biomass - shed).max(1e-9);
                     litter_today += shed;
                 }
                 p.light_frac = if light > 0.0 { got / (light * a) } else { 0.0 };
