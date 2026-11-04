@@ -42,6 +42,12 @@ def mentions(doc, number):
         forms.add(f"{number:,.0f}".replace(",", " "))
     if 0 < number < 1:
         forms.add(f"{number * 100:g}%")
+    if number >= 1e6:
+        import math
+        e = int(math.floor(math.log10(number)))
+        m = number / 10 ** e
+        forms.add(f"{m:g}e{e}")
+        forms.add(f"{m:.1f}e{e}")
     return any(f in doc for f in forms)
 
 
