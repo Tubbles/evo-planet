@@ -33,7 +33,7 @@ Each decoded part is a slab whose thickness runs geometrically from a capsule's 
 | Trunk density | lung fraction, water store, flatness | trunk density = 1000 × (1 + (1 − flatness) × (water store − 0.9 × lung fraction)); trunk mass = tissue volume × trunk density |
 | Mass ratio clamp | parent mass | a part lighter than parent mass / 30 is raised to parent mass / 30 (solver stability) |
 | Muscle section | parent's cross-section | muscle section = cross-section of the part it hangs from (the root uses its own) |
-| Maximum torque | muscle section, lever arm | maximum torque = 200000 Pa (muscle stress) × muscle section × lever arm, the radius of the segment the muscle sits on; strength scales with size as a real body's does |
+| Maximum torque | muscle section, lever arm | maximum torque = 600000 Pa (muscle stress, three times vertebrate muscle) × muscle section × lever arm, the radius of the segment the muscle sits on; strength scales with size as a real body's does |
 
 ## Body measures (read from geometry, no physics)
 

@@ -17,12 +17,13 @@ pub const MEMBRANE_THICKNESS: f32 = 0.0002;
 pub fn sheet_thickness(r1: f32) -> f32 {
     (r1 * 0.1).clamp(0.00001, 0.002)
 }
-/// Muscle stress, Pa (vertebrate muscle: about 200 kPa). Torque is this
+/// Muscle stress, Pa: three times vertebrate muscle's 200 kPa, a strong
+/// animal by any measure (the dial was turned up to see what strength buys). Torque is this
 /// times the muscle's cross-section times its lever arm, the radius of the
 /// segment it sits on, so a body's strength scales with its size as a real
 /// body's does (a fixed torque per section made centimetre bodies a
 /// hundred times too strong).
-pub const MUSCLE_STRESS: f32 = 200_000.0;
+pub const MUSCLE_STRESS: f32 = 600_000.0;
 /// Animal tissue is water-dense and not evolvable; the genome's density gene
 /// is a plant trait (dry mass per fresh volume).
 pub const ANIMAL_DENSITY: f32 = 1000.0;
