@@ -1260,6 +1260,13 @@ impl EcoWorld {
                 }
                 take_new = !take_new;
             }
+            // Bodies on dry ground or the upper shore are measured before the
+            // sea's: the land is where an unmeasured body's speed decides
+            // whether it eats, and the sea's crowd would otherwise bury them.
+            // (A scheduling choice inside the performance guard, not biology.)
+            let (land, sea): (Vec<_>, Vec<_>) = order.into_iter().partition(|&(idx, _)| self.patches[self.animals[idx].patch].submersion < 0.5);
+            let mut order = sea;
+            order.extend(land);
             // Popped from the back: reverse so the first chosen is popped first.
             order.reverse();
             self.pending = order;
