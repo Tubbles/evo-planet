@@ -17,13 +17,13 @@ fn glider(wing_len: f32, wing_chord: f32, along: f32, incidence_deg: f32, tail: 
     let tail_n = Node { kind: NodeKind::Membrane, flat: 1.0, grip: 0.0, stiffness: 1.0, freedom: 0.0, len: 0.15, r0: 0.05, r1: 0.1, joint: JointKind::Rigid, limit: 0.0, recursive_limit: 1, cpg, connections: vec![] };
     let inc = incidence_deg.to_radians();
     let mut conns = vec![
-        Connection { target: 1, along, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0 + inc, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false },
-        Connection { target: 1, along, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0 + inc, scale: 1.0, reflect: true, terminal_only: false, phase_flip: false },
+        Connection { target: 1, along, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0 + inc, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false, symmetry: evo_core::genome::Symmetry::Single },
+        Connection { target: 1, along, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0 + inc, scale: 1.0, reflect: true, terminal_only: false, phase_flip: false, symmetry: evo_core::genome::Symmetry::Single },
     ];
     if tail {
         // Horizontal stabiliser at the rear tip, level.
-        conns.push(Connection { target: 2, along: 0.02, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false });
-        conns.push(Connection { target: 2, along: 0.02, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0, scale: 1.0, reflect: true, terminal_only: false, phase_flip: false });
+        conns.push(Connection { target: 2, along: 0.02, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false, symmetry: evo_core::genome::Symmetry::Single });
+        conns.push(Connection { target: 2, along: 0.02, around: PI / 2.0, pitch: 0.0, roll: PI / 2.0, scale: 1.0, reflect: true, terminal_only: false, phase_flip: false, symmetry: evo_core::genome::Symmetry::Single });
     }
     let mut body = body;
     body.connections = conns;

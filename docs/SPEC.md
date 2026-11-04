@@ -144,10 +144,12 @@ of elements). The operators, in the order they run:
    small step, one time in five by a large one.
 2. **Nudge the whole-organism genes.** Motility drifts in small steps
    with, one time in ten, a jump of about a third: a flagellum.
-3. **Duplicate a segment** (serial homology): copy a node that is in use,
-   with its attachment and its oscillator, onto the same host, further
-   along it or mirrored. Two legs become four; a fin becomes a pair.
-4. **Add a node** with random genes, attached somewhere reachable.
+3. **Redraw an attachment's symmetry** (rarely). Every attachment carries
+   a symmetry from birth: single, a bilateral pair, or a radial ring of
+   three to six, drawn with pairs most likely and rings next, as life
+   mostly makes. There is no copying of segments after the fact.
+4. **Add a node** with random genes, attached somewhere reachable, with
+   its attachment's symmetry drawn the same way.
 5. **Mutate connections**: nudge their pose, scale and pointers; add or
    remove one.
 6. **Garbage collect** nodes no longer reachable from the root.

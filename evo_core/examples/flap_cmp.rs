@@ -8,9 +8,9 @@ fn bat(feather_amp: f32, feather_phase: f32, freq: f32, sheet: bool, sheet_limit
     let flap = Cpg { amp: 1.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, amp3: feather_amp, phase3: feather_phase, freq_mult: 1.0 };
     let still = Cpg { amp: 0.0, phase: 0.0, bias: 0.0, amp2: 0.0, phase2: 0.0, amp3: 0.0, phase3: 0.0, freq_mult: 1.0 };
     let trunk = Node { kind: NodeKind::Capsule, len: 0.25, r0: 0.03, r1: 0.021, joint: JointKind::Rigid, flat: 0.0, grip: 0.0, stiffness: 1.0, freedom: 0.0, limit: 0.3, recursive_limit: 1, cpg: still,
-        connections: vec![Connection { target: 1, along: 0.6, around: a, pitch: 0.0, roll: a, scale: 1.0, reflect: true, terminal_only: false, phase_flip: false }] };
+        connections: vec![Connection { target: 1, along: 0.6, around: a, pitch: 0.0, roll: a, scale: 1.0, reflect: true, terminal_only: false, phase_flip: false, symmetry: evo_core::genome::Symmetry::Single }] };
     let arm = Node { kind: NodeKind::Capsule, len: 0.5, r0: 0.012, r1: 0.008, joint: JointKind::Ball, flat: 0.0, grip: 0.0, stiffness: 0.0, freedom: 1.0, limit: 1.2, recursive_limit: 1, cpg: flap,
-        connections: vec![Connection { target: 2, along: 1.0, around: -PI, pitch: 0.0, roll: -PI, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false }] };
+        connections: vec![Connection { target: 2, along: 1.0, around: -PI, pitch: 0.0, roll: -PI, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false, symmetry: evo_core::genome::Symmetry::Single }] };
     let (flat, r0, r1) = if sheet { (1.0, 0.5, 0.1) } else { (0.0, 0.0056, 0.0056) };
     let wing = Node { kind: if sheet { NodeKind::Membrane } else { NodeKind::Capsule }, len: 0.5, r0, r1, joint: JointKind::Rigid, flat, grip: 0.0, stiffness: 1.0, freedom: 0.0, limit: sheet_limit, recursive_limit: 1, cpg: still, connections: vec![] };
     let mut g = Genome::random(1);

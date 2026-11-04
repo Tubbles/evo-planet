@@ -9,13 +9,13 @@ A directed graph of nodes and connections (Sims style) plus whole-organism genes
 | Quantity | Depends on | Equation or definition |
 |---|---|---|
 | Node genes | — | length, base radius, tip radius, flatness, grip, joint stiffness, joint freedom, joint limit, recursion limit, oscillator {amplitude, amplitude 2, amplitude 3, phase, phase 2, phase 3, frequency multiplier} |
-| Connection genes | — | target node, position along the host, angle around the host, pitch, roll, scale, reflect, phase flip, terminal only |
+| Connection genes | — | target node, position along the host, angle around the host, pitch, roll, scale, reflect (the side of a single child), phase flip, terminal only, symmetry: single (one child), bilateral (a mirrored pair, the mirror half a cycle out of phase when phase flip is set) or radial 3 to 6 (a ring around the host's axis, phases spread around the ring when phase flip is set) |
 | Whole-organism genes | — | base frequency, lung fraction, water store, land tolerance (cuticle or waterproof skin), motility, breathing (gills 0 to lungs 1), heterotrophy, gut type (plant 0 to meat 1), gut fraction, fat fraction, offspring fraction, reproduction fraction, longevity, lifespan (sessile), leaf toughness, seed mass, dispersal, density (plants) |
 | Per-gene mutation chance | genome size | element count = Σ over nodes (8 + 9 × connections) + 4 ; base chance p = clamp(1.5 / element count, 0.02, 0.35) ; each gene is hit with chance k × p, k between 0.4 and 3 by gene |
 | Animal body-gene rate | base chance | body genes (sizes, forms, joints, structure, lungs, water store, motility, density) use 0.2 × p |
 | Flatness step | — | ±0.03 (one time in five ±0.15); grip, stiffness, freedom ±0.1 (one in five ±0.4); sizes nudged by about 20% |
 | When mutation happens | reproduction | plants: every seed; animals: 3 births in 4; never during life |
-| Structural operators | — | duplicate a used segment (serial or mirrored, keeping its oscillator); add a random node; add or remove a connection; collect unreachable nodes. Limits: 32 nodes, 6 connections per node, 128 parts, depth 14 |
+| Structural operators | — | add a random node (attached at once 7 times in 10); add or remove a connection; redraw an attachment's symmetry (0.4 × body rate); collect unreachable nodes. A new attachment is born symmetric: bilateral 45%, radial 30%, single 25%. Limits: 32 nodes, 6 connections per node, 128 parts, depth 14 |
 
 ## Part geometry
 

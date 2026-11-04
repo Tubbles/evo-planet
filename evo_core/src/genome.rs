@@ -81,6 +81,45 @@ pub struct Connection {
     /// Mirrored children get a half-cycle phase offset (alternating gait)
     /// instead of moving in phase (bounding, flapping).
     pub phase_flip: bool,
+    /// How many copies of the child this attachment makes and how they are
+    /// arranged: one, a mirrored pair, or a ring. A new segment is born
+    /// symmetric, as in life, instead of being copied later.
+    #[serde(default)]
+    pub symmetry: Symmetry,
+}
+
+/// The symmetry of an attachment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Symmetry {
+    /// One child, on the side `reflect` says.
+    #[default]
+    Single,
+    /// A mirrored pair across the parent's plane.
+    Bilateral,
+    /// This many children spaced evenly around the parent's axis (3 to 6).
+    Radial(u8),
+}
+
+impl Symmetry {
+    /// Weighted draw: pairs most often, rings next, a single part least, as
+    /// bilateral and radial plans are what life mostly makes.
+    pub fn random(rng: &mut StdRng) -> Self {
+        let x: f32 = rng.gen_range(0.0..1.0);
+        if x < 0.45 {
+            Symmetry::Bilateral
+        } else if x < 0.75 {
+            Symmetry::Radial(rng.gen_range(3..=6))
+        } else {
+            Symmetry::Single
+        }
+    }
+    pub fn copies(self) -> usize {
+        match self {
+            Symmetry::Single => 1,
+            Symmetry::Bilateral => 2,
+            Symmetry::Radial(n) => n.clamp(3, 6) as usize,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -286,6 +325,7 @@ impl Connection {
             reflect: rng.gen_bool(0.5),
             terminal_only: rng.gen_bool(0.2),
             phase_flip: rng.gen_bool(0.5),
+            symmetry: Symmetry::random(rng),
         }
     }
 
@@ -326,6 +366,10 @@ impl Connection {
         }
         if rng.gen_bool((p * 0.5) as f64) {
             self.phase_flip = !self.phase_flip;
+        }
+        if rng.gen_bool((p * 0.4) as f64) {
+            self.symmetry = Symmetry::random(rng);
+            body = true;
         }
         body
     }
@@ -610,6 +654,7 @@ impl Genome {
                 reflect: false,
                 terminal_only: false,
                 phase_flip: false,
+                symmetry: Symmetry::Single,
             });
         }
         let n_leaf = rng.gen_range(1..=3);
@@ -624,6 +669,7 @@ impl Genome {
                 reflect: rng.gen_bool(0.7),
                 terminal_only: rng.gen_bool(0.3),
                 phase_flip: false,
+                symmetry: Symmetry::Single,
             });
         }
         nodes[0].connections.push(Connection {
@@ -636,6 +682,7 @@ impl Genome {
             reflect: rng.gen_bool(0.6),
             terminal_only: false,
             phase_flip: false,
+            symmetry: Symmetry::Single,
         });
         if rng.gen_bool(0.5) {
             nodes[2].connections.push(Connection {
@@ -648,6 +695,7 @@ impl Genome {
                 reflect: false,
                 terminal_only: false,
                 phase_flip: false,
+                symmetry: Symmetry::Single,
             });
         }
         Self {
@@ -772,40 +820,8 @@ impl Genome {
             body = true;
         }
 
-        // Duplicate a segment (serial homology): copy a used node with its
-        // attachment onto the same host, shifted along the host or mirrored,
-        // keeping its oscillator. Two legs become four; a fin becomes a pair.
-        // This is how limbs multiply in animals, by duplication of a working
-        // module, not by inventing a random one.
-        if g.nodes.len() < MAX_NODES && rng.gen_bool((pb * 2.0) as f64) {
-            let hosts: Vec<(usize, usize)> = g
-                .nodes
-                .iter()
-                .enumerate()
-                .flat_map(|(h, n)| n.connections.iter().enumerate().map(move |(ci, _)| (h, ci)))
-                .filter(|&(h, ci)| g.nodes[h].connections[ci].target != h && g.nodes[h].connections.len() < MAX_CONNECTIONS_PER_NODE)
-                .collect();
-            if !hosts.is_empty() {
-                let (h, ci) = hosts[rng.gen_range(0..hosts.len())];
-                let src = g.nodes[h].connections[ci];
-                let copy = g.nodes[src.target].clone();
-                let new_idx = g.nodes.len();
-                g.nodes.push(copy);
-                let mut c = src;
-                c.target = new_idx;
-                if rng.gen_bool(0.5) {
-                    // Serial: further along the host, same side.
-                    c.along = (c.along + rng.gen_range(-0.4..0.4f32)).clamp(0.0, 1.0);
-                    c.phase_flip = rng.gen_bool(0.5);
-                } else {
-                    // Bilateral: the mirror image, in antiphase half the time.
-                    c.reflect = !c.reflect;
-                    c.phase_flip = rng.gen_bool(0.5);
-                }
-                g.nodes[h].connections.push(c);
-                body = true;
-            }
-        }
+        // (Segments are not copied after the fact: an attachment carries its
+        // symmetry from birth, single, bilateral or radial, see `Symmetry`.)
 
         // Add a node (initially unconnected unless a pointer mutates to it).
         if g.nodes.len() < MAX_NODES && rng.gen_bool((pb * 2.0) as f64) {

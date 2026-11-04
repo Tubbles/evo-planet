@@ -4,7 +4,7 @@
 //! +Y with the attachment (joint) point at the base, y = -len/2. Membranes
 //! span Y, have chord along X and their panel normal along Z.
 
-use crate::genome::{Cpg, Genome, JointKind, NodeKind};
+use crate::genome::{Cpg, Genome, JointKind, NodeKind, Symmetry};
 use rapier3d::na::{UnitQuaternion, UnitVector3, Vector3};
 use std::f32::consts::PI;
 
@@ -224,29 +224,41 @@ impl<'a> Ctx<'a> {
             if c.terminal_only && !is_last {
                 continue;
             }
-            let mirror = reflected ^ c.reflect;
-            // Surface attachment point on this part.
-            let around = if c.reflect { -c.around } else { c.around };
-            let roll = if c.reflect { -c.roll } else { c.roll };
-            let y = -len * 0.5 + c.along * len;
-            let (nx, nz) = (around.cos(), around.sin());
-            let surface_r = radius * (1.0 - flat);
-            let anchor = Vector3::new(nx * surface_r, y, nz * surface_r);
-            let normal = Vector3::new(nx, 0.0, nz);
-            // Tilt the child from the outward normal toward this part's tip.
-            let dir = normal * c.pitch.cos() + Vector3::y() * c.pitch.sin();
-            let rot = frame_from_dir(&dir, roll);
-            let child_phase = phase_shift + if c.reflect && c.phase_flip { PI } else { 0.0 };
-            let child_scale = (scale * c.scale).clamp(0.15, 2.0);
-            // Each connection follows the same recursion counters, so
-            // snapshot and restore for sibling branches (Sims-style per-path
-            // counting).
-            let saved = self.counts.clone();
-            self.expand(c.target, Some(idx), child_scale, anchor, rot, mirror, child_phase, depth + 1);
-            // Only restore counters for nodes other than those in the chain
-            // just expanded? Sims counts per recursive cycle along a path, so
-            // restore fully: siblings start from the same counts.
-            self.counts = saved;
+            // The attachment's symmetry: one child on the side `reflect`
+            // says; a mirrored pair; or a ring of children spaced around the
+            // axis. Each copy is (mirrored, extra angle around, phase offset).
+            let copies: Vec<(bool, f32, f32)> = match c.symmetry {
+                Symmetry::Single => vec![(c.reflect, 0.0, 0.0)],
+                Symmetry::Bilateral => vec![(false, 0.0, 0.0), (true, 0.0, if c.phase_flip { PI } else { 0.0 })],
+                Symmetry::Radial(n) => {
+                    let n = n.clamp(3, 6) as usize;
+                    (0..n).map(|i| (false, 2.0 * PI * i as f32 / n as f32, if c.phase_flip { 2.0 * PI * i as f32 / n as f32 } else { 0.0 })).collect()
+                }
+            };
+            for (mirrored, extra_around, phase_offset) in copies {
+                let mirror = reflected ^ mirrored;
+                // Surface attachment point on this part.
+                let around = (if mirrored { -c.around } else { c.around }) + extra_around;
+                let roll = if mirrored { -c.roll } else { c.roll };
+                let y = -len * 0.5 + c.along * len;
+                let (nx, nz) = (around.cos(), around.sin());
+                let surface_r = radius * (1.0 - flat);
+                let anchor = Vector3::new(nx * surface_r, y, nz * surface_r);
+                let normal = Vector3::new(nx, 0.0, nz);
+                // Tilt the child from the outward normal toward this part's tip.
+                let dir = normal * c.pitch.cos() + Vector3::y() * c.pitch.sin();
+                let rot = frame_from_dir(&dir, roll);
+                let child_phase = phase_shift + phase_offset;
+                let child_scale = (scale * c.scale).clamp(0.15, 2.0);
+                // Each connection follows the same recursion counters, so
+                // snapshot and restore for sibling branches (Sims-style per-path
+                // counting).
+                let saved = self.counts.clone();
+                self.expand(c.target, Some(idx), child_scale, anchor, rot, mirror, child_phase, depth + 1);
+                // Sims counts per recursive cycle along a path, so restore
+                // fully: siblings start from the same counts.
+                self.counts = saved;
+            }
         }
     }
 }
