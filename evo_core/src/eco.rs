@@ -341,6 +341,11 @@ pub struct Patch {
     pub water: bool,
     /// Land patch touching water.
     pub shore: bool,
+    /// Where on the intertidal band a shore cell lies, 0 at the low-water
+    /// mark (under water most of the day) to 1 at the high-water mark (dry
+    /// most of the day), by elevation rank among the shore cells.
+    #[serde(default)]
+    pub shore_level: f32,
     pub moisture: f32,
     pub nutrient: f32,
     /// Plant detritus, kg.
@@ -687,6 +692,7 @@ impl EcoWorld {
             history: c.history,
         };
         w.arena_seen = w.arena_cache.keys().copied().collect();
+        set_shore_levels(&mut w.patches);
         for i in 0..w.animals.len() {
             w.request_traits(i);
         }
@@ -705,6 +711,25 @@ impl EcoWorld {
         let c: Checkpoint = bincode::deserialize(&bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         Ok(Self::restore(c))
     }
+}
+
+/// Rank each shore cell on the intertidal band by elevation: the lowest
+/// shore cell is the low-water mark (level 0), the highest the high-water
+/// mark (level 1).
+fn set_shore_levels(patches: &mut [Patch]) {
+    let mut shore: Vec<usize> = (0..patches.len()).filter(|&i| patches[i].shore).collect();
+    shore.sort_by(|&a, &b| patches[a].elevation.partial_cmp(&patches[b].elevation).unwrap());
+    let n = shore.len().max(2) as f32 - 1.0;
+    for (rank, &i) in shore.iter().enumerate() {
+        patches[i].shore_level = rank as f32 / n;
+    }
+}
+
+/// A shore cell's submersion today: under water most of the day at the
+/// low-water mark, barely at the high-water mark, swinging with the
+/// spring-neap cycle.
+fn shore_submersion(level: f32, tide: f32) -> f32 {
+    (0.9 - 0.8 * level + (tide - 0.5)).clamp(0.05, 0.95)
 }
 
 fn temp_factor(temp_c: f32) -> f32 {
@@ -916,7 +941,7 @@ impl EcoWorld {
                 } else {
                     (planet.humidity * 0.8 * (1.0 - 0.45 * (elevation / 4000.0).clamp(0.0, 1.0))).clamp(0.02, 1.0)
                 };
-                Patch { pos: positions[i], elevation, temp_c, water, shore: false, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 }, light_left: 1.0, bacteria: 0.0, motile_area: 0.0 }
+                Patch { pos: positions[i], elevation, temp_c, water, shore: false, shore_level: 0.0, moisture, nutrient: NUTRIENT0_PER_M2 * patch_area, dead_matter: DEAD0_PER_M2 * patch_area, carrion: 0.0, canopy: 0.0, submersion: if water { 1.0 } else { 0.0 }, light_left: 1.0, bacteria: 0.0, motile_area: 0.0 }
             })
             .collect();
         // Fresh water: an inland basin (a land cell lower than every
@@ -942,6 +967,12 @@ impl EcoWorld {
                 patches[i].shore = true;
                 patches[i].submersion = 0.5;
                 patches[i].moisture = patches[i].moisture.max(0.85);
+            }
+        }
+        set_shore_levels(&mut patches);
+        for i in 0..n {
+            if patches[i].shore {
+                patches[i].submersion = shore_submersion(patches[i].shore_level, 0.5);
             }
         }
 
@@ -1118,6 +1149,7 @@ impl EcoWorld {
                 self.patches[i].moisture = self.patches[i].moisture.max(0.85);
             }
         }
+        set_shore_levels(&mut self.patches);
         // Land plants under new sea die; everything else adjusts its cap.
         let g = self.planet.gravity;
         let mut i = 0;
@@ -1675,7 +1707,7 @@ impl EcoWorld {
         for p in self.patches.iter_mut() {
             p.canopy = 0.0;
             if p.shore {
-                p.submersion = tide;
+                p.submersion = shore_submersion(p.shore_level, tide);
             }
         }
         for p in &self.plants {
@@ -2204,11 +2236,11 @@ impl EcoWorld {
                 // air's moisture: a tenth of a millimetre or so a night.
                 let dew = surface * DEW_KG_PER_M2 * moisture * (1.0 - sub);
                 a.water = (a.water - loss + food_water + dew).min(0.0);
-                // Open water, in it or beside it, is drunk to the fill. Humid
-                // ground is not a drink: inland the water is in the food.
-                if sub > 0.0 {
-                    a.water = 0.0;
-                }
+                // Open water is drunk to the fill for the share of the day the
+                // body is in it (all of it at sea, a tenth at the high-water
+                // mark). Humid ground is not a drink: inland the water is in the
+                // food.
+                a.water *= 1.0 - sub;
             }
 
             // --- movement: when hungry, toward the best reachable neighbour --------
