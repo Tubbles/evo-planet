@@ -1826,7 +1826,12 @@ impl EcoWorld {
             let land_speed = land_speed_raw * motility * lin_f * (1.0 - 0.3 * plating);
             // Flight: over land a flier covers ground at its air speed (plating
             // is dead weight here too). It lands to eat, so bite and reach are unchanged.
-            let air_speed = air_speed_raw * motility * lin_f * (1.0 - 0.3 * plating);
+            // Flight over the ground is the stroke's: a body falling from a
+            // launch moves through the air too, but only the lift its wings
+            // beat (a metre of powered lift over the held wing is sustained
+            // flight) carries it anywhere.
+            let powered = self.animals[ai].traits.flap_lift.clamp(0.0, 1.0);
+            let air_speed = air_speed_raw * motility * lin_f * (1.0 - 0.3 * plating) * powered;
             let travel = if in_water { speed_here } else { speed_here.max(air_speed) };
 
             // --- costs -------------------------------------------------------
@@ -2331,11 +2336,11 @@ impl EcoWorld {
                 // A glider reaches the next patch when a launch carries it ten metres;
                 // a flier ranges over everything within an hour's flight.
                 let can_glide_over = measured_air && glide_ratio * launch_h >= patch_w;
-                let flier = measured_air && air_speed_raw * motility > 0.0;
+                let flier = measured_air && air_speed > 0.0;
                 // Relocation is a distance: a flier an hour's flight, a crawler or
                 // swimmer its day's path, in cells of this width; the move is paid
                 // per cell crossed at the gait's measured cost of transport.
-                let reloc_m = path.max(air_speed_raw * motility * 3600.0);
+                let reloc_m = path.max(air_speed * 3600.0);
                 let range_hops = ((reloc_m / patch_w).round() as usize).clamp(1, 12);
                 // Breadth-first over the neighbour graph up to range_hops, each
                 // cell with the number of cells crossed to reach it.
@@ -2661,7 +2666,7 @@ impl EcoWorld {
             // Gliding means a glide angle under 45 degrees (ratio >= 1: ten metres
             // beyond the stone from ten metres up). Below that it is parachuting:
             // a tumbling plate drifts a metre or two and is not a glider.
-            if a.traits.air_speed > 0.0 || a.traits.glide_distance >= crate::sim::AIR_DROP_HEIGHT {
+            if a.traits.flap_lift >= 0.5 || a.traits.glide_distance >= crate::sim::AIR_DROP_HEIGHT {
                 s.fliers += 1;
             }
             if a.traits.flap_lift >= 0.5 {
