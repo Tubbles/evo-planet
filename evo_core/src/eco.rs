@@ -686,6 +686,9 @@ fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut tr
         let hold = SimConfig { episode_time: TRAIT_EPISODE_S, amp_scale: 0.0, ..Default::default() };
         hold_air = Some(CreatureSim::run_episode(pheno, planet, env, hold));
         0.0
+    } else if r.sustained_speed < 0.005 && env != Environment::Shore {
+        // No progress under power: nothing for the control to subtract.
+        0.0
     } else {
         let sham = SimConfig { episode_time: TRAIT_EPISODE_S, motors: false, ..Default::default() };
         let c = CreatureSim::run_episode(pheno, planet, env, sham);
@@ -1506,6 +1509,23 @@ impl EcoWorld {
             reserve0: f32,
         }
         let mut births: Vec<Birth> = Vec::new();
+        // What each body offers a grazer as a sheet, computed once: its
+        // accessible leaf mass and its speed in its own cell.
+        let sheet_info: Vec<(f32, f32)> = self
+            .animals
+            .iter()
+            .map(|s| {
+                if s.traits.membrane_mass <= 0.0 || s.mass <= 0.002 {
+                    return (0.0, 0.0);
+                }
+                let s_lin = (s.mass / s.traits.mass.max(1e-3)).clamp(0.01, 1.0).powf(1.0 / 3.0);
+                let s_sub = self.patches[s.patch].submersion;
+                let s_speed = (s.traits.water_speed * s_sub + s.traits.land_speed * (1.0 - s_sub)) * s.genome.motility.clamp(0.0, 1.0) * s_lin;
+                let leaf = (s.traits.membrane_mass / s.traits.mass.max(1e-3)).min(1.0) * (s.mass - 0.002);
+                let tough = s.genome.leaf_toughness.clamp(0.0, 1.0);
+                (leaf * 0.5 * (1.0 - 0.8 * tough), s_speed)
+            })
+            .collect();
         let mut killed: Vec<usize> = Vec::new();
         // Flag per animal, so the checks below stay constant time (a list scan
         // made a day of grazing deaths quadratic).
@@ -1820,17 +1840,12 @@ impl EcoWorld {
                 if j == ai || killed_flag[j] {
                     continue;
                 }
-                let s = &self.animals[j];
-                if s.traits.membrane_mass <= 0.0 || s.mass <= 0.002 {
+                let (base, s_speed) = sheet_info[j];
+                if base <= 0.0 {
                     continue;
                 }
-                let s_lin = (s.mass / s.traits.mass.max(1e-3)).clamp(0.01, 1.0).powf(1.0 / 3.0);
-                let s_sub = self.patches[s.patch].submersion;
-                let s_speed = (s.traits.water_speed * s_sub + s.traits.land_speed * (1.0 - s_sub)) * s.genome.motility.clamp(0.0, 1.0) * s_lin;
                 let keep_up = if speed_here > 0.0 { (1.0 - s_speed / speed_here).clamp(0.0, 1.0) } else if s_speed <= 0.0 { 1.0 } else { 0.0 };
-                let leaf = (s.traits.membrane_mass / s.traits.mass.max(1e-3)).min(1.0) * (s.mass - 0.002);
-                let tough = s.genome.leaf_toughness.clamp(0.0, 1.0);
-                let acc = leaf * 0.5 * (1.0 - 0.8 * tough) * keep_up;
+                let acc = base * keep_up;
                 if acc > 0.0 {
                     sheet_targets.push((j, acc));
                     plant_b += acc;
