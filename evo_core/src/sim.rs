@@ -743,6 +743,8 @@ impl CreatureSim {
 
         let mut params = IntegrationParameters::default();
         params.dt = cfg.dt;
+        // Bodies are centimetres: the solver's tolerances scale with this.
+        params.length_unit = 0.01;
         params.num_solver_iterations = std::num::NonZeroUsize::new(8).unwrap();
 
         let start_com = Vector3::zeros();
@@ -911,7 +913,7 @@ impl CreatureSim {
     }
 
     pub fn is_airborne(&self) -> bool {
-        self.lowest_point() > self.ground_at(self.com().x) + 0.08
+        self.lowest_point() > self.ground_at(self.com().x) + 0.004
     }
 
     fn update_motors(&mut self) {
@@ -984,7 +986,7 @@ impl CreatureSim {
                 let half = iso.rotation * Vector3::new(0.0, p.len * 0.5, 0.0);
                 let r = if p.flat > 0.5 { (p.thickness * 0.5).max(MEMBRANE_THICKNESS * 0.5) } else { p.radius };
                 let low = (iso.translation.vector + half).y.min((iso.translation.vector - half).y) - r;
-                let down = low <= self.ground_at(iso.translation.x) + 0.02;
+                let down = low <= self.ground_at(iso.translation.x) + 0.001;
                 if i == 0 {
                     if down {
                         self.trunk_contact_steps += 1;
@@ -1159,7 +1161,8 @@ mod tests {
             flat: 0.0, grip: 0.0, stiffness: 0.0, freedom: 1.0, limit: 1.2, recursive_limit: 1, cpg: flap,
             connections: vec![Connection { target: 2, along: 1.0, around: -PI, pitch: 0.0, roll: -PI, scale: 1.0, reflect: false, terminal_only: false, phase_flip: false }],
         };
-        let (flat, r0, r1) = if sheet { (1.0, 0.5, 0.1) } else { (0.0, 0.0056, 0.0056) };
+        // A wing sheet 0.2 mm thick (the thickness gene is a tenth of the tip radius).
+        let (flat, r0, r1) = if sheet { (1.0, 0.5, 0.002) } else { (0.0, 0.0056, 0.0056) };
         let wing = Node {
             kind: if sheet { NodeKind::Membrane } else { NodeKind::Capsule }, len: 0.5, r0, r1, joint: JointKind::Rigid,
             flat, grip: 0.0, stiffness: 1.0, freedom: 0.0, limit: 0.3, recursive_limit: 1, cpg: still, connections: vec![],

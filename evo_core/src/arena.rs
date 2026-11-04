@@ -180,7 +180,7 @@ impl ArenaSim {
         // lengths whatever the pair's sizes. A fixed metre made every slow
         // small predator fail by distance alone; a gap in the prey's size
         // put a two-metre ribbon out of any small mouth's reach.
-        let dist = reach_p + reach_q + 3.0 * reach_p + 0.05;
+        let dist = reach_p + reach_q + 3.0 * reach_p + 0.001;
         let zero = Vector3::zeros();
         // Each body is turned so that its own travel direction points along
         // +X: the predator at the prey, the prey away (then perturbed).
@@ -193,6 +193,7 @@ impl ArenaSim {
         let _ = fatigue_factor;
         let mut params = IntegrationParameters::default();
         params.dt = 1.0 / 120.0;
+        params.length_unit = 0.01;
         params.num_solver_iterations = std::num::NonZeroUsize::new(8).unwrap();
         let ctx = WorldCtx { rho_air: derived.air_density, rho_water: derived.water_density, g: planet.gravity, water_level, ground_y, slope: 0.0, dt: params.dt };
         let mut sim = Self {
@@ -288,7 +289,7 @@ impl ArenaSim {
             }
             let tip = self.axis_point(&self.pred, i, 1.0);
             for j in 0..self.prey.pheno.parts.len() {
-                if self.gap_to_part(&self.prey, j, tip) <= p.radius + 0.01 {
+                if self.gap_to_part(&self.prey, j, tip) <= p.radius + 0.001 {
                     claw = true;
                 }
             }

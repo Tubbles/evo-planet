@@ -15,11 +15,11 @@ use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
-pub const MAX_NODES: usize = 10;
-pub const MAX_CONNECTIONS_PER_NODE: usize = 4;
-pub const MIN_DIM: f32 = 0.04;
-pub const MAX_LEN: f32 = 2.0;
-pub const MAX_RADIUS: f32 = 0.5;
+pub const MAX_NODES: usize = 32;
+pub const MAX_CONNECTIONS_PER_NODE: usize = 6;
+pub const MIN_DIM: f32 = 0.001;
+pub const MAX_LEN: f32 = 0.01;
+pub const MAX_RADIUS: f32 = 0.0027;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeKind {
@@ -181,7 +181,7 @@ pub struct Genome {
 }
 
 fn default_seed_mass() -> f32 {
-    0.02
+    0.000002
 }
 fn default_dispersal() -> f32 {
     1.5
@@ -509,9 +509,9 @@ impl Genome {
     pub fn random_alga(rng: &mut StdRng) -> Self {
         let sheet = Node {
             kind: NodeKind::Membrane,
-            len: rng.gen_range(0.5..1.5),
-            r0: rng.gen_range(0.2..0.6),
-            r1: rng.gen_range(0.1..0.4), // thickness gene (x0.01 m)
+            len: rng.gen_range(0.0017..0.005),
+            r0: rng.gen_range(0.0007..0.002),
+            r1: rng.gen_range(0.0003..0.0013), // thickness gene
             joint: JointKind::Rigid,
             flat: 1.0,
             grip: 0.0,
@@ -530,7 +530,7 @@ impl Genome {
             water_store: 0.0,
             density: rng.gen_range(100.0..200.0),
             land_tolerance: 0.0,
-            seed_mass: rng.gen_range(0.001..0.01),
+            seed_mass: rng.gen_range(0.000001..0.00001),
             dispersal: rng.gen_range(0.5..2.5),
             lifespan: rng.gen_range(40.0..400.0),
             repro_frac: rng.gen_range(0.4..0.9),
@@ -553,9 +553,9 @@ impl Genome {
     pub fn random_plant(rng: &mut StdRng) -> Self {
         let trunk = Node {
             kind: NodeKind::Capsule,
-            len: rng.gen_range(0.3..1.2),
-            r0: rng.gen_range(0.02..0.05),
-            r1: rng.gen_range(0.02..0.04),
+            len: rng.gen_range(0.001..0.004),
+            r0: rng.gen_range(0.0004..0.0008),
+            r1: rng.gen_range(0.0004..0.0008),
             joint: JointKind::Rigid,
             flat: 0.0,
             grip: 0.0,
@@ -568,8 +568,8 @@ impl Genome {
         };
         let leaf = Node {
             kind: NodeKind::Membrane,
-            len: rng.gen_range(0.3..1.0),
-            r0: rng.gen_range(0.1..0.5),
+            len: rng.gen_range(0.001..0.0033),
+            r0: rng.gen_range(0.0004..0.0017),
             r1: rng.gen_range(0.02..0.12), // leaf thickness gene (x0.01 m)
             joint: JointKind::Rigid,
             flat: 1.0,
@@ -659,7 +659,7 @@ impl Genome {
             // Dry-mass density of fresh plant tissue (mostly water): herbs ~50, wood ~300.
             density: rng.gen_range(40.0..200.0),
             land_tolerance: rng.gen_range(0.0..0.2),
-            seed_mass: rng.gen_range(0.0005..0.01),
+            seed_mass: rng.gen_range(0.0000005..0.00001),
             dispersal: rng.gen_range(0.5..3.0),
             lifespan: rng.gen_range(60.0..1200.0),
             repro_frac: rng.gen_range(0.4..0.9),
@@ -725,7 +725,7 @@ impl Genome {
             body = true;
         }
         if rng.gen_bool((p * 2.0) as f64) {
-            g.seed_mass = nudge(rng, g.seed_mass, 0.3, 0.001, 0.0005, 2.0);
+            g.seed_mass = nudge(rng, g.seed_mass, 0.3, 0.000001, 0.0000005, 0.002);
         }
         if rng.gen_bool((p * 2.0) as f64) {
             g.dispersal = nudge(rng, g.dispersal, 0.3, 0.1, 0.1, 12.0);

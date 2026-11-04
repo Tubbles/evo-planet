@@ -8,17 +8,21 @@ use crate::genome::{Cpg, Genome, JointKind, NodeKind};
 use rapier3d::na::{UnitQuaternion, UnitVector3, Vector3};
 use std::f32::consts::PI;
 
-pub const MAX_PARTS: usize = 24;
+pub const MAX_PARTS: usize = 128;
 pub const MAX_DEPTH: usize = 14;
-pub const MEMBRANE_THICKNESS: f32 = 0.02;
+pub const MEMBRANE_THICKNESS: f32 = 0.0002;
 /// A sheet's thickness comes from its `r1` gene, the same mapping the plant
 /// decoder uses for leaves (0.1-2 mm), times tissue density: 0.1-2 kg/m^2.
 /// A bird's wing with its bone is about 1 kg/m^2; an alga sheet a tenth.
 pub fn sheet_thickness(r1: f32) -> f32 {
-    (r1 * 0.002).clamp(0.0001, 0.002)
+    (r1 * 0.1).clamp(0.00001, 0.002)
 }
-/// Muscle strength per unit cross-section (N*m per m^2 of limb section).
-pub const STRENGTH_PER_AREA: f32 = 4000.0;
+/// Muscle stress, Pa (vertebrate muscle: about 200 kPa). Torque is this
+/// times the muscle's cross-section times its lever arm, the radius of the
+/// segment it sits on, so a body's strength scales with its size as a real
+/// body's does (a fixed torque per section made centimetre bodies a
+/// hundred times too strong).
+pub const MUSCLE_STRESS: f32 = 200_000.0;
 /// Animal tissue is water-dense and not evolvable; the genome's density gene
 /// is a plant trait (dry mass per fresh volume).
 pub const ANIMAL_DENSITY: f32 = 1000.0;
@@ -150,9 +154,9 @@ impl<'a> Ctx<'a> {
         // Animal parts are small: at most 40 cm long and 8 cm in radius (a
         // part of a few kilograms at the largest), so a body is many cheap
         // segments rather than one great one.
-        let len = (node.len * scale).clamp(0.01, self.max_len);
-        let r0 = (node.r0 * scale).clamp(0.004, self.max_radius);
-        let r1 = (node.r1 * scale).clamp(0.004, self.max_radius);
+        let len = (node.len * scale).clamp(MIN_LEN, self.max_len);
+        let r0 = (node.r0 * scale).clamp(MIN_RADIUS, self.max_radius);
+        let r1 = (node.r1 * scale).clamp(MIN_RADIUS, self.max_radius);
         let flat = node.flat();
         let grip = node.grip();
         let stiffness = node.stiffness();
@@ -180,7 +184,8 @@ impl<'a> Ctx<'a> {
         // chest), so torque scales with the parent's section, not the part's
         // own: a thin wing bone is moved by a thick chest.
         let muscle_section = parent.map(|q| self.parts[q].section_area).unwrap_or(section_area);
-        let max_torque = STRENGTH_PER_AREA * muscle_section;
+        let lever = parent.map(|q| self.parts[q].radius).unwrap_or(radius);
+        let max_torque = MUSCLE_STRESS * muscle_section * lever;
 
         let mut cpg = node.cpg;
         cpg.phase += phase_shift;
@@ -245,13 +250,15 @@ impl<'a> Ctx<'a> {
     }
 }
 
-/// Largest animal part: 40 cm long, 8 cm in radius (a few kilograms), so an
-/// animal is many cheap segments rather than one great one.
-pub const ANIMAL_MAX_LEN: f32 = 0.4;
-pub const ANIMAL_MAX_RADIUS: f32 = 0.08;
-/// Plants keep the old range (a stem can be metres).
-pub const PLANT_MAX_LEN: f32 = 3.0;
-pub const PLANT_MAX_RADIUS: f32 = 0.8;
+/// Largest part, animal or plant: one centimetre long, 2.7 mm in radius
+/// (a part of at most a fifth of a gram), so a body is many cheap
+/// segments rather than one great one; the smallest is a millimetre.
+pub const ANIMAL_MAX_LEN: f32 = 0.01;
+pub const ANIMAL_MAX_RADIUS: f32 = 0.0027;
+pub const PLANT_MAX_LEN: f32 = 0.01;
+pub const PLANT_MAX_RADIUS: f32 = 0.0027;
+pub const MIN_LEN: f32 = 0.001;
+pub const MIN_RADIUS: f32 = 0.0004;
 
 pub fn decode(g: &Genome) -> Phenotype {
     decode_with_caps(g, ANIMAL_MAX_LEN, ANIMAL_MAX_RADIUS)

@@ -15,7 +15,7 @@ A directed graph of nodes and connections (Sims style) plus whole-organism genes
 | Animal body-gene rate | base chance | body genes (sizes, forms, joints, structure, lungs, water store, motility, density) use 0.2 × p |
 | Flatness step | — | ±0.03 (one time in five ±0.15); grip, stiffness, freedom ±0.1 (one in five ±0.4); sizes nudged by about 20% |
 | When mutation happens | reproduction | plants: every seed; animals: 3 births in 4; never during life |
-| Structural operators | — | duplicate a used segment (serial or mirrored, keeping its oscillator); add a random node; add or remove a connection; collect unreachable nodes |
+| Structural operators | — | duplicate a used segment (serial or mirrored, keeping its oscillator); add a random node; add or remove a connection; collect unreachable nodes. Limits: 32 nodes, 6 connections per node, 128 parts, depth 14 |
 
 ## Part geometry
 
@@ -23,8 +23,8 @@ Each decoded part is a slab whose thickness runs geometrically from a capsule's 
 
 | Quantity | Depends on | Equation or definition |
 |---|---|---|
-| Length, radii | node genes, inherited scale | animal: length = clamp(gene × scale, 0.01, 0.4) m, base radius and tip radius = clamp(gene × scale, 0.004, 0.08) m (many cheap segments rather than one great one); plant: 0.01 to 3 m and 0.004 to 0.8 m ; mean radius = (base radius + tip radius) / 2 |
-| Sheet thickness | tip radius | sheet thickness = clamp(tip radius × 0.002, 0.0001, 0.002) m |
+| Length, radii | node genes, inherited scale | length = clamp(gene × scale, 0.001, 0.01) m; base radius and tip radius = clamp(gene × scale, 0.0004, 0.0027) m, animals and plants alike: a part is at most a centimetre (a fifth of a gram), so a body is many cheap segments ; mean radius = (base radius + tip radius) / 2 |
+| Sheet thickness | tip radius | sheet thickness = clamp(tip radius × 0.1, 0.00001, 0.002) m |
 | Thickness | mean radius, sheet thickness, flatness | thickness = (2 × mean radius)^(1 − flatness) × sheet thickness^flatness |
 | Width | mean radius, base radius, flatness | width = 2 × ((1 − flatness) × mean radius + flatness × base radius) |
 | Cross-section | width, thickness, flatness | cross-section = width × thickness × (π/4)^(1 − flatness) |
@@ -33,7 +33,7 @@ Each decoded part is a slab whose thickness runs geometrically from a capsule's 
 | Trunk density | lung fraction, water store, flatness | trunk density = 1000 × (1 + (1 − flatness) × (water store − 0.9 × lung fraction)); trunk mass = tissue volume × trunk density |
 | Mass ratio clamp | parent mass | a part lighter than parent mass / 30 is raised to parent mass / 30 (solver stability) |
 | Muscle section | parent's cross-section | muscle section = cross-section of the part it hangs from (the root uses its own) |
-| Maximum torque | muscle section | maximum torque = 4000 N·m per m² × muscle section |
+| Maximum torque | muscle section, lever arm | maximum torque = 200000 Pa (muscle stress) × muscle section × lever arm, the radius of the segment the muscle sits on; strength scales with size as a real body's does |
 
 ## Body measures (read from geometry, no physics)
 
@@ -106,9 +106,9 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 
 | Quantity | Depends on | Equation or definition |
 |---|---|---|
-| Start | reaches | distance between centres = predator reach + prey reach + 3 × predator reach + 0.05 m; each body turned so its travel direction points along the line; prey yaw perturbed ±0.5 rad, side offset ±0.5 × prey reach |
+| Start | reaches | distance between centres = predator reach + prey reach + 3 × predator reach + 1 mm; each body turned so its travel direction points along the line; prey yaw perturbed ±0.5 rad, side offset ±0.5 × prey reach |
 | Steering | heading, bearing, turn sign | steer = clamp(turn sign × bearing / (π/4), −1, 1); bearing positive when a positive yaw turns the heading toward the target; prey steers away |
-| Bite | mouth, gape, prey thickness | bite = mouth point within gape/2 of a prey part whose thickness ≤ gape; claw = clawed part tip within its radius + 1 cm of a prey part |
+| Bite | mouth, gape, prey thickness | bite = mouth point within gape/2 of a prey part whose thickness ≤ gape; claw = clawed part tip within its radius + 1 mm of a prey part |
 | Outcome of a bout | hold time, distance | eaten = bite or claw contact held 1 s; fled = no bite ever and farther than the start after 12 s; otherwise survived |
 | Pair result | 10 bouts | eaten, fled, survived shares over 10 perturbed bouts, cached per (predator lineage, prey lineage, medium) |
 | When fought | attacks | a pair is queued at its first actual attack attempt; 1 pair per day headless (about 24 single-body episodes) |
@@ -147,15 +147,16 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Photosynthesis | light taken, CO₂ factor, temperature factor, water fraction, toughness, heterotrophy, nutrient | photosynthesis = min(light taken × 0.02 × CO₂ factor × temperature factor × water fraction × (1 − 0.35 × toughness) × (1 − 0.6 × heterotrophy), nutrient left / 0.02) kg dry per day; anchored plants attenuated by exp(−0.3 × (depth − height) × (1 − motility)) |
 | Absorption (osmotrophy) | heterotrophy, leaf area, dead matter | absorbed = heterotrophy × leaf area × (dead matter / area) × 0.3 × share × (0.3 + temperature factor), pool limited to half per day |
 | Capture (phagocytosis) | heterotrophy, leaf area, bacteria, motility | captured = heterotrophy × leaf area × (0.05 × submersion + 0.02 × motility) × 86400 × particles per m³ × 0.05 × share |
-| Respiration | leaf mass, biomass, motility, transport, temperature factor, land tolerance | respiration = (leaf mass × 0.004 + (biomass − leaf mass) × (0.0001 + 0.0005 × motility) + transport × 0.002) × (0.3 + temperature factor) × (1 + 0.3 × land tolerance) |
+| Respiration | leaf mass, biomass, motility, transport, temperature factor, land tolerance | respiration = (leaf mass × 0.000008 + (biomass − leaf mass) × (0.000001 + 0.000005 × motility) + transport × 0.000004) × (0.3 + temperature factor) × (1 + 0.3 × land tolerance) |
 | Energy | above | energy += photosynthesis + 0.6 × (absorbed + captured) − respiration − wilting loss |
 | Leaf shedding | specific leaf area | leaf lifespan = clamp(365 × (leaf mass per area / 0.1)^1.5, 20, 2000) days; shed = leaf mass / leaf lifespan → litter |
-| Growth | energy, growth cap | cap = target mass × (submersion + (1 − submersion) × growth cap³); grow = min(energy, 0.05 × biomass + 0.01, cap − biomass) |
+| Growth | energy, growth cap | cap = target mass × (submersion + (1 − submersion) × growth cap³); grow = min(energy, 0.05 × biomass + 1e-8, cap − biomass) |
 | Seeds | energy, seed mass, reproduction fraction | seed cost = 1.5 × seed mass; if biomass ≥ cap × reproduction fraction and energy > 1.5 × seed cost: up to 3 seeds, each mutated |
 | Seed dispersal | dispersal gene, height, air density | hops = dispersal × 10 m / cell width × (1 + 0.3 × height × √(air density / 1.225)), a random walk kept within one medium class of the parent's (water 2, shore 1, dry 0) |
 | Plant death | energy, age | energy < −0.3 × biomass, or age > lifespan = (1 − motility) × lifespan gene + motility × 150 × target mass^0.25 × longevity |
 | Plant to animal | child motility | a seed with motility ≥ 0.5 is born an animal (mass = offspring fraction × adult mass, at least the seed mass); an animal's child with motility < 0.5 settles as a plant |
 | Density cap | cell area | 0.48 plants per m² in water and on land (performance guard) |
+| Realised height floor | — | realised height is at least 0.2 mm; a plant's grazed remainder is at least 2e-7 kg |
 
 ## Animals (per individual, per day)
 
@@ -165,7 +166,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Breathing efficiency | submersion, breathing gene | breathing efficiency = submersion × (1 − 0.9 × breathing) + (1 − submersion) × (0.1 + 0.9 × breathing); oxygen debt below 0.2 costs mass × 0.05 × (0.2 − breathing efficiency) / 0.2 per day (a starvation below zero reserve is then counted as suffocation) |
 | Speed here | measured speeds, submersion, motility, plating, linear scale | speed here = (water speed × submersion + land speed × (1 − submersion)) × motility × linear scale × (1 − 0.3 × plating) |
 | Air speed over the ground | measured air speed, motility, plating, flap lift | air speed over the ground = measured air speed × motility × linear scale × (1 − 0.3 × plating) × clamp(flap lift, 0, 1): only the stroke's own lift carries a body anywhere; travel = max(speed here, air speed over the ground) on land |
-| Maintenance | membrane mass, mass, motility, temperature, oxygen, waterproofing | maintenance = (membrane mass × 0.004 + (mass − membrane mass)^0.75 × (0.0001 + 0.0005 × motility)) × (0.3 + temperature factor) × Q10 / clamp(oxygen relative, 0.3, 1) × (1 + 0.3 × land tolerance) kg dry per day (bulk tissue at a fifth of its earlier rate: a segment is cheap to carry) |
+| Maintenance | membrane mass, mass, motility, temperature, oxygen, waterproofing | maintenance = (membrane mass × 0.000008 + (mass − membrane mass)^0.75 × (0.000001 + 0.000005 × motility)) × (0.3 + temperature factor) × Q10 / clamp(oxygen relative, 0.3, 1) × (1 + 0.3 × land tolerance) kg dry per day (bulk tissue at a five-hundredth of its first rate: a segment is cheap to carry) |
 | Activity (fatigue) | fatigue factor, breathing efficiency | activity = fatigue in water × submersion + fatigue on land × (1 − submersion) |
 | Path needed | bite rate, gut space, food found, handling time, reach, day's path | wanted = min(bite rate, gut space at the start of the day); if handling time × wanted < 1: search needed = wanted / (food found × (1 − handling time × wanted)), path needed = clamp((search needed × area − π × reach²) / (2 × reach), 0, day's path); otherwise, or with no food found, the whole day's path |
 | Movement cost | cost of transport, mass, gravity, path needed | movement cost = cost of transport × mass × g × path needed / 0.25 / 18 MJ per kg; unmeasured bodies: 10.7 × mass^0.68 × path needed / 18 MJ per kg; standing still costs nothing beyond maintenance |
@@ -180,8 +181,8 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Range | reach, path | range = π × reach² + 2 × reach × path m²; search = min(1, range / area); range beyond the cell spills over neighbour rings |
 | Browsing height | reach, upright | browsing reach = reach × linear scale × (0.3 + 0.7 × upright); browse = clamp(browsing reach / plant height, 0.1, 1) on land, 1 in water |
 | Filtering | mass, submersion | clearance per kg = 0.5 × mass^(−0.5) m³; filtered = min(1, clearance per kg × mass × submersion / (2 × area)); search += 0.2 × filtered; bacteria rate = filtered × bacteria × 0.5 |
-| Plant food on offer | plants in range | accessible = (biomass − 0.004) × leaf fraction × 0.5 × (1 − 0.8 × toughness) × browse, times ring coverage beyond the cell |
-| Sheet food on offer | other animals in the cell | accessible = sheet leaf mass × 0.5 × (1 − 0.8 × toughness) × clamp(1 − sheet speed / own speed, 0, 1) + whole sheet × filtered when the sheet's reach ≤ own gape (in water) |
+| Plant food on offer | plants in range | accessible = (biomass − 4e-7 kg) × leaf fraction × 0.5 × (1 − 0.8 × toughness) × browse, times ring coverage beyond the cell |
+| Sheet food on offer | other animals in the cell (heavier than 2e-7 kg) | accessible = sheet leaf mass × 0.5 × (1 − 0.8 × toughness) × clamp(1 − sheet speed / own speed, 0, 1) + whole sheet × filtered when the sheet's reach ≤ own gape (in water) |
 | Plant intake | search, food on offer, handling time | plant intake = search × food / (1 + search × handling time × food) (Holling type II, competition is depletion) |
 | Carrion intake | reach, path, carrion | carrion search = min(1, (π × reach² + strip × reach × path) / area), strip 6 (40 for a flier); carrion intake = carrion search × carrion / (1 + carrion search × handling time × carrion) |
 | Absorption and capture | heterotrophy, surface, dead matter, wetness, bacteria, speed | wetness = submersion + (1 − submersion) × moisture; absorbed = min(heterotrophy × surface × wetness × (dead matter / area) × 0.3 × Q10, 0.2 × dead matter); captured = heterotrophy × surface × (0.05 × submersion + speed) × 86400 × particles × 0.05; energy += 0.6 × (absorbed + captured) |

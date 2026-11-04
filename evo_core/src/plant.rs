@@ -178,7 +178,12 @@ impl PlantBody {
 }
 
 pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
-    let pheno = decode_with_caps(g, PLANT_MAX_LEN, PLANT_MAX_RADIUS);
+    decode_plant_with_caps(g, gravity, PLANT_MAX_LEN, PLANT_MAX_RADIUS)
+}
+
+/// The plant body at chosen part caps (the structural tests draw metre-scale stems).
+pub fn decode_plant_with_caps(g: &Genome, gravity: f32, max_len: f32, max_radius: f32) -> PlantBody {
+    let pheno = decode_with_caps(g, max_len, max_radius);
     let isos = placements(&pheno);
     let n = pheno.parts.len();
     let mut parts = Vec::with_capacity(n);
@@ -350,8 +355,8 @@ mod tests {
             g.nodes[0].r1 = 0.02;
             g.nodes[0].recursive_limit = 3;
             g.density = 800.0; // dense wood: a 9 m, 4 cm column is near its limit on Earth, buckles at 3 g
-            let pa = decode_plant(&g, 9.81);
-            let pb = decode_plant(&g, 30.0);
+            let pa = decode_plant_with_caps(&g, 9.81, 3.0, 0.8);
+            let pb = decode_plant_with_caps(&g, 30.0, 3.0, 0.8);
             // Only genomes whose recursion actually stacks the column are tall
             // enough to load it; short ones stand at any gravity.
             if pa.height < 6.5 {

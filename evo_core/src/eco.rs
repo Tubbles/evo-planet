@@ -297,7 +297,7 @@ impl Animal {
             traits,
             patch,
             lineage,
-            mass: mass.max(0.001),
+            mass: mass.max(1e-7),
             reserve,
             gut_plant: 0.0,
             gut_meat: 0.0,
@@ -333,7 +333,7 @@ impl Animal {
     /// (days) blending into the animal's 150·M^0.25·longevity as it moves.
     pub fn lifespan(&self) -> f32 {
         let m = self.genome.motility.clamp(0.0, 1.0);
-        let animal = 150.0 * self.traits.mass.max(0.01).powf(0.25) * self.genome.longevity.max(0.1);
+        let animal = 150.0 * self.traits.mass.max(1e-7).powf(0.25) * self.genome.longevity.max(0.1);
         (1.0 - m) * self.genome.lifespan.max(1.0) + m * animal
     }
 }
@@ -923,7 +923,7 @@ fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut tr
             if r.swept_reach > 0.0 {
                 traits.reach = r.swept_reach;
             }
-            traits.upright = (r.mean_height / (0.5 * traits.reach).max(0.01)).clamp(0.0, 1.0);
+            traits.upright = (r.mean_height / (0.5 * traits.reach).max(1e-4)).clamp(0.0, 1.0);
         }
     }
     traits
@@ -1505,7 +1505,7 @@ impl EcoWorld {
             for &i in list {
                 let p = &mut self.plants[i];
                 let want = p.body().height * p.grown().max(0.05);
-                p.height = if is_water { want.min(1.5) } else { want }.max(0.02);
+                p.height = if is_water { want.min(1.5) } else { want }.max(0.0002);
             }
             let mut order = list.clone();
             order.sort_by(|a, b| self.plants[*b].height.partial_cmp(&self.plants[*a].height).unwrap());
@@ -1606,8 +1606,8 @@ impl EcoWorld {
                 let transport = p.body().transport * (p.biomass / p.body().target_mass).clamp(0.0, 1.0);
                 // The same continuum from the sessile side: a plant with some
                 // motility already pays that share of an animal's field rate.
-                let mot_tissue = 0.0005 * p.genome.motility.clamp(0.0, 1.0);
-                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * (0.0001 + mot_tissue) + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
+                let mot_tissue = 0.000005 * p.genome.motility.clamp(0.0, 1.0);
+                let respiration = (leaf_m * 0.000008 + (p.biomass - leaf_m).max(0.0) * (0.000001 + mot_tissue) + transport * 0.000004) * (0.3 + tf) * (1.0 + 0.3 * tol);
                 production_today += photo;
                 p.energy += photo + (absorbed + captured) * 0.6 - respiration - p.biomass * 0.02 * wilt * (1.0 - 0.8 * tol);
                 // Leaf economics: thin leaves live weeks, thick ones years
@@ -1627,7 +1627,7 @@ impl EcoWorld {
                 if p.energy > 0.0 {
                     let cap = p.body().target_mass * (sub + (1.0 - sub) * p.body().growth_cap.powi(3));
                     if p.biomass < cap {
-                        let grow = p.energy.min(p.biomass * 0.05 + 0.01).min(cap - p.biomass);
+                        let grow = p.energy.min(p.biomass * 0.05 + 1e-8).min(cap - p.biomass);
                         p.biomass += grow;
                         p.energy -= grow;
                     }
@@ -1645,7 +1645,7 @@ impl EcoWorld {
                     }
                 }
                 let m = p.genome.motility.clamp(0.0, 1.0);
-                let lifespan = (1.0 - m) * p.genome.lifespan.max(1.0) + m * 150.0 * p.body().target_mass.max(0.01).powf(0.25) * p.genome.longevity.max(0.1);
+                let lifespan = (1.0 - m) * p.genome.lifespan.max(1.0) + m * 150.0 * p.body().target_mass.max(1e-7).powf(0.25) * p.genome.longevity.max(0.1);
                 if p.energy < -p.biomass * 0.3 || p.age > lifespan {
                     dead_plants.push(i);
                 }
@@ -1719,15 +1719,15 @@ impl EcoWorld {
             .animals
             .iter()
             .map(|s| {
-                if s.traits.membrane_mass <= 0.0 || s.mass <= 0.002 {
+                if s.traits.membrane_mass <= 0.0 || s.mass <= 2e-7 {
                     return (0.0, 0.0, 0.0, 0.0);
                 }
-                let s_lin = (s.mass / s.traits.mass.max(1e-3)).clamp(0.01, 1.0).powf(1.0 / 3.0);
+                let s_lin = (s.mass / s.traits.mass.max(1e-7)).clamp(0.01, 1.0).powf(1.0 / 3.0);
                 let s_sub = self.patches[s.patch].submersion;
                 let s_speed = (s.traits.water_speed * s_sub + s.traits.land_speed * (1.0 - s_sub)) * s.genome.motility.clamp(0.0, 1.0) * s_lin;
-                let leaf = (s.traits.membrane_mass / s.traits.mass.max(1e-3)).min(1.0) * (s.mass - 0.002);
+                let leaf = (s.traits.membrane_mass / s.traits.mass.max(1e-7)).min(1.0) * (s.mass - 2e-7);
                 let tough = s.genome.leaf_toughness.clamp(0.0, 1.0);
-                (leaf * 0.5 * (1.0 - 0.8 * tough), s_speed, s.traits.reach * s_lin, s.mass - 0.002)
+                (leaf * 0.5 * (1.0 - 0.8 * tough), s_speed, s.traits.reach * s_lin, s.mass - 2e-7)
             })
             .collect();
         let mut killed: Vec<usize> = Vec::new();
@@ -1776,8 +1776,8 @@ impl EcoWorld {
                 (
                     a.patch,
                     self.patches[a.patch].water,
-                    a.traits.mass.max(0.001),
-                    a.mass.max(0.001),
+                    a.traits.mass.max(1e-7),
+                    a.mass.max(1e-7),
                     a.genome.motility.clamp(0.0, 1.0),
                     a.traits.section_area,
                     a.traits.base_freq,
@@ -1798,7 +1798,7 @@ impl EcoWorld {
             let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air, glide_ratio) = {
                 let t = &self.animals[ai].traits;
                 let sb = self.patches[patch].submersion;
-                (t.reach.max(0.02), t.mouth_area.max(1e-5), t.claws, t.plating, sb + (1.0 - sb) * t.upright, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT)
+                (t.reach.max(0.0002), t.mouth_area.max(1e-9), t.claws, t.plating, sb + (1.0 - sb) * t.upright, t.air_speed, t.measured_air, t.glide_distance / crate::sim::AIR_DROP_HEIGHT)
             };
             // Launch height here: the canopy plus the drop to the lowest neighbour.
             let launch_h = {
@@ -1852,7 +1852,7 @@ impl EcoWorld {
             // A waterproofed integument (the land tolerance gene) costs upkeep,
             // as a plant's cuticle does.
             let waterproof = self.animals[ai].genome.land_tolerance.clamp(0.0, 1.0);
-            let fmr = (membrane_mass * 0.004 + (mass - membrane_mass).max(0.0).powf(0.75) * (0.0001 + 0.0005 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3) * (1.0 + 0.3 * waterproof);
+            let fmr = (membrane_mass * 0.000008 + (mass - membrane_mass).max(0.0).powf(0.75) * (0.000001 + 0.000005 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3) * (1.0 + 0.3 * waterproof);
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
             // Short of oxygen (gills in air, lungs under water) the tissue runs
             // an anaerobic debt that costs it, continuously, up to 5% of the
@@ -1953,15 +1953,15 @@ impl EcoWorld {
             let mut plant_b = 0.0f32;
             for &pi in &plants_in[patch] {
                 let p = &self.plants[pi];
-                if p.biomass < 0.004 {
+                if p.biomass < 4e-7 {
                     continue;
                 }
                 let lf = p.body().leaf_mass / p.body().target_mass;
                 // Browsing height matters on land; floating algae are all within reach.
-                let browse = if in_water { 1.0 } else { (reach_h / p.height.max(0.02)).clamp(0.1, 1.0) };
+                let browse = if in_water { 1.0 } else { (reach_h / p.height.max(0.0002)).clamp(0.1, 1.0) };
                 // Tender leaves are half takeable in a day; tough ones resist grazing.
                 let tough = p.genome.leaf_toughness.clamp(0.0, 1.0);
-                let acc = (p.biomass - 0.004) * lf * 0.5 * (1.0 - 0.8 * tough) * browse;
+                let acc = (p.biomass - 4e-7) * lf * 0.5 * (1.0 - 0.8 * tough) * browse;
                 if acc > 0.0 {
                     plant_targets.push((pi, acc));
                     plant_b += acc;
@@ -2012,13 +2012,13 @@ impl EcoWorld {
                     }
                     for &pi in &plants_in[j] {
                         let p = &self.plants[pi];
-                        if p.biomass < 0.004 {
+                        if p.biomass < 4e-7 {
                             continue;
                         }
                         let lf = p.body().leaf_mass / p.body().target_mass;
-                        let browse = if js >= 1.0 { 1.0 } else { (reach_h / p.height.max(0.02)).clamp(0.1, 1.0) };
+                        let browse = if js >= 1.0 { 1.0 } else { (reach_h / p.height.max(0.0002)).clamp(0.1, 1.0) };
                         let tough = p.genome.leaf_toughness.clamp(0.0, 1.0);
-                        let acc = (p.biomass - 0.004) * lf * 0.5 * (1.0 - 0.8 * tough) * browse * spill;
+                        let acc = (p.biomass - 4e-7) * lf * 0.5 * (1.0 - 0.8 * tough) * browse * spill;
                         if acc > 0.0 {
                             plant_targets.push((pi, acc));
                             plant_b += acc;
@@ -2035,12 +2035,12 @@ impl EcoWorld {
                     }
                     for &pi in &plants_in[j] {
                         let p = &self.plants[pi];
-                        if p.biomass < 0.004 {
+                        if p.biomass < 4e-7 {
                             continue;
                         }
                         let lf = p.body().leaf_mass / p.body().target_mass;
                         let tough = p.genome.leaf_toughness.clamp(0.0, 1.0);
-                        let acc = (p.biomass - 0.004) * lf * 0.5 * (1.0 - 0.8 * tough) * amph;
+                        let acc = (p.biomass - 4e-7) * lf * 0.5 * (1.0 - 0.8 * tough) * amph;
                         if acc > 0.0 {
                             plant_targets.push((pi, acc));
                             plant_b += acc;
@@ -2117,10 +2117,10 @@ impl EcoWorld {
                 for _ in 0..candidates.len().min(3) {
                     let j = candidates[self.rng.gen_range(0..candidates.len())];
                     let prey = &self.animals[j];
-                    let pm = prey.mass.max(0.001);
+                    let pm = prey.mass.max(1e-7);
                     let p_in_water = self.patches[prey.patch].water;
                     let p_sub = self.patches[prey.patch].submersion;
-                    let p_lin = (pm / prey.traits.mass.max(0.001)).clamp(0.01, 1.0).powf(1.0 / 3.0);
+                    let p_lin = (pm / prey.traits.mass.max(1e-7)).clamp(0.01, 1.0).powf(1.0 / 3.0);
                     let prey_speed = (prey.traits.water_speed * p_sub + prey.traits.land_speed.max(prey.traits.air_speed) * (1.0 - p_sub)) * prey.genome.motility.clamp(0.0, 1.0) * p_lin * (1.0 - 0.3 * prey.traits.plating);
                     // Manoeuvrability decides chases as much as speed (Howland 1974):
                     // a turn rate of about 1.5 rad/s doubles either side's term.
@@ -2128,8 +2128,8 @@ impl EcoWorld {
                     let prey_turn = prey.traits.turn_water * p_sub + prey.traits.turn_land.max(prey.traits.turn_air) * (1.0 - p_sub);
                     // Chases scale with body size (Howland 1974): speeds in body
                     // lengths per second, a sessile party at the floor of 0.2.
-                    let my_bl = speed_here / (2.0 * reach_now).max(0.01);
-                    let prey_bl = prey_speed / (2.0 * prey.traits.reach * p_lin).max(0.01);
+                    let my_bl = speed_here / (2.0 * reach_now).max(1e-4);
+                    let prey_bl = prey_speed / (2.0 * prey.traits.reach * p_lin).max(1e-4);
                     let attack = m34 * (0.2 + my_bl.min(10.0)) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright) * (0.5 + 0.5 * (my_turn / 1.5).min(1.0));
                     // Taking off is the escape a ground predator cannot follow: a glider
                     // needs a perch (its patch's launch height), a flier needs nothing.
@@ -2199,7 +2199,7 @@ impl EcoWorld {
                         if self.rng.gen_bool(p_success.clamp(0.0, 1.0) as f64) {
                             let prey_mass = self.animals[j].mass;
                             let prey_reserve = self.animals[j].reserve.max(0.0);
-                            let z = (mass / prey_mass.max(0.001)).log10();
+                            let z = (mass / prey_mass.max(1e-7)).log10();
                             let xi = (0.4 + 0.4 * z).clamp(0.0, 1.0);
                             let body = prey_mass * 0.8 + prey_reserve;
                             let edible = body * xi;
@@ -2457,7 +2457,7 @@ impl EcoWorld {
                 // the maturity its line evolved.
                 let mature = a.mass >= a.genome.repro_frac.clamp(0.1, 0.98) * adult_mass;
                 if mature {
-                    let mass0 = (a.genome.offspring_frac.clamp(0.01, 0.5) * adult_mass).max(0.001);
+                    let mass0 = (a.genome.offspring_frac.clamp(0.01, 0.5) * adult_mass).max(1e-8);
                     let cost = mass0 * 1.3; // body plus a starter reserve
                     if surplus >= cost && self.rng.gen_bool(0.8) {
                         a.reserve -= cost;
@@ -2516,7 +2516,7 @@ impl EcoWorld {
                 if plant_counts[b.patch] < cap {
                     plant_counts[b.patch] += 1;
                     let mut plant = Plant::new(b.genome, lineage, b.patch, 0.0, 0.0, self.planet.gravity);
-                    plant.biomass = b.mass0.min(plant.body().target_mass).max(0.002);
+                    plant.biomass = b.mass0.min(plant.body().target_mass).max(2e-7);
                     plant.energy = b.reserve0;
                     self.plants.push(plant);
                     self.stats.animal_to_plant += 1;
@@ -2627,7 +2627,7 @@ impl EcoWorld {
         {
             let mut veg = vec![false; self.patches.len()];
             for p in &self.plants {
-                if !self.patches[p.patch].water && p.biomass > 0.05 {
+                if !self.patches[p.patch].water && p.biomass > 5e-6 {
                     veg[p.patch] = true;
                 }
             }
@@ -2837,11 +2837,11 @@ impl EcoWorld {
                     s.shore_share += if self.patches[a.patch].shore { 1.0 / c } else { 0.0 };
                     let sb = self.patches[a.patch].submersion;
                     let sp = a.traits.water_speed * sb + a.traits.land_speed * (1.0 - sb);
-                    s.speed_bl += sp / (2.0 * a.traits.reach).max(0.01) / c;
+                    s.speed_bl += sp / (2.0 * a.traits.reach).max(1e-4) / c;
                     s.parts += decode(&a.genome).part_count() as f32 / c;
                     s.membrane_area += a.traits.membrane_area / c;
                     s.mouth += a.traits.mouth_area / c;
-                    s.intake += a.intake_rate / a.mass.max(1e-3) / c;
+                    s.intake += a.intake_rate / a.mass.max(1e-7) / c;
                     s.lung_frac += a.genome.lung_frac / c;
                     s.waterproof += a.genome.land_tolerance / c;
                     s.flat += a.genome.nodes[a.genome.root].flat() / c;
