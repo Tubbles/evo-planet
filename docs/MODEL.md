@@ -956,3 +956,19 @@ ledger against 91,364 dead of age. Sheets with gills die on dry land in
 a day, as they should. What lives there next has to be compact,
 waterproofed and lung-breathing, and the interior is 135 kg of plants
 with no one eating them.
+
+## The soup's cost
+
+Runs 17 and 18 (tidal gradient, land-first measurement) showed the
+frontier working as a filter (65,183 dried out and 25,901 suffocated in
+one day's ledger at the upper shore and inland) and the sea filling with
+two-gram sheets: 232,488 of them, a day costing ten seconds. Nothing in
+the sea cropped them: a mouth bites a tenth of its owner's mass a day
+and a fixed mussel's clearance filters a fraction of a percent of a cell.
+Zooplankton crop phytoplankton because clearance per kilogram rises
+steeply as bodies get small and because small cells are swallowed whole.
+Both are in now: clearance per kilogram falls as the square root of mass
+(a copepod's hundreds of cubic metres per kilogram a day, a mussel's
+tens, a fish's one), and a sheet that passes the grazer's mouth whole is
+filtered from the water it clears, on top of what a bite takes. Small
+sheets become prey to anything with a mouth wider than they are.

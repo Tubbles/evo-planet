@@ -494,7 +494,7 @@ Every quantity is kilograms of dry biomass equivalent per day.
 |---|---|---|
 | net primary production | light on leaf and membrane area | plant and mat biomass |
 | absorption (osmotrophy) | dead matter pool | organisms, by surface area |
-| capture and filter feeding | bacteria pool, suspended fraction | organisms, by surface and clearance |
+| capture and filter feeding | bacteria pool, suspended fraction, and any motile sheet small enough to pass the mouth whole | organisms, by surface and clearance (0.5 m³ per kg per day at a kilogram, falling as the square root of mass per kilogram) |
 | grazing | plant leaf mass, and the sheets of motile organisms a grazer can keep up with | animal stomach |
 | predation | prey (80% edible) | predator stomach |
 | scavenging | carrion pool | animal stomach |
