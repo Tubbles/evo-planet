@@ -2,7 +2,7 @@
 //!
 //! Usage: evo_headless [--planet N|name] [--days N] [--grid PATCHES] [--seed N]
 //!        [--patch-area M2] [--evals-per-day N] [--arena-per-day F] [--list-planets]
-//!        [--dump-gaits DIR] [--save FILE] [--load FILE] [--water FRACTION]
+//!        [--dump-gaits DIR] [--save FILE] [--load FILE] [--water FRACTION] [--every DAYS]
 //!
 //! `--save` writes a checkpoint at every ledger line; `--load` carries on from
 //! one (to `--days`, counted from the world's own day).
@@ -11,7 +11,7 @@
 
 use evo_core::planet::PlanetParams;
 
-fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32, arena_per_day: f32, dump_dir: Option<&str>, save: Option<&str>, load: Option<&str>) {
+fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32, arena_per_day: f32, dump_dir: Option<&str>, save: Option<&str>, load: Option<&str>, every: Option<u64>) {
     use evo_core::eco::EcoWorld;
     let mut w = match load {
         Some(path) => {
@@ -35,7 +35,8 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
     for day in first..=days {
         w.measure_pending(evals_per_day);
         w.tick();
-        if day % (days / 10).max(1) == 0 || day == first {
+        let interval = every.unwrap_or((days / 10).max(1)).max(1);
+        if day % interval == 0 || day == first {
             if let Some(path) = save {
                 match w.save(path) {
                     Ok(()) => println!("saved {path} at day {day}"),
@@ -136,10 +137,15 @@ fn main() {
     let mut dump_dir: Option<String> = None;
     let mut save: Option<String> = None;
     let mut water: Option<f32> = None;
+    let mut every: Option<u64> = None;
     let mut load: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--every" => {
+                every = args[i + 1].parse().ok();
+                i += 1;
+            }
             "--water" => {
                 water = args[i + 1].parse().ok();
                 i += 1;
@@ -212,5 +218,5 @@ fn main() {
         // with more land than Earth's has more interior to walk on.
         planet.water_coverage = w.clamp(0.05, 0.97);
     }
-    run_eco(planet, days, grid, seed, evals_per_day, patch_area, arena_per_day, dump_dir.as_deref(), save.as_deref(), load.as_deref());
+    run_eco(planet, days, grid, seed, evals_per_day, patch_area, arena_per_day, dump_dir.as_deref(), save.as_deref(), load.as_deref(), every);
 }
