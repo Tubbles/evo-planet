@@ -606,6 +606,107 @@ pub struct EcoWorld {
     pub history: Vec<[f32; 7]>,
 }
 
+/// Everything a world needs to carry on from where it was: what the
+/// physics has measured, what the arena has found, and who is alive. The
+/// day's queues are rebuilt on restore.
+#[derive(Serialize, Deserialize)]
+pub struct Checkpoint {
+    planet: PlanetParams,
+    patches: Vec<Patch>,
+    neighbours: Vec<Vec<usize>>,
+    plants: Vec<Plant>,
+    animals: Vec<Animal>,
+    day: u64,
+    terrain_seed: u32,
+    patch_area: f32,
+    next_lineage: u32,
+    trait_cache: Vec<(String, Traits)>,
+    arena_cache: Vec<((u32, u32, Environment), crate::arena::ArenaOutcome)>,
+    arena_record: Vec<(u32, (f32, u32))>,
+    arena_rate: f32,
+    arena_credit: f32,
+    stats: EcoStats,
+    history: Vec<[f32; 7]>,
+}
+
+impl EcoWorld {
+    pub fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            planet: self.planet.clone(),
+            patches: self.patches.clone(),
+            neighbours: self.neighbours.clone(),
+            plants: self.plants.clone(),
+            animals: self.animals.clone(),
+            day: self.day,
+            terrain_seed: self.terrain_seed,
+            patch_area: self.patch_area,
+            next_lineage: self.next_lineage,
+            trait_cache: self.trait_cache.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            arena_cache: self.arena_cache.iter().map(|(k, v)| (*k, *v)).collect(),
+            arena_record: self.arena_record.iter().map(|(k, v)| (*k, *v)).collect(),
+            arena_rate: self.arena_rate,
+            arena_credit: self.arena_credit,
+            stats: self.stats.clone(),
+            history: self.history.clone(),
+        }
+    }
+
+    /// A world from a checkpoint: bodies decoded again, queues rebuilt, the
+    /// random stream reseeded from the day (a restored run is not the same
+    /// run, but it is the same world).
+    pub fn restore(c: Checkpoint) -> Self {
+        let derived = c.planet.derive();
+        let gravity = c.planet.gravity;
+        let mut plants = c.plants;
+        for p in plants.iter_mut() {
+            if p.body.is_none() {
+                p.body = Some(decode_plant(&p.genome, gravity));
+            }
+        }
+        let mut w = EcoWorld {
+            planet: c.planet,
+            derived,
+            patches: c.patches,
+            neighbours: c.neighbours,
+            plants,
+            animals: c.animals,
+            day: c.day,
+            terrain_seed: c.terrain_seed,
+            patch_area: c.patch_area,
+            rng: StdRng::seed_from_u64(c.day ^ ((c.terrain_seed as u64) << 20)),
+            next_lineage: c.next_lineage,
+            trait_cache: c.trait_cache.into_iter().collect(),
+            pending: Vec::new(),
+            arena_cache: c.arena_cache.into_iter().collect(),
+            arena_pending: Vec::new(),
+            arena_seen: HashSet::new(),
+            arena_rate: c.arena_rate,
+            arena_credit: c.arena_credit,
+            arena_record: c.arena_record.into_iter().collect(),
+            stats: c.stats,
+            history: c.history,
+        };
+        w.arena_seen = w.arena_cache.keys().copied().collect();
+        for i in 0..w.animals.len() {
+            w.request_traits(i);
+        }
+        w
+    }
+
+    pub fn save(&self, path: &str) -> std::io::Result<()> {
+        let bytes = bincode::serialize(&self.checkpoint()).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let tmp = format!("{path}.tmp");
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(tmp, path)
+    }
+
+    pub fn load(path: &str) -> std::io::Result<Self> {
+        let bytes = std::fs::read(path)?;
+        let c: Checkpoint = bincode::deserialize(&bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        Ok(Self::restore(c))
+    }
+}
+
 fn temp_factor(temp_c: f32) -> f32 {
     (-((temp_c - 22.0) / 16.0).powi(2)).exp()
 }
@@ -2758,6 +2859,29 @@ impl EcoWorld {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_checkpoint_restores_the_world() {
+        let mut w = EcoWorld::new(PlanetParams::earth(), 300, 9);
+        for _ in 0..200 {
+            w.measure_pending(4);
+            w.tick();
+        }
+        let path = std::env::temp_dir().join("evo_checkpoint_test.bin");
+        let path = path.to_str().unwrap().to_string();
+        w.save(&path).unwrap();
+        let mut r = EcoWorld::load(&path).unwrap();
+        assert_eq!(r.day, w.day);
+        assert_eq!(r.plants.len(), w.plants.len());
+        assert_eq!(r.animals.len(), w.animals.len());
+        for _ in 0..5 {
+            r.measure_pending(4);
+            r.tick();
+        }
+        assert_eq!(r.day, w.day + 5);
+        assert!(!r.plants.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn ecology_runs_and_plants_persist() {

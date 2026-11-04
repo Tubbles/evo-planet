@@ -2,14 +2,25 @@
 //!
 //! Usage: evo_headless [--planet N|name] [--days N] [--grid PATCHES] [--seed N]
 //!        [--patch-area M2] [--evals-per-day N] [--arena-per-day F] [--list-planets]
+//!        [--dump-gaits DIR] [--save FILE] [--load FILE]
+//!
+//! `--save` writes a checkpoint at every ledger line; `--load` carries on from
+//! one (to `--days`, counted from the world's own day).
 //!
 //! `--eco` is accepted and ignored: the ecology is the only mode.
 
 use evo_core::planet::PlanetParams;
 
-fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32, arena_per_day: f32, dump_dir: Option<&str>) {
+fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per_day: usize, patch_area: f32, arena_per_day: f32, dump_dir: Option<&str>, save: Option<&str>, load: Option<&str>) {
     use evo_core::eco::EcoWorld;
-    let mut w = EcoWorld::new_with_area(planet.clone(), patches, seed, patch_area);
+    let mut w = match load {
+        Some(path) => {
+            let w = EcoWorld::load(path).expect("checkpoint");
+            println!("restored {path} at day {}", w.day);
+            w
+        }
+        None => EcoWorld::new_with_area(planet.clone(), patches, seed, patch_area),
+    };
     w.arena_rate = arena_per_day;
     let d = planet.derive();
     println!(
@@ -20,10 +31,17 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
         w.patches.iter().max_by(|a, b| a.elevation.partial_cmp(&b.elevation).unwrap()).map(|p| p.temp_c).unwrap_or(0.0)
     );
     let start = std::time::Instant::now();
-    for day in 1..=days {
+    let first = w.day + 1;
+    for day in first..=days {
         w.measure_pending(evals_per_day);
         w.tick();
-        if day % (days / 10).max(1) == 0 || day == 1 {
+        if day % (days / 10).max(1) == 0 || day == first {
+            if let Some(path) = save {
+                match w.save(path) {
+                    Ok(()) => println!("saved {path} at day {day}"),
+                    Err(e) => println!("save failed: {e}"),
+                }
+            }
             for l in w.lineages(3) {
                 if l.kind == "animal" {
                     println!(
@@ -116,9 +134,19 @@ fn main() {
     let mut planet_sel = "0".to_string();
     let mut seed = 1u64;
     let mut dump_dir: Option<String> = None;
+    let mut save: Option<String> = None;
+    let mut load: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--save" => {
+                save = Some(args[i + 1].clone());
+                i += 1;
+            }
+            "--load" => {
+                load = Some(args[i + 1].clone());
+                i += 1;
+            }
             "--dump-gaits" => {
                 dump_dir = Some(args[i + 1].clone());
                 i += 1;
@@ -174,5 +202,5 @@ fn main() {
         .find(|(k, p)| k.to_string() == planet_sel || p.name.to_lowercase().contains(&planet_sel.to_lowercase()))
         .map(|(_, p)| p.clone())
         .unwrap_or_else(PlanetParams::earth);
-    run_eco(planet, days, grid, seed, evals_per_day, patch_area, arena_per_day, dump_dir.as_deref());
+    run_eco(planet, days, grid, seed, evals_per_day, patch_area, arena_per_day, dump_dir.as_deref(), save.as_deref(), load.as_deref());
 }
