@@ -2544,6 +2544,14 @@ impl EcoWorld {
         for p in &self.plants {
             plant_counts[p.patch] += 1;
         }
+        // The same density guard for motile organisms: a pond of photosynthetic
+        // sheets a tenth of a milligram each grew by twelve percent a day with
+        // light and nutrient for a hundred million of them (see MODEL.md), far
+        // past what fits in memory as individuals.
+        let mut animal_counts: Vec<usize> = vec![0; n_patches];
+        for a in &self.animals {
+            animal_counts[a.patch] += 1;
+        }
         for b in births {
             let lineage = if b.body_changed && self.rng.gen_bool(0.2) { self.new_lineage() } else { b.lineage };
             if b.genome.motility < 0.5 {
@@ -2584,6 +2592,13 @@ impl EcoWorld {
             // Larval dispersal: young drift one or two patches from the parent,
             // which is what keeps them off the parents' menu in the sea.
             let born_at = self.disperse_same_habitat(b.patch, LARVAL_DRIFT_M / patch_w);
+            // A larva drifting onto a full cell does not settle (the cap that
+            // already limits seeds), and its body is carrion there.
+            if animal_counts[born_at] >= self.plant_cap(born_at) {
+                self.patches[born_at].carrion += b.mass0 + b.reserve0.max(0.0);
+                continue;
+            }
+            animal_counts[born_at] += 1;
             self.animals.push(Animal::new(b.genome, key, traits, born_at, lineage, b.mass0, b.reserve0));
             let idx = self.animals.len() - 1;
             self.request_traits(idx);

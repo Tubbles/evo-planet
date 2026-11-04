@@ -989,3 +989,26 @@ is doing its work: in run 19's last day 31,788 bodies dried out and
 14,642 suffocated at the upper shore and inland, and a two-gram sheet
 cannot survive there whatever its genes, since a sheet is all surface.
 What crosses has to be thicker first.
+
+## The centimetre pond and its mat
+
+At the centimetre cap the pond runs (200 cells of a square metre, half
+water) produced animals once in three seeds, at day 1000 of seed 4, and
+then filled the machine. The per-day ledger from that checkpoint shows
+why. The animals are photosynthetic sheets of a tenth of a milligram
+(flat 1.00, heterotrophy well under one), so their income is the mat's
+light, per area, and nothing crops them: grazing was 3 mg a day for the
+whole pond against 500 mg a day of production, and nearly all deaths
+were sheets drying on the shore. Numbers grew by twelve percent a day
+(7,388 on day 1001, 231,245 on day 1028) and the plants never moved
+from 7.9 g. Light and nutrient (3 g/m², 150 g/m² of tissue) would carry
+on the order of a hundred million such bodies in that pond, which is
+the mat equilibrium of run 19 at a thousandth of the body mass: not a
+leak, and not a rule gone wrong, but the model's sea at a scale where
+individuals cannot be stored. Two guards followed: the trait cache
+keeps only living genomes (it had grown with the cumulative birth
+count), and larvae settle under the same 48 per m² density cap that
+seeds already had, becoming carrion on a full cell. The cap is a
+performance guard and is marked as one; it makes the pond a crowded
+place where a slot, not a square metre, is what a body holds, and that
+is a bias worth remembering when reading what the crowd evolves.
