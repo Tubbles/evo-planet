@@ -124,7 +124,7 @@ sine wave per driven joint axis. Every joint target is
 | longevity | multiplier on the lifespan that mass sets |
 | lifespan | a sessile organism's lifespan in days; blended with the mass-based lifespan by motility |
 | seed mass (`seed_mass`), dispersal | a seed's mass and how far it travels (10 m per unit) |
-| land tolerance (`land_tolerance`) | a plant's adaptation to air and dry ground; costs upkeep everywhere |
+| land tolerance (`land_tolerance`) | the integument against air: a plant's cuticle and stomata (cutting transpiration by up to 80%) and its tolerance of drying; an animal's waterproof skin. Costs upkeep everywhere |
 | leaf toughness (`leaf_toughness`) | tough leaves lose less to grazers and digest worse but photosynthesise slower |
 | lung fraction (`lung_frac`) | share of the trunk's volume given to lungs or gills |
 | water store (`water_store`) | extra trunk mass held as water, against aridity |
@@ -424,7 +424,8 @@ flowchart TD
 flowchart LR
   L["light × area × surface shade from motile mats"] --> BL["Beer-Lambert by height order"]
   BL --> DA["depth attenuation, 0.3 per metre, for bed-anchored plants"]
-  DA --> PH["photosynthesis × water × habitat × nutrient × toughness × (1 − 0.6 × heterotrophy)"]
+  DA --> PH["photosynthesis × water × nutrient × toughness × (1 − 0.6 × heterotrophy)"]
+  WT["water: roots × soil moisture against leaf area × transpiration × (1 − 0.8 × cuticle gene); wilting below 0.3 kills unadapted tissue"] --> PH
   DM[dead matter] --> OS["absorption through the surface (osmotrophy)"]
   BA[bacteria] --> PG["capture by the surface in moving water (phagocytosis)"]
   PH --> EN[energy]

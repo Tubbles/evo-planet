@@ -926,3 +926,20 @@ bearing has the right sign. The shuffler now takes the sheet in 70% of
 bouts. Bouts last 12 s. A bug of this kind is exactly why abilities are
 measured and not assumed: the ledger said "kills 0" for a thousand
 pairs, and that was a fact about the arena, not the animals.
+
+## The interior was never habitable
+
+The probe `land_probe` said it in one column for every run: inland
+plants 0.4 kg, 0 cells green. The plant model took three quarters of an
+unadapted plant's photosynthesis in air by a fixed factor (0.25 + 0.75 ×
+tolerance), whatever the ground's moisture, and cut its water uptake by
+the same gene. A seedling inland earned 6% of its potential and died;
+tolerance rose by drift, 0.01 to 0.07 in 1,600 days, because nothing
+could live there long enough to be selected. That factor was a wall, not
+a water balance. Land plants now live by the water balance alone: roots
+against soil moisture, leaves transpiring by area less what the cuticle
+gene closes, photosynthesis following the water as stomata do, and
+wilting (water below 0.3) killing unadapted tissue. With that, every
+interior cell is green by day 600 (62 kg of plants inland against 0.4).
+The sheets and the gene flow were real faults, but this one was the
+wall.
