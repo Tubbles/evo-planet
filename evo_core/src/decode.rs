@@ -31,8 +31,13 @@ pub struct Part {
     pub len: f32,
     pub r0: f32,
     pub r1: f32,
-    /// Mean radius used for the collider.
+    /// Radius of the circle with the part's cross-section (the collider's
+    /// capsule radius when the part is rounder than flat).
     pub radius: f32,
+    /// Thickness of the part, metres: a capsule's diameter at flat = 0, the
+    /// sheet's thickness at flat = 1, and the geometric blend between (the
+    /// form continuum is geometric in thickness, which spans four decades).
+    pub thickness: f32,
     pub mass: f32,
     pub density: f32,
     pub joint: JointKind,
@@ -97,6 +102,7 @@ struct Ctx<'a> {
     counts: Vec<u8>,
 }
 
+#[allow(dead_code)]
 fn capsule_volume(len: f32, r: f32) -> f32 {
     PI * r * r * len + 4.0 / 3.0 * PI * r * r * r
 }
@@ -144,16 +150,25 @@ impl<'a> Ctx<'a> {
         let grip = node.grip();
         let stiffness = node.stiffness();
         let freedom = node.freedom();
-        // A part is a blend of a capsule of mean radius and a sheet of chord
-        // 2*r0: mass, tissue volume (for buoyancy) and muscle section all blend.
+        // A part is a slab of width 2*r (the capsule's diameter) whose
+        // thickness runs geometrically from that diameter (flat = 0, a
+        // capsule) to the sheet thickness (flat = 1), with the cross-section's
+        // shape factor running from a circle's to a rectangle's. Geometric,
+        // because thickness spans four decades: a linear blend of mass made a
+        // one-metre sheet at flat 0.9 weigh ninety kilograms, a wall between
+        // sheets and bodies that no mutation could cross.
         let r_cap = 0.5 * (r0 + r1);
-        let radius = (1.0 - flat) * r_cap + flat * r0;
-        let cap_vol = capsule_volume(len, r_cap);
-        let sheet_mass = len * 2.0 * r0 * sheet_thickness(node.r1 * scale) * ANIMAL_DENSITY;
-        let mass = (1.0 - flat) * cap_vol * ANIMAL_DENSITY + flat * sheet_mass;
-        let tissue_vol = (1.0 - flat) * cap_vol + flat * sheet_mass / ANIMAL_DENSITY;
-        let density = mass / tissue_vol.max(1e-9);
-        let section_area = (1.0 - flat) * PI * r_cap * r_cap + flat * (PI * 0.03 * 0.03 + len * 0.004);
+        let t_sheet = sheet_thickness(node.r1 * scale);
+        let thickness = (2.0 * r_cap).powf(1.0 - flat) * t_sheet.powf(flat);
+        let shape = (PI / 4.0).powf(1.0 - flat);
+        // Width: the capsule's mean diameter, or the sheet's chord 2*r0 (its
+        // r1 is the thickness gene).
+        let half_width = (1.0 - flat) * r_cap + flat * r0;
+        let section_area = 2.0 * half_width * thickness * shape;
+        let radius = (section_area / PI).sqrt();
+        let tissue_vol = section_area * len + (1.0 - flat) * 4.0 / 3.0 * PI * r_cap * r_cap * r_cap;
+        let mass = tissue_vol * ANIMAL_DENSITY;
+        let density = ANIMAL_DENSITY;
         // The muscle that swings a part sits on its parent (hip, shoulder,
         // chest), so torque scales with the parent's section, not the part's
         // own: a thin wing bone is moved by a thick chest.
@@ -173,6 +188,7 @@ impl<'a> Ctx<'a> {
             r0,
             r1,
             radius,
+            thickness,
             mass,
             density,
             joint: if parent.is_none() { JointKind::Rigid } else { node.joint },
@@ -243,14 +259,11 @@ pub fn decode(g: &Genome) -> Phenotype {
     let water = g.water_store.clamp(0.0, 0.5);
     let torso_volume = {
         let f = parts[0].flat;
-        let r_cap = 0.5 * (parts[0].r0 + parts[0].r1);
-        let v = capsule_volume(parts[0].len, r_cap);
-        let torso_density = ANIMAL_DENSITY * (1.0 - 0.9 * lung) * (1.0 + water);
-        let sheet_mass = parts[0].len * 2.0 * parts[0].r0 * sheet_thickness(parts[0].r1) * ANIMAL_DENSITY;
-        let mass = (1.0 - f) * v * torso_density + f * sheet_mass;
-        let vol = (1.0 - f) * v + f * sheet_mass / ANIMAL_DENSITY;
-        parts[0].mass = mass;
-        parts[0].density = mass / vol.max(1e-9);
+        let vol = parts[0].mass / ANIMAL_DENSITY;
+        // Lungs lighten and stored water weighs the round share of the trunk.
+        let torso_density = ANIMAL_DENSITY * (1.0 + (1.0 - f) * (water - 0.9 * lung));
+        parts[0].mass = vol * torso_density;
+        parts[0].density = torso_density;
         vol
     };
 
@@ -335,12 +348,12 @@ pub fn body_metrics(pheno: &Phenotype) -> BodyMetrics {
         }
     }
     let root = &pheno.parts[0];
-    let trunk_section = PI * root.radius * root.radius;
+    let trunk_section = root.section_area;
     BodyMetrics {
         reach,
-        // A mouth is the front of a trunk; a sheet (membrane root) has none and
-        // must absorb or filter instead.
-        mouth_area: PI * root.r0 * root.r0 * (1.0 - root.flat),
+        // A mouth is the front of the trunk: its cross-section there (a sheet
+        // has only its edge, width by thickness, and nibbles).
+        mouth_area: root.section_area * (root.r0 / (0.5 * (root.r0 + root.r1)).max(1e-6)),
         claws: (pad_section / trunk_section.max(1e-6)).min(3.0),
         plating: rigid_mass / total,
     }

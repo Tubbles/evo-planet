@@ -232,12 +232,14 @@ impl ArenaSim {
     /// or a clawed foot on any prey part.
     fn holding(&self) -> (bool, bool) {
         let trunk = &self.pred.pheno.parts[0];
-        let gape = 2.0 * trunk.r0 * (1.0 - trunk.flat);
+        // The gape is the trunk's thickness at the front: a capsule's diameter,
+        // a sheet's edge.
+        let gape = trunk.thickness * (trunk.r0 / (0.5 * (trunk.r0 + trunk.r1)).max(1e-6));
         let mouth = self.axis_point(&self.pred, 0, 1.0);
         let mut bite = false;
         let mut claw = false;
         for (j, q) in self.prey.pheno.parts.iter().enumerate() {
-            let thickness = if q.flat > 0.5 { 2.0 * q.r1.min(0.01) } else { 2.0 * q.radius };
+            let thickness = q.thickness;
             if gape > 0.0 && thickness <= gape && self.gap_to_part(&self.prey, j, mouth) <= 0.5 * gape {
                 bite = true;
             }

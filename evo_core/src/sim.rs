@@ -392,7 +392,7 @@ pub fn build_creature(
             // inner box has no mass in rapier); everything else about the part is
             // the continuous blend, and its mass is set from that blend.
             let col = if p.flat > 0.5 {
-                ColliderBuilder::cuboid(p.r0, p.len * 0.5, MEMBRANE_THICKNESS * 0.5)
+                ColliderBuilder::cuboid(p.r0, p.len * 0.5, (p.thickness * 0.5).max(MEMBRANE_THICKNESS * 0.5))
             } else {
                 ColliderBuilder::capsule_y(p.len * 0.5, p.radius.max(0.002))
             }
@@ -942,7 +942,7 @@ impl CreatureSim {
                 let p = &self.pheno.parts[i];
                 let iso = rb.position();
                 let half = iso.rotation * Vector3::new(0.0, p.len * 0.5, 0.0);
-                let r = p.radius * (1.0 - p.flat) + 0.5 * MEMBRANE_THICKNESS * p.flat;
+                let r = if p.flat > 0.5 { (p.thickness * 0.5).max(MEMBRANE_THICKNESS * 0.5) } else { p.radius };
                 let low = (iso.translation.vector + half).y.min((iso.translation.vector - half).y) - r;
                 let down = low <= self.ground_at(iso.translation.x) + 0.02;
                 if i == 0 {
