@@ -40,12 +40,18 @@ pub fn noise3(p: [f32; 3], seed: u32) -> f32 {
     lerp(y0, y1, fz)
 }
 
-fn fbm(p: [f32; 3], octaves: u32, lacunarity: f32, gain: f32, seed: u32) -> f32 {
+/// Fractal noise whose octaves stop at `max_rel_freq` times the base
+/// frequency (the first octave is always kept), so a coarse grid is not
+/// handed detail it cannot show: see `elevation_at_res`.
+fn fbm(p: [f32; 3], octaves: u32, lacunarity: f32, gain: f32, seed: u32, max_rel_freq: f32) -> f32 {
     let mut amp = 1.0;
     let mut freq = 1.0;
     let mut sum = 0.0;
     let mut norm = 0.0;
     for o in 0..octaves {
+        if o > 0 && freq > max_rel_freq {
+            break;
+        }
         sum += amp * noise3([p[0] * freq, p[1] * freq, p[2] * freq], seed.wrapping_add(o * 131));
         norm += amp;
         amp *= gain;
@@ -54,12 +60,15 @@ fn fbm(p: [f32; 3], octaves: u32, lacunarity: f32, gain: f32, seed: u32) -> f32 
     sum / norm
 }
 
-fn ridged(p: [f32; 3], octaves: u32, seed: u32) -> f32 {
+fn ridged(p: [f32; 3], octaves: u32, seed: u32, max_rel_freq: f32) -> f32 {
     let mut amp = 1.0;
     let mut freq = 1.0;
     let mut sum = 0.0;
     let mut norm = 0.0;
     for o in 0..octaves {
+        if o > 0 && freq > max_rel_freq {
+            break;
+        }
         let n = 1.0 - noise3([p[0] * freq, p[1] * freq, p[2] * freq], seed.wrapping_add(7 + o * 977)).abs();
         sum += amp * n * n;
         norm += amp;
@@ -72,13 +81,28 @@ fn ridged(p: [f32; 3], octaves: u32, seed: u32) -> f32 {
 /// Raw elevation in metres before sea level is chosen. Continents from low
 /// frequency noise, ridged mountain belts where a mask is high, detail on top.
 pub fn elevation_at(dir: [f32; 3], seed: u32) -> f32 {
+    elevation_at_res(dir, seed, 1_000_000)
+}
+
+/// Elevation as a grid of `cells` on the sphere can show it: noise whose
+/// wavelength is under about three cells is left out, so the coastline is
+/// drawn at the grid's own scale instead of being shattered into one-cell
+/// islands and fjords. A 600-cell world then has continents with an
+/// interior (at full detail a fifth of its land was more than one cell from
+/// the sea); a 6,000-cell world shows the same continents with their
+/// mountain belts and detail. Mountains rise only on land (the belt mask
+/// times a land bias that is zero at the coast), so they never cut the
+/// coast into islands.
+pub fn elevation_at_res(dir: [f32; 3], seed: u32, cells: usize) -> f32 {
     let p = |s: f32| [dir[0] * s, dir[1] * s, dir[2] * s];
-    let continents = fbm(p(1.6), 4, 2.0, 0.5, seed); // -1..1
-    let belt_mask = (fbm(p(2.4), 3, 2.0, 0.5, seed.wrapping_add(31)) * 1.6).clamp(0.0, 1.0);
-    let mountains = ridged(p(4.5), 4, seed) * belt_mask; // 0..1
-    let detail = fbm(p(9.0), 3, 2.0, 0.5, seed.wrapping_add(59)) * 0.15;
-    // Land-biased mountains: stronger where continents are high.
-    let land_bias = ((continents + 0.2) * 1.5).clamp(0.0, 1.0);
+    // Cell width in radians is about 3.54 / sqrt(cells); a lattice spacing
+    // of 1 / f radians must be three cells or more.
+    let f_max = (cells as f32).sqrt() / 10.6;
+    let continents = fbm(p(1.6), 4, 2.0, 0.5, seed, f_max / 1.6); // -1..1
+    let belt_mask = (fbm(p(2.4), 3, 2.0, 0.5, seed.wrapping_add(31), f_max / 2.4) * 1.6).clamp(0.0, 1.0);
+    let mountains = if 4.5 <= f_max { ridged(p(4.5), 4, seed, f_max / 4.5) * belt_mask } else { 0.0 }; // 0..1
+    let detail = if 9.0 <= f_max { fbm(p(9.0), 3, 2.0, 0.5, seed.wrapping_add(59), f_max / 9.0) * 0.15 } else { 0.0 };
+    let land_bias = (continents * 4.0).clamp(0.0, 1.0);
     continents * 2600.0 + mountains * 5200.0 * land_bias + detail * 800.0
 }
 

@@ -27,7 +27,7 @@
 //! Units: one tick is one day; energy is kilograms of dry biomass
 //! equivalent; a patch is roughly a 10 m square.
 
-use crate::decode::{body_metrics, decode};
+use crate::decode::{body_metrics, decode, Phenotype};
 use crate::genome::Genome;
 use std::f32::consts::PI;
 use crate::planet::{Derived, PlanetParams};
@@ -48,9 +48,11 @@ pub const PATCH_AREA: f32 = 100.0;
 /// decides how finely the planet is cut (see EcoWorld::patch_area).
 pub const NUTRIENT0_PER_M2: f32 = 0.02;
 pub const DEAD0_PER_M2: f32 = 0.01;
-/// Individual-plant density caps (performance guards), per m^2.
+/// Individual-plant density caps (performance guards), per m^2. The same
+/// on land as in water: at eight per hundred square metres the land cells
+/// filled with stunted seedlings and no better-adapted seed could land.
 pub const PLANT_CAP_PER_M2_WATER: f32 = 0.48;
-pub const PLANT_CAP_PER_M2_LAND: f32 = 0.08;
+pub const PLANT_CAP_PER_M2_LAND: f32 = 0.48;
 /// Beddington-DeAngelis interference per competitor per 100 m^2.
 pub const INTERFERENCE_PER_100M2: f32 = 0.15;
 /// Founding grazers per square metre of sea.
@@ -589,8 +591,54 @@ fn hash_genome(g: &Genome) -> String {
 
 /// Measure one body in one environment: the episodes of the battery and the
 /// traits they set. Pure, so a day's batch can run on every core.
+/// What the decoded body says before any physics: mass, surfaces, muscle,
+/// mouth, claws, plating, the rest-pose reach, and the oxygen-limited
+/// activity. Physics overlays speeds, power and the gait on these.
+fn decoded_traits(pheno: &Phenotype, derived: &Derived) -> Traits {
+    let bm = body_metrics(pheno);
+    Traits {
+        mass: pheno.total_mass,
+        activity: fatigue_factor(pheno, derived),
+        // Muscle work: cross-section of driven joints weighted by how far
+        // and how often they are swung. A rigid strut or a limp limb costs
+        // only its mass.
+        section_area: pheno
+            .parts
+            .iter()
+            .skip(1)
+            .map(|p| p.muscle_section * (1.0 - p.stiffness) * p.cpg.freq_mult * (p.cpg.amp.abs().min(p.limit) / 0.8).min(1.5))
+            .sum::<f32>(),
+        base_freq: pheno.base_freq,
+        membrane_area: pheno.membrane_area,
+        membrane_mass: pheno.membrane_mass,
+        reach: bm.reach,
+        mouth_area: bm.mouth_area,
+        claws: bm.claws,
+        plating: bm.plating,
+        upright: 0.3,
+        ..Default::default()
+    }
+}
+
 fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut traits: Traits) -> Traits {
     let pheno = decode(&genome);
+    // Until now this body may have been accounted as its parent's (the
+    // neutral prior at birth); from here on it is itself.
+    {
+        let own = decoded_traits(&pheno, &planet.derive());
+        traits.mass = own.mass;
+        traits.activity = own.activity;
+        traits.section_area = own.section_area;
+        traits.base_freq = own.base_freq;
+        traits.membrane_area = own.membrane_area;
+        traits.membrane_mass = own.membrane_mass;
+        traits.mouth_area = own.mouth_area;
+        traits.claws = own.claws;
+        traits.plating = own.plating;
+        if !traits.measured_land && !traits.measured_water && !traits.measured_air {
+            traits.reach = own.reach;
+        }
+    }
     let cfg = SimConfig { episode_time: TRAIT_EPISODE_S, ..Default::default() };
     let r = CreatureSim::run_episode(pheno.clone(), planet, env, cfg);
     // Sustained progress only, and only what the muscles add: the same
@@ -715,7 +763,7 @@ impl EcoWorld {
         let neighbours = terrain::nearest_neighbours(&positions, NEIGHBOURS);
 
         // Elevation, then sea level from the water-coverage quantile.
-        let raw: Vec<f32> = positions.iter().map(|p| terrain::elevation_at(*p, terrain_seed)).collect();
+        let raw: Vec<f32> = positions.iter().map(|p| terrain::elevation_at_res(*p, terrain_seed, n)).collect();
         let mut sorted = raw.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let k = (planet.water_coverage.clamp(0.0, 1.0) * n as f32) as usize;
@@ -865,30 +913,7 @@ impl EcoWorld {
         if let Some(t) = self.trait_cache.get(&key) {
             return *t;
         }
-        let pheno = decode(g);
-        let bm = body_metrics(&pheno);
-        let t = Traits {
-            mass: pheno.total_mass,
-            activity: fatigue_factor(&pheno, &self.derived),
-            // Muscle work: cross-section of driven joints weighted by how far
-            // and how often they are swung. A rigid strut or a limp limb costs
-            // only its mass.
-            section_area: pheno
-                .parts
-                .iter()
-                .skip(1)
-                .map(|p| p.muscle_section * (1.0 - p.stiffness) * p.cpg.freq_mult * (p.cpg.amp.abs().min(p.limit) / 0.8).min(1.5))
-                .sum::<f32>(),
-            base_freq: pheno.base_freq,
-            membrane_area: pheno.membrane_area,
-            membrane_mass: pheno.membrane_mass,
-            reach: bm.reach,
-            mouth_area: bm.mouth_area,
-            claws: bm.claws,
-            plating: bm.plating,
-            upright: 0.3,
-            ..Default::default()
-        };
+        let t = decoded_traits(&decode(g), &self.derived);
         self.trait_cache.insert(key, t);
         t
     }
@@ -903,7 +928,7 @@ impl EcoWorld {
         self.derived = self.planet.derive();
         let n = self.patches.len();
         // Raw elevation recovered from any patch, then the new sea level.
-        let old_sea = terrain::elevation_at(self.patches[0].pos, self.terrain_seed) - self.patches[0].elevation;
+        let old_sea = terrain::elevation_at_res(self.patches[0].pos, self.terrain_seed, self.patches.len()) - self.patches[0].elevation;
         let raw: Vec<f32> = self.patches.iter().map(|p| p.elevation + old_sea).collect();
         let mut sorted = raw.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -2162,16 +2187,20 @@ impl EcoWorld {
             let key = hash_genome(&b.genome);
             if !b.body_changed {
                 self.trait_cache.entry(key.clone()).or_insert(b.parent_traits);
+            } else {
+                // A changed body is accounted as its parent's body, on both
+                // sides of the ledger (mass and cost as well as speed), until
+                // its own physics has run: a prior that is neutral, so a queue
+                // of unmeasured bodies cannot select against new parts by
+                // charging for them before they are credited.
+                let mut prior = b.parent_traits;
+                prior.measured_land = false;
+                prior.measured_water = false;
+                prior.measured_air = false;
+                prior.measured_shore = false;
+                self.trait_cache.entry(key.clone()).or_insert(prior);
             }
-            let mut traits = self.lookup_traits(&b.genome);
-            // A changed body inherits its parent's measured speeds as a neutral
-            // prior until its own physics runs: assumed no better and no worse.
-            if b.body_changed && !traits.measured_water && !traits.measured_land {
-                traits.water_speed = b.parent_traits.water_speed;
-                traits.land_speed = b.parent_traits.land_speed;
-                traits.turn_water = b.parent_traits.turn_water;
-                traits.turn_land = b.parent_traits.turn_land;
-            }
+            let traits = self.lookup_traits(&b.genome);
             // Larval dispersal: young drift one or two patches from the parent,
             // which is what keeps them off the parents' menu in the sea.
             let born_at = self.disperse_same_habitat(b.patch, LARVAL_DRIFT_M / patch_w);
@@ -2564,7 +2593,7 @@ impl EcoWorld {
         let sea_level_raw = {
             // Recover raw sea level from any patch: raw = elevation + sea_level.
             let p = &self.patches[0];
-            terrain::elevation_at(p.pos, self.terrain_seed) - p.elevation
+            terrain::elevation_at_res(p.pos, self.terrain_seed, self.patches.len()) - p.elevation
         };
         let mut positions = Vec::with_capacity(ico.positions.len() * 3);
         let mut vertex_patch = Vec::with_capacity(ico.positions.len());
@@ -2574,7 +2603,7 @@ impl EcoWorld {
             positions.extend_from_slice(v);
             let patch = terrain::nearest_patch(&centres, *v);
             vertex_patch.push(patch as u32);
-            let e = terrain::elevation_at(*v, self.terrain_seed) - sea_level_raw;
+            let e = terrain::elevation_at_res(*v, self.terrain_seed, self.patches.len()) - sea_level_raw;
             vertex_elevation.push(e);
             vertex_temp.push(terrain::local_temperature(self.planet.temp_c, *v, e));
         }
