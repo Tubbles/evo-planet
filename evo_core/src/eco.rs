@@ -2053,7 +2053,18 @@ impl EcoWorld {
             // grazeable as a floating alga; a sheet swimming away from a slower
             // grazer is not). The continuum has no kingdom line for a mouth.
             let mut sheet_targets: Vec<(usize, f32)> = Vec::new();
-            for &j in &animals_in[patch] {
+            // A crowded cell is sampled (64 sheets, each standing for its
+            // share of the crowd) so that a day's grazing stays linear in the
+            // number of animals, not quadratic: a cell of a hundred thousand
+            // milligram sheets froze the world otherwise.
+            const SHEET_SAMPLE: usize = 64;
+            let crowd = animals_in[patch].len();
+            let (picks, weight): (Vec<usize>, f32) = if crowd > SHEET_SAMPLE {
+                ((0..SHEET_SAMPLE).map(|_| animals_in[patch][self.rng.gen_range(0..crowd)]).collect(), crowd as f32 / SHEET_SAMPLE as f32)
+            } else {
+                (animals_in[patch].clone(), 1.0)
+            };
+            for j in picks {
                 if j == ai || killed_flag[j] {
                     continue;
                 }
@@ -2066,7 +2077,7 @@ impl EcoWorld {
                 // the water the body clears (zooplankton on phytoplankton), on
                 // top of what a bite takes.
                 let swallow = if in_water && s_reach <= gape { filtered } else { 0.0 };
-                let acc = base * keep_up + s_whole * swallow;
+                let acc = (base * keep_up + s_whole * swallow) * weight;
                 if acc > 0.0 {
                     sheet_targets.push((j, acc));
                     plant_b += acc;
