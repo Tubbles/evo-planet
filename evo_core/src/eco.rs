@@ -53,8 +53,6 @@ pub const DEAD0_PER_M2: f32 = 0.01;
 /// filled with stunted seedlings and no better-adapted seed could land.
 pub const PLANT_CAP_PER_M2_WATER: f32 = 0.48;
 pub const PLANT_CAP_PER_M2_LAND: f32 = 0.48;
-/// Beddington-DeAngelis interference per competitor per 100 m^2.
-pub const INTERFERENCE_PER_100M2: f32 = 0.15;
 /// Founding grazers per square metre of sea.
 pub const FOUNDERS_PER_M2: f32 = 1.0 / 1200.0;
 /// Evaporation from a wet body surface in dry air, kg of water per m² per
@@ -1814,16 +1812,19 @@ impl EcoWorld {
                     plant_b += acc;
                 }
             }
-            // Beddington-DeAngelis: conspecific crowding in the patch interferes with feeding.
-            let crowd = (animals_in[patch].len().saturating_sub(1)) as f32;
-            let interference = INTERFERENCE_PER_100M2 * crowd * 100.0 / a;
-            let plant_rate = search * plant_b / (1.0 + search * handling * plant_b + interference); // kg/day
+            // Competition is depletion: what one eats the next does not find.
+            // (A Beddington-DeAngelis interference term per competitor used to
+            // divide every intake by the crowd: at 350 grazers a cell it
+            // throttled feeding fifty-fold, so nothing was ever food-limited,
+            // the mats were never eaten down, and the smallest fastest breeder
+            // won a scramble that no resource ever decided.)
+            let plant_rate = search * plant_b / (1.0 + search * handling * plant_b); // kg/day
             let carrion_here = self.patches[patch].carrion;
             // Carrion is smelt from afar: the detection strip is three times wider.
             // A flier surveys from height: a far wider strip (vultures find carcasses from kilometres up).
             let strip = if sub < 1.0 && air_speed > 0.0 { 40.0 } else { 6.0 };
             let carrion_search = ((PI * reach_now * reach_now + strip * reach_now * path) / a).min(1.0);
-            let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here + interference);
+            let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here);
             {
                 // Bacteria through the filter: cheap, meat-like food for anything that strains water.
                 let take = bacteria_rate.min(self.patches[patch].bacteria * 0.3);

@@ -428,7 +428,7 @@ flowchart LR
   AC["activity: measured gait power over the foraging day"] --> DL
   WB["water: evaporation per m² of skin in air, less drink (patch wetness) and the water in food"] --> DT
   PH["photosynthesis at the surface mat, shared by area"] --> DL
-  RG["range: π × reach² + 2 × reach × path, over as many cells as it covers"] --> FR["Holling type II intake of plants, motile sheets (as far as the grazer keeps up with them), carrion and bacteria, with interference"]
+  RG["range: π × reach² + 2 × reach × path, over as many cells as it covers"] --> FR["Holling type II intake of plants, motile sheets (as far as the grazer keeps up with them), carrion and bacteria; competition is depletion, no interference term"]
   FR --> GT["stomach and digestion by gut type"]
   GT --> DL
   OS["absorption and capture by surface"] --> DL
