@@ -411,10 +411,17 @@ impl Node {
             body = true;
         }
         // Form and joint genes drift; one mutation in five is a larger step.
+        // Flatness steps are small: thickness is geometric in it (four
+        // decades over the range), so 0.03 is already a third more thickness.
         self.sync();
         for k in 0..4 {
             if rng.gen_bool((p * 0.6) as f64) {
-                let step = if rng.gen_bool(0.2) { 0.4 } else { 0.1 };
+                let step = match (k, rng.gen_bool(0.2)) {
+                    (0, true) => 0.15,
+                    (0, false) => 0.03,
+                    (_, true) => 0.4,
+                    _ => 0.1,
+                };
                 let d = rng.gen_range(-step..step);
                 match k {
                     0 => self.flat = (self.flat + d).clamp(0.0, 1.0),
