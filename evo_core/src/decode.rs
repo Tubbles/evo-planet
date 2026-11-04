@@ -69,6 +69,8 @@ pub struct Phenotype {
     pub parts: Vec<Part>,
     pub lung_frac: f32,
     pub water_store: f32,
+    /// Gills (0) to lungs (1).
+    pub breathing: f32,
     pub base_freq: f32,
     pub total_mass: f32,
     pub membrane_area: f32,
@@ -267,13 +269,13 @@ pub fn decode(g: &Genome) -> Phenotype {
         vol
     };
 
-    // Clamp neighbouring mass ratios to about 10:1 for solver stability by
-    // raising the lighter part's density.
+    // Clamp neighbouring mass ratios to 30:1 for solver stability by
+    // raising the lighter part's density (12:1 erased a wing's lightness).
     for i in 1..parts.len() {
         let p = parts[i].parent.unwrap();
         let pm = parts[p].mass;
-        if parts[i].mass * 12.0 < pm {
-            let m = pm / 12.0;
+        if parts[i].mass * 30.0 < pm {
+            let m = pm / 30.0;
             let vol = parts[i].mass / parts[i].density;
             parts[i].mass = m;
             parts[i].density = m / vol;
@@ -288,6 +290,7 @@ pub fn decode(g: &Genome) -> Phenotype {
         parts,
         lung_frac: lung,
         water_store: water,
+        breathing: g.breathing,
         base_freq: g.base_freq,
         total_mass,
         membrane_area,

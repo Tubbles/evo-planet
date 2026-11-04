@@ -108,7 +108,7 @@ pub fn clearance_per_kg(mass: f32) -> f32 {
 // No population guard: the world's limits (light, particles, food, crowding)
 // are the only limits. Performance is a separate problem (cohorts, planned)
 // and is never solved by discarding births.
-pub const TRAIT_EPISODE_S: f32 = 4.0;
+pub const TRAIT_EPISODE_S: f32 = 6.0;
 /// An animal's body genes mutate at this share of the rate of its other
 /// genes (controller, life history, physiology). Morphology is conserved in
 /// life, and each changed body is a physics measurement the planet must
@@ -187,7 +187,12 @@ pub struct Traits {
     pub land_speed: f32,
     pub water_speed: f32,
     pub glide_distance: f32,
+    /// Oxygen-limited share of full muscle output in water and in air.
     pub activity: f32,
+    #[serde(default)]
+    pub fatigue_water: f32,
+    #[serde(default)]
+    pub fatigue_land: f32,
     pub section_area: f32,
     pub base_freq: f32,
     pub membrane_area: f32,
@@ -766,7 +771,9 @@ fn decoded_traits(pheno: &Phenotype, derived: &Derived) -> Traits {
     let bm = body_metrics(pheno);
     Traits {
         mass: pheno.total_mass,
-        activity: fatigue_factor(pheno, derived),
+        activity: fatigue_factor(pheno, derived, 0.0),
+        fatigue_water: fatigue_factor(pheno, derived, 1.0),
+        fatigue_land: fatigue_factor(pheno, derived, 0.0),
         // Muscle work: cross-section of driven joints weighted by how far
         // and how often they are swung. A rigid strut or a limp limb costs
         // only its mass.
@@ -796,6 +803,8 @@ fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut tr
         let own = decoded_traits(&pheno, &planet.derive());
         traits.mass = own.mass;
         traits.activity = own.activity;
+        traits.fatigue_water = own.fatigue_water;
+        traits.fatigue_land = own.fatigue_land;
         traits.section_area = own.section_area;
         traits.base_freq = own.base_freq;
         traits.membrane_area = own.membrane_area;
@@ -891,7 +900,8 @@ fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut tr
             };
             traits.glide_distance = if r.exploded { 0.0 } else { glide };
             traits.flap_lift = if r.exploded { 0.0 } else { lift };
-            traits.air_speed = if !r.exploded && r.airborne_frac >= 0.95 && r.distance > 5.0 { r.distance / TRAIT_EPISODE_S } else { 0.0 };
+            // Speed through the air for the share of the episode spent aloft.
+            traits.air_speed = if r.exploded { 0.0 } else { r.distance / TRAIT_EPISODE_S * r.airborne_frac };
             traits.turn_air = turn;
             traits.climb_air = climb;
             traits.measured_air = true;
@@ -1193,7 +1203,10 @@ impl EcoWorld {
                 a.traits.measured_water = false;
                 a.traits.measured_air = false;
                 a.traits.measured_shore = false;
-                a.traits.activity = fatigue_factor(&decode(&a.genome), &derived);
+                let ph = decode(&a.genome);
+                a.traits.activity = fatigue_factor(&ph, &derived, 0.0);
+                a.traits.fatigue_water = fatigue_factor(&ph, &derived, 1.0);
+                a.traits.fatigue_land = fatigue_factor(&ph, &derived, 0.0);
             }
             self.pending.clear();
             for idx in 0..self.animals.len() {
@@ -1217,7 +1230,8 @@ impl EcoWorld {
         let order = if in_water { [Environment::Land, Environment::Water] } else { [Environment::Water, Environment::Land] };
         // Wings are only worth testing on a body light enough to be lifted:
         // wing loading below 50 kg/m^2 (bats and birds span 1-20).
-        let winged = t.membrane_area > 0.0 && t.membrane_area / t.mass.max(1e-3) >= 0.02;
+        // Any surface may lift: every body with a sheet is dropped once.
+        let winged = t.membrane_area > 0.0;
         // The queue is rebuilt from scratch each day and a body is requested
         // once per rebuild, so no duplicate check (which was quadratic) is needed.
         if winged && !t.measured_air {
@@ -1382,9 +1396,15 @@ impl EcoWorld {
 
     /// A predator lineage's own record (mean eaten share over the pairs it
     /// has fought), once it has fought a few: the prior for pairs it has not.
-    fn arena_record(&self, pred: u32) -> Option<f32> {
-        self.arena_record.get(&pred).filter(|r| r.1 >= 3).map(|r| r.0 / r.1 as f32)
+    /// A predator lineage's record over the pairs it has fought: the sum of
+    /// eaten shares and the number of fights.
+    fn arena_record(&self, pred: u32) -> Option<(f32, u32)> {
+        self.arena_record.get(&pred).copied()
     }
+
+    /// Fights a lineage's record is weighed against the prior with: a lost
+    /// first bout must not zero every pair it has never fought.
+    pub const ARENA_PRIOR_WEIGHT: f32 = 5.0;
 
     /// Every fought-out pair: (predator lineage, prey lineage, medium, outcome).
     pub fn arena_outcomes(&self) -> Vec<(u32, u32, Environment, crate::arena::ArenaOutcome)> {
@@ -1750,7 +1770,7 @@ impl EcoWorld {
                 continue;
             }
             // --- read state -------------------------------------------------
-            let (patch, in_water, adult_mass, mass, motility, section, freq, activity, _gut_type, fat_frac, gut_frac, membrane_area, water_speed_raw, land_speed_raw, measured_land, measured_water, eff_plant, eff_meat, prev_intake) = {
+            let (patch, in_water, adult_mass, mass, motility, _section, _freq, activity, _gut_type, fat_frac, gut_frac, membrane_area, water_speed_raw, land_speed_raw, measured_land, measured_water, eff_plant, eff_meat, prev_intake) = {
                 let a = &self.animals[ai];
                 let (ep, em) = a.efficiencies();
                 (
@@ -1829,22 +1849,27 @@ impl EcoWorld {
             let waterproof = self.animals[ai].genome.land_tolerance.clamp(0.0, 1.0);
             let fmr = (membrane_mass * 0.004 + (mass - membrane_mass).max(0.0).powf(0.75) * (0.0005 + 0.0025 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3) * (1.0 + 0.3 * waterproof);
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
-            // Short of oxygen, the muscles cannot be kept working all day.
-            let activity = activity * resp_eff;
+            // Short of oxygen (gills in air, lungs under water) the tissue runs
+            // an anaerobic debt that costs it, continuously, up to 5% of the
+            // body a day with no gas exchange at all.
+            let upkeep = upkeep + mass * 0.05 * ((0.2 - resp_eff).max(0.0) / 0.2);
+            // What the muscles can keep up all day: the oxygen budget in this
+            // medium (gills under water, lungs in air), from the body's own tests.
+            let activity = {
+                let t = &self.animals[ai].traits;
+                let fw = if t.fatigue_water > 0.0 { t.fatigue_water } else { activity };
+                let fl = if t.fatigue_land > 0.0 { t.fatigue_land } else { activity };
+                fw * sub + fl * (1.0 - sub)
+            };
             // Moving costs what the gait episode measured: mechanical power at
             // full drive (scaled to this individual's mass) over the foraging
             // day, through muscle efficiency, in dry biomass. A body not yet
             // measured pays the muscle-section estimate instead.
-            let activity_cost = {
-                let t = &self.animals[ai].traits;
-                let power = (t.power_water * sub + t.power_land * (1.0 - sub)) * (mass / adult_mass).clamp(0.01, 1.0);
-                if power > 0.0 {
-                    power * activity * motility * FORAGE_S / MUSCLE_EFFICIENCY / J_PER_KG_DRY
-                } else {
-                    0.004 * section * freq * 20.0 * activity * motility * size_f.powf(2.0 / 3.0)
-                }
-            };
-            let mut delta = -(fmr + upkeep + activity_cost);
+            // Moving is charged by the metre actually walked today (below,
+            // once the day's food is known), at the gait's measured cost of
+            // transport; standing still costs nothing beyond maintenance.
+            let activity_cost: f32;
+            let mut delta = -(fmr + upkeep);
             // A motile organism with membranes still photosynthesises (Euglena,
             // not a sudden animal): the same leaf chemistry as a plant, halved for
             // a surface that is not held flat to the sun, and displaced by the
@@ -1867,9 +1892,9 @@ impl EcoWorld {
                     production_today += photo;
                 }
             }
-            cost_today += fmr + upkeep + activity_cost;
+            cost_today += fmr + upkeep;
             // What is metabolised is excreted: its nutrient returns to the cell.
-            self.patches[patch].nutrient += (fmr + upkeep + activity_cost) * NUTRIENT_FRACTION;
+            self.patches[patch].nutrient += (fmr + upkeep) * NUTRIENT_FRACTION;
 
             // --- digestion of yesterday's gut contents -------------------------
             let gut_cap = gut_frac * mass;
@@ -1889,6 +1914,7 @@ impl EcoWorld {
                 }
             }
             let mut space = (gut_cap - (self.animals[ai].gut_plant + self.animals[ai].gut_meat)).max(0.0);
+            let space_at_start = space;
 
             // --- foraging options, each as a Holling type II intake rate ---------
             // Bite rate from the mouth: trunk cross-section (juveniles scaled),
@@ -2102,14 +2128,14 @@ impl EcoWorld {
                     let attack = m34 * (0.2 + my_bl.min(10.0)) * (0.5 + 3.0 * claws) * (0.5 + 0.5 * upright) * (0.5 + 0.5 * (my_turn / 1.5).min(1.0));
                     // Taking off is the escape a ground predator cannot follow: a glider
                     // needs a perch (its patch's launch height), a flier needs nothing.
+                    // Taking off: a glide from the cell's launch height, or the
+                    // stroke's own lift (a metre of powered lift is a take-off).
                     let takeoff = if p_in_water {
                         0.0
-                    } else if prey.traits.air_speed > 0.0 {
-                        1.0
                     } else {
                         let e = self.patches[prey.patch].elevation;
                         let drop = self.neighbours[prey.patch].iter().map(|&k| e - self.patches[k].elevation).fold(0.0f32, f32::max);
-                        (prey.traits.glide_distance / crate::sim::AIR_DROP_HEIGHT * (self.patches[prey.patch].canopy + drop.min(50.0)) / 10.0).clamp(0.0, 1.0)
+                        (prey.traits.glide_distance / crate::sim::AIR_DROP_HEIGHT * (self.patches[prey.patch].canopy + drop.min(50.0)) / 10.0 + prey.traits.flap_lift + prey.traits.air_speed).clamp(0.0, 1.0)
                     };
                     let defence = pm.powf(0.75) * (0.2 + prey_bl.min(10.0)) * (0.5 + 2.0 * prey.traits.plating) * (1.0 + 3.0 * takeoff) * (0.5 + 0.5 * (prey_turn / 1.5).min(1.0));
                     let scale = 0.25 * (attack + defence) + 1e-6;
@@ -2133,16 +2159,15 @@ impl EcoWorld {
                     // No mouth and no claws means nothing to bite or hold with:
                     // no attempt, no fight. That is the arena's own rule applied
                     // before the arena, not a tuning.
-                    let can_bite = self.animals[ai].traits.mouth_area > 0.0 || claws > 0.0;
-                    let p_capture = if !can_bite {
-                        0.0
-                    } else {
-                        match self.arena_outcome(self.animals[ai].lineage, prey.lineage, medium) {
-                            Some(o) => o.eaten,
-                            // Not fought yet: the predator's own record over its
-                            // other prey, or the formula if it has none.
-                            None => self.arena_record(self.animals[ai].lineage).unwrap_or_else(|| hump / (1.0 + (-(attack - defence) / scale).exp())),
-                        }
+                    let prior = hump / (1.0 + (-(attack - defence) / scale).exp());
+                    let p_capture = match self.arena_outcome(self.animals[ai].lineage, prey.lineage, medium) {
+                        Some(o) => o.eaten,
+                        // Not fought yet: the prior, weighed with the predator's
+                        // own record over the prey it has fought.
+                        None => match self.arena_record(self.animals[ai].lineage) {
+                            Some((sum, n)) => (prior * Self::ARENA_PRIOR_WEIGHT + sum) / (Self::ARENA_PRIOR_WEIGHT + n as f32),
+                            None => prior,
+                        },
                     };
                     let p_success = encounter * p_capture;
                     // Fritsch et al.: energy gained per kill falls with relative prey
@@ -2245,6 +2270,36 @@ impl EcoWorld {
                 a.ate_carrion += food_carrion;
             }
 
+            // --- the day's walking, and what it cost ---------------------------
+            // The body forages until it has found what it can eat (the bite
+            // rate, or the room in its gut), then stops: the path needed is the
+            // search that brings the day's food to that, up to the whole day's
+            // path. The metres walked are charged at the gait's measured cost of
+            // transport (J per kg per m) through muscle efficiency; a body not
+            // yet measured pays the field estimate of 10.7 J per kg^0.68 per m.
+            {
+                let food_found = plant_b + carrion_here;
+                let want = bite_rate.min(space_at_start).max(0.0);
+                let path_needed = if food_found <= 0.0 {
+                    path
+                } else {
+                    let h = handling;
+                    if h * want >= 1.0 {
+                        path
+                    } else {
+                        let s_needed = want / (food_found * (1.0 - h * want));
+                        ((s_needed * a - PI * reach_now * reach_now) / (2.0 * reach_now).max(1e-3)).clamp(0.0, path)
+                    }
+                };
+                let t = &self.animals[ai].traits;
+                let cot = t.cot_water * sub + t.cot_land * (1.0 - sub);
+                let joules = if cot > 0.0 { cot * mass * g * path_needed / MUSCLE_EFFICIENCY } else { 10.7 * mass.powf(0.68) * path_needed };
+                activity_cost = joules / J_PER_KG_DRY;
+                delta -= activity_cost;
+                cost_today += activity_cost;
+                self.patches[patch].nutrient += activity_cost * NUTRIENT_FRACTION;
+            }
+
             // --- water: loss through the skin in air, against drink and food ----
             // Evaporation is per square metre of body surface, so it is the
             // surface-to-mass ratio that decides who can live on dry land: a
@@ -2276,11 +2331,11 @@ impl EcoWorld {
                 // A glider reaches the next patch when a launch carries it ten metres;
                 // a flier ranges over everything within an hour's flight.
                 let can_glide_over = measured_air && glide_ratio * launch_h >= patch_w;
-                let flier = measured_air && air_speed_raw * motility > 0.5;
+                let flier = measured_air && air_speed_raw * motility > 0.0;
                 // Relocation is a distance: a flier an hour's flight, a crawler or
                 // swimmer its day's path, in cells of this width; the move is paid
                 // per cell crossed at the gait's measured cost of transport.
-                let reloc_m = if flier { air_speed_raw * motility * 3600.0 } else { path };
+                let reloc_m = path.max(air_speed_raw * motility * 3600.0);
                 let range_hops = ((reloc_m / patch_w).round() as usize).clamp(1, 12);
                 // Breadth-first over the neighbour graph up to range_hops, each
                 // cell with the number of cells crossed to reach it.
@@ -2341,16 +2396,15 @@ impl EcoWorld {
                 }
                 if let Some((target, _)) = best {
                     let target_water = self.patches[target].water;
-                    let use_speed = (if target_water { water_speed_raw } else { land_speed_raw.max(air_speed_raw) }) * motility * lin_f;
                     // The move costs the measured cost of transport (J per kg per
                     // metre, Tucker's form when unmeasured) over the cells crossed.
                     let t = &self.animals[ai].traits;
                     let cot = if target_water { t.cot_water } else { t.cot_land };
                     let dist = best_hops as f32 * patch_w;
                     delta -= if cot > 0.0 {
-                        cot * mass * (g / 9.81) * dist / MUSCLE_EFFICIENCY / J_PER_KG_DRY
+                        cot * mass * g * dist / MUSCLE_EFFICIENCY / J_PER_KG_DRY
                     } else {
-                        0.00001 * mass.powf(0.7) * (g / 9.81) * dist / (0.3 + use_speed).min(3.0)
+                        10.7 * mass.powf(0.68) * dist / J_PER_KG_DRY
                     };
                     self.animals[ai].patch = target;
                 }
@@ -2413,12 +2467,14 @@ impl EcoWorld {
                     }
                 }
             }
-            if resp_eff < 0.2 && self.rng.gen_bool(0.5) {
-                // A gill-breather on dry land, or a lung-breather under water.
-                self.stats.deaths_suffocated += 1;
-                deaths.push(ai);
-            } else if a.reserve < 0.0 {
-                self.stats.deaths_starved += 1;
+            if a.reserve < 0.0 {
+                // Starved; counted as suffocated when it was the oxygen debt
+                // (a gill-breather on dry land, a lung-breather under water).
+                if resp_eff < 0.2 {
+                    self.stats.deaths_suffocated += 1;
+                } else {
+                    self.stats.deaths_starved += 1;
+                }
                 deaths.push(ai);
             } else if a.water < -(LETHAL_WATER_LOSS + a.genome.water_store.clamp(0.0, 0.5)) * a.mass {
                 self.stats.deaths_dried += 1;

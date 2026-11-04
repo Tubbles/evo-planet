@@ -163,8 +163,8 @@ pub struct EpisodeResult {
     /// Mean angular speed of the trunk, rad/s: low for a carried trunk, high
     /// for a body that rolls or tumbles its way forward.
     pub trunk_spin: f32,
-    /// Mechanical work the joints did during the settled time, joules (the
-    /// absolute value of torque times angular displacement, summed).
+    /// Metabolic-side work of the joints during the settled time, joules:
+    /// work done in full, work absorbed while lengthening at a fifth.
     pub work: f32,
     /// Cost of transport: work per kilogram per metre of progress, J/(kg m).
     /// Walking mammals 1 to 5; a thrashing body far more.
@@ -229,6 +229,8 @@ pub struct CreatureSim {
     clearance_sum: f32,
     trunk_spin_sum: f32,
     work: f32,
+    /// Work with lengthening counted in full, for the energy audit.
+    work_total: f32,
     energy_start: Option<f32>,
 }
 
@@ -239,10 +241,27 @@ fn part_bounding_radius(p: &crate::decode::Part) -> f32 {
 /// Oxygen supply over demand, clamped. Supply grows with lung fraction,
 /// torso volume and partial pressure of O2; demand with total muscle section
 /// and oscillation frequency.
-pub fn fatigue_factor(pheno: &Phenotype, derived: &Derived) -> f32 {
-    let supply = pheno.lung_frac * pheno.torso_volume * derived.o2_rel;
+/// Oxygen supply over demand in a medium: gills (the breathing gene toward
+/// 0) supply a submerged body at the rate a typical 8% lung would, lungs
+/// (breathing toward 1) supply a body in air by its lung fraction; the
+/// medium is the submersion (1 water, 0 air, between on the shore).
+pub fn fatigue_factor(pheno: &Phenotype, derived: &Derived, submersion: f32) -> f32 {
+    let b = pheno.breathing.clamp(0.0, 1.0);
+    let gills = (1.0 - 0.9 * b) * 0.08;
+    let lungs = (0.1 + 0.9 * b) * pheno.lung_frac;
+    let capacity = submersion * gills + (1.0 - submersion) * lungs;
+    let supply = capacity * pheno.torso_volume * derived.o2_rel;
     let demand = (pheno.total_section_area * pheno.base_freq).max(1e-6);
     (O2_BUDGET_K * supply / demand).clamp(0.1, 1.0)
+}
+
+/// The submersion an environment's episode runs in, for the oxygen budget.
+pub fn env_submersion(env: Environment) -> f32 {
+    match env {
+        Environment::Water => 1.0,
+        Environment::Shore => 0.5,
+        _ => 0.0,
+    }
 }
 
 /// Hydration multiplier on land fitness: creatures on arid worlds need
@@ -383,7 +402,7 @@ pub fn build_creature(
             iso.translation.z += origin_z;
         }
 
-        let fatigue = fatigue_factor(pheno, derived);
+        let fatigue = fatigue_factor(pheno, derived, env_submersion(env));
 
         let mut handles: Vec<RigidBodyHandle> = Vec::with_capacity(n);
         for (i, p) in pheno.parts.iter().enumerate() {
@@ -471,8 +490,9 @@ pub fn update_motors(
     fatigue: f32,
     time: f32,
     dr: Drive,
-) -> f32 {
+) -> (f32, f32) {
     let mut power = 0.0f32;
+    let mut power_abs = 0.0f32;
     let t = time;
     let f = base_freq;
     for i in 1..parts.len() {
@@ -529,12 +549,16 @@ pub fn update_motors(
                 let maxf = strength + rigid;
                 for (target, theta, omega) in [(t1, ang.x, w.x), (t2, ang.z, w.z), (t3, ang.y, w.y)] {
                     let tau = (stiffness * (target - theta) - damping * omega).clamp(-maxf, maxf);
-                    power += (tau * omega).abs();
+                    let p = tau * omega;
+                    // Muscle pays about a fifth for work done on it (lengthening
+                    // under load) compared with work it does.
+                    power += if p > 0.0 { p } else { 0.2 * -p };
+                    power_abs += p.abs();
                 }
             }
         }
     }
-    power
+    (power, power_abs)
 }
 
 /// Fluid, spin, rolling and buoyancy forces on every part of one body.
@@ -771,6 +795,7 @@ impl CreatureSim {
             clearance_sum: 0.0,
             trunk_spin_sum: 0.0,
             work: 0.0,
+            work_total: 0.0,
             energy_start: None,
         };
         sim.start_com = sim.com();
@@ -891,9 +916,10 @@ impl CreatureSim {
 
     fn update_motors(&mut self) {
         let drive = Drive { active: self.motors_active(), steer: self.cfg.steer, bias_shift: self.cfg.bias_shift, amp_scale: self.cfg.amp_scale };
-        let power = update_motors(&self.bodies, &mut self.impulse_joints, &self.pheno.parts, &self.handles, &self.joint_handles, self.pheno.base_freq, self.fatigue, self.time, drive);
+        let (power, power_abs) = update_motors(&self.bodies, &mut self.impulse_joints, &self.pheno.parts, &self.handles, &self.joint_handles, self.pheno.base_freq, self.fatigue, self.time, drive);
         if self.settled {
             self.work += power * self.cfg.dt;
+            self.work_total += power_abs * self.cfg.dt;
         }
     }
 
@@ -1069,7 +1095,7 @@ impl CreatureSim {
             trunk_spin: if self.total_steps > 0 { self.trunk_spin_sum / self.total_steps as f32 } else { 0.0 },
             work: self.work,
             energy_leak: match self.energy_start {
-                Some(e0) => (self.mechanical_energy() - e0) - self.work,
+                Some(e0) => (self.mechanical_energy() - e0) - self.work_total,
                 None => 0.0,
             },
             cost_of_transport: {
@@ -1143,6 +1169,7 @@ mod tests {
         g.root = 0;
         g.base_freq = freq;
         g.lung_frac = 0.1;
+        g.breathing = 1.0;
         g.water_store = 0.0;
         g.motility = 1.0;
         g
@@ -1218,6 +1245,7 @@ mod tests {
         g.nodes[0].r0 = 0.75;
         g.nodes[0].recursive_limit = 1;
         g.lung_frac = 0.0;
+        g.breathing = 1.0;
         g.water_store = 0.0;
         let cfg = SimConfig { settle_time: 0.0, episode_time: 1.5, ..Default::default() };
         let earth = PlanetParams::earth();
