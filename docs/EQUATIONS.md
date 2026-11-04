@@ -1,6 +1,6 @@
 # Evo Planet Equations
 
-Every quantity in the model and the equation that produces it, from the genome through the physics episodes to the daily tick of the planet. Units are kilograms, metres, seconds and days unless stated. `×` multiply, `^` power, `clamp(x, low, high)` limits x to the range, `exp` is e to the power. Source of truth: `evo_core/src` at commit 70f0047.
+Every quantity in the model and the equation that produces it, from the genome through the physics episodes to the daily tick of the planet. Units are kilograms, metres, seconds and days unless stated. `×` multiply, `^` power, `clamp(x, low, high)` limits x to the range, `exp` is e to the power. Source of truth: `evo_core/src` on main after the energetics fixes.
 
 ## Genome
 
@@ -31,7 +31,7 @@ Each decoded part is a slab whose thickness runs geometrically from a capsule's 
 | Collider | cross-section, flatness | flatness ≤ 0.5: capsule of radius √(cross-section / π) ; flatness > 0.5: box width × length × max(thickness, 1 mm) |
 | Mass | cross-section, length, mean radius, flatness | mass = 1000 kg/m³ × (cross-section × length + (1 − flatness) × 4/3 × π × mean radius³) |
 | Trunk density | lung fraction, water store, flatness | trunk density = 1000 × (1 + (1 − flatness) × (water store − 0.9 × lung fraction)); trunk mass = tissue volume × trunk density |
-| Mass ratio clamp | parent mass | a part lighter than parent mass / 12 is raised to parent mass / 12 (solver stability) |
+| Mass ratio clamp | parent mass | a part lighter than parent mass / 30 is raised to parent mass / 30 (solver stability) |
 | Muscle section | parent's cross-section | muscle section = cross-section of the part it hangs from (the root uses its own) |
 | Maximum torque | muscle section | maximum torque = 4000 N·m per m² × muscle section |
 
@@ -46,7 +46,7 @@ Each decoded part is a slab whose thickness runs geometrically from a capsule's 
 | Gape | trunk thickness, radii | gape = trunk thickness × base radius / mean radius |
 | Claws | parts' grip | claws = min(3, Σ cross-section × grip / trunk cross-section) |
 | Plating | parts' stiffness | plating = Σ over non-trunk parts of mass × stiffness × (1 − flatness) / total mass |
-| Fatigue (oxygen) factor | lung fraction, trunk volume, planet oxygen, muscle sections, base frequency | fatigue = clamp(40 × lung fraction × trunk volume × oxygen relative / (Σ muscle section × base frequency), 0.1, 1) |
+| Fatigue (oxygen) factor | breathing, lung fraction, trunk volume, planet oxygen, muscle sections, base frequency, medium | gills = (1 − 0.9 × breathing) × 0.08; lungs = (0.1 + 0.9 × breathing) × lung fraction; capacity = submersion × gills + (1 − submersion) × lungs ; fatigue = clamp(40 × capacity × trunk volume × oxygen relative / (Σ muscle section × base frequency), 0.1, 1), computed for water (submersion 1) and for land (0) |
 | Body surface (ecology) | current mass, membrane area, growth | surface = max(6 × (mass / 1000)^(2/3), 2 × membrane area × growth fraction^(2/3)) |
 
 ## Physics step (rapier, per time step)
@@ -63,18 +63,18 @@ Each decoded part is a slab whose thickness runs geometrically from a capsule's 
 | Stall blend | angle of attack | stall = clamp((\|α\| − 0.26 rad) / 0.12 rad, 0, 1); plate force = attached × (1 − stall) + stalled × stall, plus parallel drag ½ × density × area × C_D0 × speed² |
 | Capsule drag and spin | radius, length, velocity, angular speed | drag ∝ ½ × density × speed²/3 × projected area; spin torque = ½ × density × 1.0 × effective radius⁴ × effective length × ω × \|ω\|, capped at inertia × ω / time step |
 | Buoyancy | part mass, density, submersion | buoyancy = water density × (mass / part density) × g × submersion, upward |
-| Mechanical work | torque, angular speed | work = Σ over steps and axes of \|torque × angular speed\| × time step (settled phase only) |
+| Mechanical work | torque, angular speed | work = Σ over steps and axes of (torque × angular speed if positive, else a fifth of its size) × time step (settled phase only; muscle pays a fifth for work absorbed while lengthening). The energy audit uses the full absolute sum. |
 
 ## Episode results
 
-An episode is one body in one environment (land, water, air, shore) for a settling time plus 4 s of driven motion.
+An episode is one body in one environment (land, water, air, shore) for a settling time plus 6 s of driven motion.
 
 | Quantity | Depends on | Equation or definition |
 |---|---|---|
 | Sustained speed | centre of mass | sustained speed = horizontal distance moved by the centre of mass over the second half of the episode / (episode time / 2) |
 | Yaw rate | trunk angular velocity | mean vertical angular velocity of the trunk over the second half (signed) |
 | Travel direction | centre of mass steps, trunk rotation | unit vector of Σ (trunk rotation⁻¹ × horizontal step of the centre of mass), in the trunk's own frame |
-| Power | work | power = work / 4 s |
+| Power | work | power = work / 6 s |
 | Cost of transport | work, mass, gravity, distance | cost of transport = work / (mass × g × max(distance, 0.05)) in J per kg per m |
 | Energy leak (audit) | mechanical energy, work | leak = (mechanical energy at end − at start) − work; should be ≤ 0 |
 | Mean height | centre of mass | mean centre-of-mass height above ground after settling |
@@ -95,10 +95,10 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Power, cost of transport | driven episode | taken from the driven episode, per medium |
 | Glide distance | air drop with wings held still | glide distance = max(0, air distance held − stone distance) |
 | Flap lift | air drop driven vs held | flap lift = mean height driven − mean height held (metres) |
-| Air speed | air drop driven | air speed = distance / 4 s if airborne ≥ 95% of the episode and distance > 5 m, else 0 |
+| Air speed | air drop driven | air speed = (distance / 6 s) × airborne fraction |
 | Reach (measured) | swept reach | reach = swept reach of the land episode when > 0, else the rest-pose reach |
 | Unmeasured mutant | parent's traits | a changed body carries its parent's traits entirely (mass, speeds, costs) until its own episodes run; an unchanged body inherits them outright |
-| When measured | mass | at birth and again at half adult mass; land and water episodes each (air if membrane area / mass ≥ 0.02 m²/kg) |
+| When measured | mass | at birth and again at half adult mass; land and water episodes each, and an air drop for any body with a sheet |
 | Budget and order | pending queue | N bodies per day on every core (default 96 headless); bodies on dry ground or the upper shore first, then most-copied and newest alternately |
 
 ## Arena (predation fought out)
@@ -160,12 +160,13 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Quantity | Depends on | Equation or definition |
 |---|---|---|
 | Growth fraction | mass, adult mass | growth fraction = clamp(mass / adult mass, 0.01, 1); linear scale = growth fraction^(1/3); mass^(3/4) is used as the metabolic scale |
-| Breathing efficiency | submersion, breathing gene | breathing efficiency = submersion × (1 − 0.9 × breathing) + (1 − submersion) × (0.1 + 0.9 × breathing); below 0.2: 50% chance of suffocation per day |
+| Breathing efficiency | submersion, breathing gene | breathing efficiency = submersion × (1 − 0.9 × breathing) + (1 − submersion) × (0.1 + 0.9 × breathing); oxygen debt below 0.2 costs mass × 0.05 × (0.2 − breathing efficiency) / 0.2 per day (a starvation below zero reserve is then counted as suffocation) |
 | Speed here | measured speeds, submersion, motility, plating, linear scale | speed here = (water speed × submersion + land speed × (1 − submersion)) × motility × linear scale × (1 − 0.3 × plating); travel = max(speed here, air speed) on land |
 | Maintenance | membrane mass, mass, motility, temperature, oxygen, waterproofing | maintenance = (membrane mass × 0.004 + (mass − membrane mass)^0.75 × (0.0005 + 0.0025 × motility)) × (0.3 + temperature factor) × Q10 / clamp(oxygen relative, 0.3, 1) × (1 + 0.3 × land tolerance) kg dry per day |
-| Activity (fatigue) | fatigue factor, breathing efficiency | activity = fatigue factor × breathing efficiency |
-| Activity cost | measured power, activity, motility | activity cost = power × growth fraction × activity × motility × 28 800 s / 0.25 / 18 MJ per kg; unmeasured bodies: 0.004 × muscle section × base frequency × 20 × activity × motility × growth fraction^(2/3) |
-| Excretion | maintenance, activity cost | cell nutrient += 0.02 × (maintenance + activity cost) |
+| Activity (fatigue) | fatigue factor, breathing efficiency | activity = fatigue in water × submersion + fatigue on land × (1 − submersion) |
+| Path needed | bite rate, gut space, food found, handling time, reach, day's path | wanted = min(bite rate, gut space at the start of the day); if handling time × wanted < 1: search needed = wanted / (food found × (1 − handling time × wanted)), path needed = clamp((search needed × area − π × reach²) / (2 × reach), 0, day's path); otherwise, or with no food found, the whole day's path |
+| Movement cost | cost of transport, mass, gravity, path needed | movement cost = cost of transport × mass × g × path needed / 0.25 / 18 MJ per kg; unmeasured bodies: 10.7 × mass^0.68 × path needed / 18 MJ per kg; standing still costs nothing beyond maintenance |
+| Excretion | maintenance, activity cost | cell nutrient += 0.02 × (maintenance + oxygen debt + movement cost) |
 | Mat photosynthesis | membrane area, cell mat area, nutrient | intercepted = light × area × (0.3 × submersion + 1 − submersion) × (1 − exp(−0.5 × mat area / area)); photosynthesis = min((1 − 0.6 × heterotrophy) × intercepted × (own leaf area / mat area) × 0.02 × CO₂ factor × temperature factor, nutrient / 0.02) |
 | Digestion | gut contents, mass, Q10 | digested = 0.12 × mass^0.75 × Q10 per day; energy += digested plant × plant efficiency + digested meat × meat efficiency; the rest returns as dung |
 | Gut capacity | gut fraction, mass | gut capacity = gut fraction × mass; space = gut capacity − contents |
@@ -185,7 +186,8 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Water gain | food, surface, moisture, submersion | food water = 4 × plant eaten + 2.5 × (carrion + meat eaten); dew = surface × 0.2 × moisture × (1 − submersion); then the deficit is reduced by the share of the day in water: deficit ×= (1 − submersion) |
 | Drying out | water deficit, mass, water store | death when deficit > (0.15 + water store) × mass |
 | Predation prior (before the arena) | masses, body lengths per second, claws, upright, plating, turn, take-off | attack = mass^0.75 × (0.2 + min(own body lengths/s, 10)) × (0.5 + 3 × claws) × (0.5 + 0.5 × upright) × (0.5 + 0.5 × min(turn / 1.5, 1)) ; defence = prey mass^0.75 × (0.2 + min(prey body lengths/s, 10)) × (0.5 + 2 × prey plating) × (1 + 3 × take-off) × (0.5 + 0.5 × min(prey turn / 1.5, 1)) ; z = log10(own mass / prey mass); hump = exp(−(z − 1)² / 2) ; prior capture = hump / (1 + exp(−(attack − defence) / (0.25 × (attack + defence)))) |
-| Capture probability | arena | eaten share of the fought pair if it exists, else the predator lineage's mean eaten over other prey, else the prior; zero without a mouth or claws |
+| Capture probability | arena | eaten share of the fought pair if it exists; otherwise (prior × 5 + Σ eaten over the lineage's fought pairs) / (5 + fights), the prior alone before any fight |
+| Take-off (prey's escape upward) | glide distance, launch height, flap lift, air speed | take-off = clamp(glide distance / 10 m × launch height / 10 m + flap lift (m) + air speed (m/s), 0, 1); launch height = canopy + drop to the lowest neighbour (≤ 50 m) |
 | Encounter | range, reaches | encounter = min(1, range / area) × min(1, prey reach / own reach) |
 | Kill value and decision | prey mass, efficiencies, handling, maintenance | edible = 0.8 × prey mass × clamp(0.4 + 0.4 × z, 0, 1); gain = meal × meat efficiency + leftovers × 0.3 × meat efficiency; handle = min(0.2 + edible × handling time, 5) days ; profitability = (encounter × capture probability × gain − 0.1 × maintenance) / handle; attack if profitability > max(plant value, carrion value, half of yesterday's intake); the attempt costs 0.1 × maintenance |
 | Fat capacity | mass, fat fraction | fat capacity = 0.05 × mass + fat fraction × mass^1.19; starvation when reserve < 0 |
@@ -193,7 +195,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Reproduction | reproduction fraction, offspring fraction, surplus | mature when mass ≥ reproduction fraction × adult mass; child mass = offspring fraction × adult mass; cost = 1.3 × child mass; 80% chance per day when surplus ≥ cost; store capped at fat capacity + 2 × cost |
 | Larval dispersal | birth cell | a walk of 15 m / cell width hops kept within one medium class of the birth cell's |
 | Lifespan | motility, adult mass, longevity | lifespan = (1 − motility) × lifespan gene + motility × 150 × adult mass^0.25 × longevity days |
-| Relocation | hunger, path, cost of transport | hungry = energy < 0 and reserve < 0.5 × fat capacity; then with 60% chance move to the best cell within path / cell width hops (≤ 12) it can enter (swims, crawls, flies or glides); cost = cost of transport × mass × (g / 9.81) × hops × cell width / 0.25 / 18 MJ per kg |
+| Relocation | hunger, path, cost of transport | hungry = energy < 0 and reserve < 0.5 × fat capacity; then with 60% chance move to the best cell within max(path, air speed × 3600 s) / cell width hops (≤ 12) it can enter (swims, crawls, flies or glides); cost = cost of transport × mass × g × hops × cell width / 0.25 / 18 MJ per kg (unmeasured: 10.7 × mass^0.68 × distance / 18 MJ per kg) |
 | Death | above | suffocated, starved (reserve < 0), dried out, old age (age > lifespan), killed |
 
 ## Order of a day

@@ -453,7 +453,7 @@ rose 0.01 to 0.05 in 1,200 days).
 ```mermaid
 flowchart LR
   MB["maintenance: tissue rates, bulk tissue as mass to the three quarters (Kleiber) × temperature (Q10) × oxygen × waterproofing upkeep"] --> DL[daily balance]
-  AC["activity: measured gait power over the foraging day"] --> DL
+  AC["movement: cost of transport × metres walked to find the day's food (standing still is free)"] --> DL
   WB["water: evaporation per m² of skin in air, less drink (patch wetness) and the water in food"] --> DT
   PH["photosynthesis at the surface mat, shared by area, drawing the cell's nutrient"] --> DL
   RG["range: π × reach² + 2 × reach × path, over as many cells as it covers"] --> FR["Holling type II intake of plants, motile sheets (as far as the grazer keeps up with them), carrion and bacteria; competition is depletion, no interference term"]
@@ -464,7 +464,7 @@ flowchart LR
   DL --> RV["reserve, capped by fat capacity"]
   RV --> GW["growth (West, Brown and Enquist)"]
   GW --> RP["reproduction at the maturity fraction of full size"]
-  RV --> DT["death: starved, dried out, old, suffocated, killed"]
+  RV --> DT["death: starved (an oxygen debt counts as suffocated), dried out, old, killed"]
   HG[hungry] --> MV["relocate as far as the day's path to the best cell it can enter, paying the cost of transport per cell crossed"]
 ```
 
