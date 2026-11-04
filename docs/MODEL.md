@@ -907,3 +907,22 @@ without ever binding. Nutrient is now a conserved element at 2% of
 tissue, 3 g/m² at the start (a productive sea's photic column), drawn as
 tissue is made and returned as it decays or is metabolised. Standing
 biomass is capped near 150 g/m² and light alone no longer feeds a bloom.
+
+## The arena that could not bite
+
+Across runs 6 to 11 the arena fought 1,079 pairs and recorded no kill.
+A saved walker at 1.4 m/s against a motionless sheet a tenth of a
+millimetre thick: survived or fled, every bout. Tracing one bout step by
+step (`arena_trace`) showed the chaser walking away from the prey from
+the first second. Two faults. The bearing's sign was inverted: a positive
+yaw carries +X toward -Z, and the controller called a target at +Z "to
+the left", so every chaser steered away from its prey and every prey
+toward its chaser. And the controller aimed the trunk's axis, while the
+gait moved the body in whatever direction it moved it in (the shuffler
+travels backwards along its trunk). The speed test now records the
+travel direction in the trunk's frame, the arena steers that and spawns
+each body turned so that it points along the line between them, and the
+bearing has the right sign. The shuffler now takes the sheet in 70% of
+bouts. Bouts last 12 s. A bug of this kind is exactly why abilities are
+measured and not assumed: the ledger said "kills 0" for a thousand
+pairs, and that was a fact about the arena, not the animals.

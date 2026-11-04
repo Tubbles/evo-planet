@@ -347,7 +347,12 @@ predator first considers a prey of a given body type in a given medium
 (land or water), the pair is queued for the arena (`arena.rs`): both
 bodies in one physics world, the predator steering at the prey and the
 prey steering away through a bearing controller on the turn their own
-tests measured (its sign comes from the turn test). The two start with a
+tests measured (its sign comes from the turn test). What is steered is the
+direction the body's gait actually travels in, measured in the speed
+test as a unit vector in the trunk's frame: a body that shuffles
+backwards or crabs sideways is aimed by that, not by its trunk axis, and
+each body is spawned turned so that its travel points along the line
+between them. The two start with a
 gap of three of the predator's reaches between their surfaces, so the
 chase is the same in body lengths at every size (a fixed metre made every
 slow small predator fail by distance alone; a gap set by the prey's size
@@ -355,7 +360,7 @@ put a two-metre ribbon out of any small mouth's reach). A bout ends when the
 predator has held the prey for one second with its mouth (the front of
 the trunk, with a gape of the trunk's diameter, on a prey part that fits
 in it) or with a clawed foot in contact: **eaten**. If time runs out
-(6 s) with no bite ever landed and the prey farther away than it started:
+(12 s) with no bite ever landed and the prey farther away than it started:
 **fled**. Otherwise: **survived**. A pair is fought ten times from
 perturbed starts (the prey's facing within half a radian of straight
 away, its side offset within half its reach) and the three shares are
