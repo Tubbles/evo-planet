@@ -1362,23 +1362,13 @@ impl EcoWorld {
         self.arena_pending.push(ArenaRequest { pred: a.lineage, prey: b.lineage, env, genome_pred: a.genome.clone(), genome_prey: b.genome.clone(), sign_pred: sp, sign_prey: sq, travel_pred: tp, travel_prey: tq });
     }
 
-    /// Larval drift: a random walk that stays in the birth patch's medium
-    /// (water larvae drift through water, land young stay on land).
+    /// Larval drift: a random walk through the birth cell's medium, as a
+    /// seed's (water larvae drift through water and strand on the shore,
+    /// land young stay on land and the shore, the shore's go either way).
+    /// A walk that kept the shore's young to wet cells meant nothing born
+    /// on the shore could ever be born inland.
     fn disperse_same_habitat(&mut self, from: usize, reach: f32) -> usize {
-        let wet = self.patches[from].submersion > 0.0;
-        let mut p = from;
-        let mut hops = reach.floor() as usize;
-        if self.rng.gen_bool((reach.fract()) as f64) {
-            hops += 1;
-        }
-        for _ in 0..hops {
-            let nb: Vec<usize> = self.neighbours[p].iter().copied().filter(|&k| (self.patches[k].submersion > 0.0) == wet).collect();
-            if nb.is_empty() {
-                break;
-            }
-            p = nb[self.rng.gen_range(0..nb.len())];
-        }
-        p
+        self.disperse(from, reach)
     }
 
     /// A seed's random walk of `hops` steps, through its parent's medium: a
