@@ -1,6 +1,6 @@
 # Evo Planet Equations
 
-Every quantity in the model and the equation that produces it, from the genome through the physics episodes to the daily tick of the planet. Units are kilograms, metres, seconds and days unless stated. `×` multiply, `^` power, `clamp(x, low, high)` limits x to the range, `exp` is e to the power. Source of truth: `evo_core/src` on main after the energetics fixes.
+Every quantity in the model and the equation that produces it, from the genome through the physics episodes to the daily tick of the planet. Units are kilograms, metres, seconds and days unless stated. `×` multiply, `^` power, `clamp(x, low, high)` limits x to the range, `exp` is e to the power. Source of truth: `evo_core/src` on main. Regenerate the page with `scripts/equations_page.py`; audit the numbers with `scripts/check_equations.py`.
 
 ## Genome
 
@@ -83,6 +83,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Trunk spin | trunk angular velocity | mean \|angular velocity\| of the trunk |
 | Footfalls, stepping limbs | ground contacts | footfall = a non-trunk part's onset of ground contact; stepping limbs = number of parts with ≥ 2 footfalls |
 | Swept reach | part positions | farthest any part end got from the centre of mass during the episode |
+| Shore episode | start 4 m out | the body starts 4 m (shore start x = -4.0 m) seaward of the waterline on a tilted ground and its progress up the dry beach is measured |
 | Air drop | launch 3 m/s from 10 m | air distance = horizontal distance to first ground contact; airborne fraction = share of steps off the ground; stone distance = ballistic reference |
 
 ## Measurement (traits an animal carries into the ecology)
@@ -117,6 +118,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Quantity | Depends on | Equation or definition |
 |---|---|---|
 | Planet dials | — | gravity, water coverage, humidity, temperature, pressure, oxygen fraction, CO₂ fraction, insolation, aridity |
+| Oxygen relative | pressure, oxygen fraction | oxygen relative = partial pressure of oxygen / Earth's 21.2 kPa |
 | Elevation | fractal noise, cell count | elevation = continents × 2600 + mountains × 5200 × clamp(4 × continents, 0, 1) + detail × 800 (metres); noise octaves narrower than 3 cells are dropped; sea level = the water-coverage quantile of elevation |
 | Cell area | run parameter | 100 m² by default; every rule below is per m² or per m |
 | Moisture | humidity, elevation | land: clamp(0.8 × humidity × (1 − 0.45 × elevation / 4000), 0.02, 1); shore: at least 0.85; water: 1 |
@@ -138,7 +140,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Quantity | Depends on | Equation or definition |
 |---|---|---|
 | Plant body | genome, gravity | parts → leaf mass (flat parts), stem mass, root mass; leaf area; specific leaf area = leaf area / leaf mass; height; target mass = leaf + stem + root |
-| Structural stress | bending moment, stem section, modulus 3 GPa | stress = moment / (π × effective radius² × stem strength), checked against buckling π² × E × I / 4; growth cap = 1 if stress ≤ 1 else √(1 / stress) |
+| Structural stress | bending moment, stem section, stem strength 60000 Pa, stem modulus 3.0e9 Pa | stress = moment / (π × effective radius² × 60000 Pa), checked against buckling π² × 3.0e9 Pa × second moment / 4; growth cap = 1 if stress ≤ 1 else √(1 / stress) |
 | Grown fraction | biomass, target mass | grown = (biomass / target mass)^(1/3); realised height = body height × max(grown, 0.05) (≤ 1.5 m in water); leaf area now = body leaf area × grown² |
 | Water uptake and demand | root mass, moisture, leaf area, aridity, temperature factor, specific leaf area, land tolerance | uptake = root mass × moisture × 0.6 ; demand = leaf area × (0.002 + 0.015 × aridity) × (0.5 + temperature factor) × (0.5 + min(specific leaf area / 20, 2)) × (1 − 0.8 × land tolerance) ; water fraction = submersion + (1 − submersion) × min(1, uptake / demand) |
 | Wilting | water fraction, submersion, land tolerance | wilt = max(0, 0.3 − water fraction) / 0.3 × (1 − submersion); energy −= biomass × 0.02 × wilt × (1 − 0.8 × land tolerance) |
@@ -161,7 +163,8 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 |---|---|---|
 | Growth fraction | mass, adult mass | growth fraction = clamp(mass / adult mass, 0.01, 1); linear scale = growth fraction^(1/3); mass^(3/4) is used as the metabolic scale |
 | Breathing efficiency | submersion, breathing gene | breathing efficiency = submersion × (1 − 0.9 × breathing) + (1 − submersion) × (0.1 + 0.9 × breathing); oxygen debt below 0.2 costs mass × 0.05 × (0.2 − breathing efficiency) / 0.2 per day (a starvation below zero reserve is then counted as suffocation) |
-| Speed here | measured speeds, submersion, motility, plating, linear scale | speed here = (water speed × submersion + land speed × (1 − submersion)) × motility × linear scale × (1 − 0.3 × plating); travel = max(speed here, air speed) on land |
+| Speed here | measured speeds, submersion, motility, plating, linear scale | speed here = (water speed × submersion + land speed × (1 − submersion)) × motility × linear scale × (1 − 0.3 × plating) |
+| Air speed over the ground | measured air speed, motility, plating, flap lift | air speed over the ground = measured air speed × motility × linear scale × (1 − 0.3 × plating) × clamp(flap lift, 0, 1): only the stroke's own lift carries a body anywhere; travel = max(speed here, air speed over the ground) on land |
 | Maintenance | membrane mass, mass, motility, temperature, oxygen, waterproofing | maintenance = (membrane mass × 0.004 + (mass − membrane mass)^0.75 × (0.0005 + 0.0025 × motility)) × (0.3 + temperature factor) × Q10 / clamp(oxygen relative, 0.3, 1) × (1 + 0.3 × land tolerance) kg dry per day |
 | Activity (fatigue) | fatigue factor, breathing efficiency | activity = fatigue in water × submersion + fatigue on land × (1 − submersion) |
 | Path needed | bite rate, gut space, food found, handling time, reach, day's path | wanted = min(bite rate, gut space at the start of the day); if handling time × wanted < 1: search needed = wanted / (food found × (1 − handling time × wanted)), path needed = clamp((search needed × area − π × reach²) / (2 × reach), 0, day's path); otherwise, or with no food found, the whole day's path |
@@ -195,7 +198,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Reproduction | reproduction fraction, offspring fraction, surplus | mature when mass ≥ reproduction fraction × adult mass; child mass = offspring fraction × adult mass; cost = 1.3 × child mass; 80% chance per day when surplus ≥ cost; store capped at fat capacity + 2 × cost |
 | Larval dispersal | birth cell | a walk of 15 m / cell width hops kept within one medium class of the birth cell's |
 | Lifespan | motility, adult mass, longevity | lifespan = (1 − motility) × lifespan gene + motility × 150 × adult mass^0.25 × longevity days |
-| Relocation | hunger, path, cost of transport | hungry = energy < 0 and reserve < 0.5 × fat capacity; then with 60% chance move to the best cell within max(path, air speed × 3600 s) / cell width hops (≤ 12) it can enter (swims, crawls, flies or glides); cost = cost of transport × mass × g × hops × cell width / 0.25 / 18 MJ per kg (unmeasured: 10.7 × mass^0.68 × distance / 18 MJ per kg) |
+| Relocation | hunger, path, cost of transport | hungry = energy < 0 and reserve < 0.5 × fat capacity; then with 60% chance move to the best cell within max(path, air speed over the ground × 3600 s) / cell width hops (≤ 12) it can enter (swims, crawls, flies or glides); cost = cost of transport × mass × g × hops × cell width / 0.25 / 18 MJ per kg (unmeasured: 10.7 × mass^0.68 × distance / 18 MJ per kg) |
 | Death | above | suffocated, starved (reserve < 0), dried out, old age (age > lifespan), killed |
 
 ## Order of a day
