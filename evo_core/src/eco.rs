@@ -417,6 +417,9 @@ pub struct EcoStats {
     /// Daily energy audit (kg biomass equivalent per day, last tick).
     pub primary_production: f32,
     pub grazing_intake: f32,
+    /// Of the grazing, the share taken from motile sheets (kg/day).
+    #[serde(default)]
+    pub mat_grazing: f32,
     pub predation_intake: f32,
     pub scavenging_intake: f32,
     pub metabolic_cost: f32,
@@ -1476,7 +1479,7 @@ impl EcoWorld {
         }
         let mut births: Vec<Birth> = Vec::new();
         let mut killed: Vec<usize> = Vec::new();
-        let (mut graze_today, mut prey_today, mut carrion_today, mut cost_today) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        let (mut graze_today, mut prey_today, mut carrion_today, mut cost_today, mut mats_today) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
         let n_animals = self.animals.len();
         let mut animals_in: Vec<Vec<usize>> = vec![Vec::new(); n_patches];
         for (i, a) in self.animals.iter().enumerate() {
@@ -1778,6 +1781,31 @@ impl EcoWorld {
                     }
                 }
             }
+            // Motile sheets are leaf tissue too: the same bite takes them, as
+            // far as the grazer can keep up with them (a drifting mat is as
+            // grazeable as a floating alga; a sheet swimming away from a slower
+            // grazer is not). The continuum has no kingdom line for a mouth.
+            let mut sheet_targets: Vec<(usize, f32)> = Vec::new();
+            for &j in &animals_in[patch] {
+                if j == ai || killed.contains(&j) {
+                    continue;
+                }
+                let s = &self.animals[j];
+                if s.traits.membrane_mass <= 0.0 || s.mass <= 0.002 {
+                    continue;
+                }
+                let s_lin = (s.mass / s.traits.mass.max(1e-3)).clamp(0.01, 1.0).powf(1.0 / 3.0);
+                let s_sub = self.patches[s.patch].submersion;
+                let s_speed = (s.traits.water_speed * s_sub + s.traits.land_speed * (1.0 - s_sub)) * s.genome.motility.clamp(0.0, 1.0) * s_lin;
+                let keep_up = if speed_here > 0.0 { (1.0 - s_speed / speed_here).clamp(0.0, 1.0) } else if s_speed <= 0.0 { 1.0 } else { 0.0 };
+                let leaf = (s.traits.membrane_mass / s.traits.mass.max(1e-3)).min(1.0) * (s.mass - 0.002);
+                let tough = s.genome.leaf_toughness.clamp(0.0, 1.0);
+                let acc = leaf * 0.5 * (1.0 - 0.8 * tough) * keep_up;
+                if acc > 0.0 {
+                    sheet_targets.push((j, acc));
+                    plant_b += acc;
+                }
+            }
             // Beddington-DeAngelis: conspecific crowding in the patch interferes with feeding.
             let crowd = (animals_in[patch].len().saturating_sub(1)) as f32;
             let interference = INTERFERENCE_PER_100M2 * crowd * 100.0 / a;
@@ -1948,6 +1976,18 @@ impl EcoWorld {
                             p.biomass -= bite;
                             take -= bite;
                             food_plant += bite;
+                        }
+                        for (j, acc) in &sheet_targets {
+                            let s = &mut self.animals[*j];
+                            let bite = (acc * scale_take).min(s.mass * 0.9);
+                            s.mass -= bite;
+                            take -= bite;
+                            food_plant += bite;
+                            mats_today += bite;
+                            // Grazed below a tenth of its size, a sheet is gone.
+                            if s.mass < 0.1 * s.traits.mass {
+                                killed.push(*j);
+                            }
                         }
                         space -= food_plant;
                     }
@@ -2215,6 +2255,7 @@ impl EcoWorld {
 
         self.stats.primary_production = production_today;
         self.stats.grazing_intake = graze_today;
+        self.stats.mat_grazing = mats_today;
         self.stats.predation_intake = prey_today;
         self.stats.scavenging_intake = carrion_today;
         self.stats.metabolic_cost = cost_today;
