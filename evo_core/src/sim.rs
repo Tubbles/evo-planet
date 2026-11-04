@@ -111,6 +111,10 @@ pub fn ballistic_distance(gravity: f32) -> f32 {
 }
 pub const WATER_DEPTH: f32 = 12.0;
 
+fn default_travel() -> [f32; 3] {
+    [0.0, 1.0, 0.0]
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct EpisodeResult {
     pub distance: f32,
@@ -132,6 +136,11 @@ pub struct EpisodeResult {
     pub sustained_speed: f32,
     /// Mean yaw rate of the trunk over the second half, rad/s (signed).
     pub yaw_rate: f32,
+    /// Which way the body travels, as a unit vector in the trunk's own frame
+    /// (its axis is +Y): forward, backward, sideways, whatever the gait does.
+    /// A controller that wants to go somewhere steers this, not the axis.
+    #[serde(default = "default_travel")]
+    pub travel_local: [f32; 3],
     /// Vertical speed of the centre of mass over the second half, m/s (signed).
     pub climb_speed: f32,
     /// Shore test: metres up the dry beach the body got under its own power.
@@ -209,6 +218,9 @@ pub struct CreatureSim {
     mid_com: Option<Vector3<f32>>,
     yaw_sum: f32,
     yaw_n: u32,
+    /// Travel over the window in the trunk's frame, summed per step.
+    travel_sum: Vector3<f32>,
+    prev_com: Option<Vector3<f32>>,
     swept_reach: f32,
     trunk_contact_steps: u32,
     part_down: Vec<bool>,
@@ -749,6 +761,8 @@ impl CreatureSim {
             mid_com: None,
             yaw_sum: 0.0,
             yaw_n: 0,
+            travel_sum: Vector3::zeros(),
+            prev_com: None,
             swept_reach: 0.0,
             trunk_contact_steps: 0,
             part_down: vec![false; n_parts],
@@ -983,6 +997,13 @@ impl CreatureSim {
                 if let Some(rb) = self.bodies.get(self.handles[0]) {
                     self.yaw_sum += rb.angvel().y;
                     self.yaw_n += 1;
+                    let com = self.com();
+                    if let Some(prev) = self.prev_com {
+                        let mut v = com - prev;
+                        v.y = 0.0;
+                        self.travel_sum += rb.position().rotation.inverse() * v;
+                    }
+                    self.prev_com = Some(com);
                 }
             }
             let airborne = self.is_airborne();
@@ -1066,6 +1087,7 @@ impl CreatureSim {
                 None => 0.0,
             },
             yaw_rate: if self.yaw_n > 0 { self.yaw_sum / self.yaw_n as f32 } else { 0.0 },
+            travel_local: if self.travel_sum.norm() > 1e-4 { let t = self.travel_sum.normalize(); [t.x, t.y, t.z] } else { default_travel() },
             shore_progress: self.shore_best,
             climb_speed: match self.mid_com {
                 Some(m) => {

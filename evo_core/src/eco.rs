@@ -170,6 +170,10 @@ impl Plant {
 // Animals
 // ---------------------------------------------------------------------------
 
+pub fn default_heading() -> [f32; 3] {
+    [0.0, 1.0, 0.0]
+}
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Traits {
     pub mass: f32,
@@ -198,6 +202,12 @@ pub struct Traits {
     pub turn_sign_land: f32,
     #[serde(default)]
     pub turn_sign_water: f32,
+    /// Which way the body travels in the trunk's own frame, per medium (from
+    /// the gait episode), so the arena steers the gait, not the trunk axis.
+    #[serde(default = "crate::eco::default_heading")]
+    pub heading_land: [f32; 3],
+    #[serde(default = "crate::eco::default_heading")]
+    pub heading_water: [f32; 3],
     /// Measured mechanical power of the gait at full drive, watts, and its
     /// cost of transport, J/(kg m), per medium. What moving costs.
     #[serde(default)]
@@ -557,6 +567,8 @@ struct ArenaRequest {
     genome_prey: Genome,
     sign_pred: f32,
     sign_prey: f32,
+    travel_pred: [f32; 3],
+    travel_prey: [f32; 3],
 }
 
 pub struct EcoWorld {
@@ -714,6 +726,7 @@ fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut tr
             traits.cot_water = if r.exploded { 0.0 } else { r.cost_of_transport };
             traits.turn_water = turn;
             traits.turn_sign_water = turn_sign;
+            traits.heading_water = r.travel_local;
             traits.climb_water = climb;
             traits.measured_water = true;
             traits.reach = traits.reach.max(r.swept_reach);
@@ -752,6 +765,7 @@ fn measure_body(planet: &PlanetParams, genome: &Genome, env: Environment, mut tr
             traits.trunk_spin = r.trunk_spin;
             traits.turn_land = turn;
             traits.turn_sign_land = turn_sign;
+            traits.heading_land = r.travel_local;
             traits.measured_land = true;
             // Reach is what the body swept in the episode, not the
             // rest pose it was drawn in.
@@ -1164,7 +1178,7 @@ impl EcoWorld {
             let pp = decode(&req.genome_pred);
             let pq = decode(&req.genome_prey);
             let seed = (req.pred as u64) << 32 | req.prey as u64;
-            let out = crate::arena::run_pair(&pp, &pq, &self.planet, req.env, req.sign_pred, req.sign_prey, seed);
+            let out = crate::arena::run_pair(&pp, &pq, &self.planet, req.env, (req.sign_pred, req.travel_pred), (req.sign_prey, req.travel_prey), seed);
             self.arena_cache.insert(key, out);
             let rec = self.arena_record.entry(req.pred).or_insert((0.0, 0));
             rec.0 += out.eaten;
@@ -1212,8 +1226,12 @@ impl EcoWorld {
             self.arena_cache.insert(key, crate::arena::ArenaOutcome { eaten: 0.0, fled: 0.0, survived: 1.0, bouts: 0 });
             return;
         }
-        let (sp, sq) = if env == Environment::Water { (a.traits.turn_sign_water, b.traits.turn_sign_water) } else { (a.traits.turn_sign_land, b.traits.turn_sign_land) };
-        self.arena_pending.push(ArenaRequest { pred: a.lineage, prey: b.lineage, env, genome_pred: a.genome.clone(), genome_prey: b.genome.clone(), sign_pred: sp, sign_prey: sq });
+        let (sp, sq, tp, tq) = if env == Environment::Water {
+            (a.traits.turn_sign_water, b.traits.turn_sign_water, a.traits.heading_water, b.traits.heading_water)
+        } else {
+            (a.traits.turn_sign_land, b.traits.turn_sign_land, a.traits.heading_land, b.traits.heading_land)
+        };
+        self.arena_pending.push(ArenaRequest { pred: a.lineage, prey: b.lineage, env, genome_pred: a.genome.clone(), genome_prey: b.genome.clone(), sign_pred: sp, sign_prey: sq, travel_pred: tp, travel_prey: tq });
     }
 
     /// Larval drift: a random walk that stays in the birth patch's medium

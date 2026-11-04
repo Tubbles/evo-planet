@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
 /// Seconds a bout may run.
-pub const BOUT_TIME: f32 = 6.0;
+pub const BOUT_TIME: f32 = 12.0;
 /// Seconds of mouth or claw hold that subdue the prey.
 pub const HOLD_TO_SUBDUE: f32 = 1.0;
 /// Bouts per pair of body types.
@@ -63,6 +63,26 @@ struct Fighter {
     fatigue: f32,
     /// Which way positive steer turns this body (+1 or -1), from its turn test.
     turn_sign: f32,
+    /// Which way its gait carries it, in the trunk's frame (from its speed test).
+    travel: Vector3<f32>,
+}
+
+/// A body's steering facts from its own tests: the sign of its turn and the
+/// direction its gait travels in the trunk's frame.
+pub type Steering = (f32, [f32; 3]);
+
+/// The yaw that points a body's travel direction along +X at spawn (the
+/// trunk is built along +X before yawing, its own +Y along world +X).
+fn yaw_to_face_x(travel: [f32; 3]) -> f32 {
+    // In the built pose the trunk's +Y lies along +X and its +X along -Y...
+    // only the horizontal part matters: local +Y -> world +X, local +X ->
+    // world -Z (a right-handed frame turned onto its side), local +Z -> +Z.
+    let wx = travel[1];
+    let wz = travel[2];
+    if wx * wx + wz * wz < 1e-6 {
+        return 0.0;
+    }
+    (wz).atan2(wx)
 }
 
 impl Fighter {
@@ -77,9 +97,10 @@ impl Fighter {
         }
         if m > 0.0 { sum / m } else { sum }
     }
-    /// The trunk's forward direction (its own +Y), horizontal.
+    /// The direction the body travels in (its gait's, from its speed test,
+    /// turned by the trunk's current rotation), horizontal.
     fn heading(&self, bodies: &RigidBodySet) -> Vector3<f32> {
-        let d = bodies.get(self.handles[0]).map(|rb| rb.position().rotation * Vector3::y()).unwrap_or_else(Vector3::x);
+        let d = bodies.get(self.handles[0]).map(|rb| rb.position().rotation * self.travel).unwrap_or_else(Vector3::x);
         let mut h = Vector3::new(d.x, 0.0, d.z);
         if h.norm() < 1e-4 {
             h = Vector3::x();
@@ -99,10 +120,13 @@ impl Fighter {
         }
         let to = to.normalize();
         let h = self.heading(bodies);
-        // Signed bearing about the vertical: positive means the target is to
-        // the heading's left (right-hand rule about +Y).
-        let bearing = (h.x * to.z - h.z * to.x).atan2(h.dot(&to));
-        (self.turn_sign * bearing / (PI / 2.0)).clamp(-1.0, 1.0)
+        // Signed bearing about the vertical: positive when a positive yaw
+        // (right-handed about +Y, which carries +X toward -Z) turns the
+        // heading toward the target. (The sign was the other way round, so
+        // every chaser steered away from its prey and every prey toward its
+        // chaser: no kill in a thousand pairs.)
+        let bearing = (h.z * to.x - h.x * to.z).atan2(h.dot(&to));
+        (self.turn_sign * bearing / (PI / 4.0)).clamp(-1.0, 1.0)
     }
 }
 
@@ -136,7 +160,9 @@ impl ArenaSim {
     /// by both reaches, facing away, turned by `prey_yaw` and offset by
     /// `prey_side` across the line.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(pred: Phenotype, prey: Phenotype, planet: &PlanetParams, env: Environment, pred_sign: f32, prey_sign: f32, prey_yaw: f32, prey_side: f32) -> Self {
+    pub fn new(pred: Phenotype, prey: Phenotype, planet: &PlanetParams, env: Environment, pred_steer: Steering, prey_steer: Steering, prey_yaw: f32, prey_side: f32) -> Self {
+        let (pred_sign, pred_travel) = pred_steer;
+        let (prey_sign, prey_travel) = prey_steer;
         let derived = planet.derive();
         let mut bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
@@ -156,8 +182,12 @@ impl ArenaSim {
         // put a two-metre ribbon out of any small mouth's reach.
         let dist = reach_p + reach_q + 3.0 * reach_p + 0.05;
         let zero = Vector3::zeros();
-        let bp = build_creature(&mut bodies, &mut colliders, &mut impulse_joints, &pred, env, &derived, ground_y, 0.0, spawn_y, 0.0, 0.0, 0.0, zero);
-        let bq = build_creature(&mut bodies, &mut colliders, &mut impulse_joints, &prey, env, &derived, ground_y, 0.0, spawn_y, dist, prey_side, prey_yaw, zero);
+        // Each body is turned so that its own travel direction points along
+        // +X: the predator at the prey, the prey away (then perturbed).
+        let yaw_p = yaw_to_face_x(pred_travel);
+        let yaw_q = yaw_to_face_x(prey_travel) + prey_yaw;
+        let bp = build_creature(&mut bodies, &mut colliders, &mut impulse_joints, &pred, env, &derived, ground_y, 0.0, spawn_y, 0.0, 0.0, yaw_p, zero);
+        let bq = build_creature(&mut bodies, &mut colliders, &mut impulse_joints, &prey, env, &derived, ground_y, 0.0, spawn_y, dist, prey_side, yaw_q, zero);
         let Built { handles: hp, joint_handles: jp, fatigue: fp } = bp;
         let Built { handles: hq, joint_handles: jq, fatigue: fq } = bq;
         let _ = fatigue_factor;
@@ -179,8 +209,8 @@ impl ArenaSim {
             params,
             gravity: vector![0.0, -planet.gravity, 0.0],
             ctx,
-            pred: Fighter { pheno: pred, handles: hp, joint_handles: jp, fatigue: fp, turn_sign: if pred_sign < 0.0 { -1.0 } else { 1.0 } },
-            prey: Fighter { pheno: prey, handles: hq, joint_handles: jq, fatigue: fq, turn_sign: if prey_sign < 0.0 { -1.0 } else { 1.0 } },
+            pred: Fighter { pheno: pred, handles: hp, joint_handles: jp, fatigue: fp, turn_sign: if pred_sign < 0.0 { -1.0 } else { 1.0 }, travel: Vector3::new(pred_travel[0], pred_travel[1], pred_travel[2]) },
+            prey: Fighter { pheno: prey, handles: hq, joint_handles: jq, fatigue: fq, turn_sign: if prey_sign < 0.0 { -1.0 } else { 1.0 }, travel: Vector3::new(prey_travel[0], prey_travel[1], prey_travel[2]) },
             time: 0.0,
             settled: false,
             start_dist: 0.0,
@@ -198,6 +228,14 @@ impl ArenaSim {
             }
         }
         sim
+    }
+
+    /// Debug view: predator centre, prey centre, the mouth point, the
+    /// predator's heading and the smallest gap from the mouth to a prey part.
+    pub fn snapshot(&self) -> (Vector3<f32>, Vector3<f32>, Vector3<f32>, Vector3<f32>, f32) {
+        let mouth = self.axis_point(&self.pred, 0, 1.0);
+        let gap = (0..self.prey.pheno.parts.len()).map(|j| self.gap_to_part(&self.prey, j, mouth)).fold(f32::MAX, f32::min);
+        (self.pred.com(&self.bodies), self.prey.com(&self.bodies), mouth, self.pred.heading(&self.bodies), gap)
     }
 
     pub fn distance(&self) -> f32 {
@@ -335,8 +373,8 @@ impl ArenaSim {
         }
     }
 
-    pub fn run_bout(pred: Phenotype, prey: Phenotype, planet: &PlanetParams, env: Environment, pred_sign: f32, prey_sign: f32, prey_yaw: f32, prey_side: f32) -> BoutResult {
-        let mut sim = ArenaSim::new(pred, prey, planet, env, pred_sign, prey_sign, prey_yaw, prey_side);
+    pub fn run_bout(pred: Phenotype, prey: Phenotype, planet: &PlanetParams, env: Environment, pred_steer: Steering, prey_steer: Steering, prey_yaw: f32, prey_side: f32) -> BoutResult {
+        let mut sim = ArenaSim::new(pred, prey, planet, env, pred_steer, prey_steer, prey_yaw, prey_side);
         while !sim.finished() {
             sim.step();
         }
@@ -347,14 +385,14 @@ impl ArenaSim {
 /// Fight a pair of body types `BOUTS` times from perturbed starts (the prey's
 /// facing within half a radian of straight away, its side offset within
 /// half its reach) and return the shares of outcomes.
-pub fn run_pair(pred: &Phenotype, prey: &Phenotype, planet: &PlanetParams, env: Environment, pred_sign: f32, prey_sign: f32, seed: u64) -> ArenaOutcome {
+pub fn run_pair(pred: &Phenotype, prey: &Phenotype, planet: &PlanetParams, env: Environment, pred_steer: Steering, prey_steer: Steering, seed: u64) -> ArenaOutcome {
     let mut rng = StdRng::seed_from_u64(seed);
     let reach_q = body_metrics(prey).reach;
     let mut out = ArenaOutcome::default();
     for _ in 0..BOUTS {
         let yaw = rng.gen_range(-0.5..0.5f32);
         let side = rng.gen_range(-0.5..0.5f32) * reach_q;
-        match ArenaSim::run_bout(pred.clone(), prey.clone(), planet, env, pred_sign, prey_sign, yaw, side) {
+        match ArenaSim::run_bout(pred.clone(), prey.clone(), planet, env, pred_steer, prey_steer, yaw, side) {
             BoutResult::Eaten => out.eaten += 1.0,
             BoutResult::Fled => out.fled += 1.0,
             BoutResult::Survived => out.survived += 1.0,
@@ -381,7 +419,7 @@ mod tests {
         let planet = PlanetParams::earth();
         let a = decode(&Genome::random(3));
         let b = decode(&Genome::random(4));
-        let mut sim = ArenaSim::new(a, b, &planet, Environment::Land, 1.0, 1.0, 0.0, 0.0);
+        let mut sim = ArenaSim::new(a, b, &planet, Environment::Land, (1.0, [0.0, 1.0, 0.0]), (1.0, [0.0, 1.0, 0.0]), 0.0, 0.0);
         // Motors never engage if we never settle: run only the settling time.
         while sim.time < SETTLE - 0.01 {
             sim.step();
@@ -411,7 +449,7 @@ mod tests {
         }
         let pp = decode(&pred);
         let pq = decode(&prey);
-        let mut sim = ArenaSim::new(pp, pq, &planet, Environment::Land, 1.0, 1.0, 0.0, 0.0);
+        let mut sim = ArenaSim::new(pp, pq, &planet, Environment::Land, (1.0, [0.0, 1.0, 0.0]), (1.0, [0.0, 1.0, 0.0]), 0.0, 0.0);
         // Set the prey down touching the predator's mouth (not inside it, or
         // the solver throws it out before anything can be held).
         let mouth = sim.axis_point(&sim.pred, 0, 1.0);

@@ -41,7 +41,7 @@ fn main() {
             let pq = decode(&w.animals[*iq].genome);
             let (sp, sq) = (w.animals[*ip].traits.turn_sign_water, w.animals[*iq].traits.turn_sign_water);
             let t0 = std::time::Instant::now();
-            let o = run_pair(&pp, &pq, &planet, Environment::Water, sp, sq, 1);
+            let o = run_pair(&pp, &pq, &planet, Environment::Water, (sp, w.animals[*ip].traits.heading_water), (sq, w.animals[*iq].traits.heading_water), 1);
             println!(
                 "  {}.. eats {}..: eaten {:.0}% fled {:.0}% survived {:.0}% over {} bouts in {:.1} s",
                 &kp[..8], &kq[..8], o.eaten * 100.0, o.fled * 100.0, o.survived * 100.0, BOUTS, t0.elapsed().as_secs_f32()

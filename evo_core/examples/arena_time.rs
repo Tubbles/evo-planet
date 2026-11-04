@@ -12,7 +12,7 @@ fn main() {
         let pq = decode(&Genome::random(b));
         for env in [Environment::Water, Environment::Land] {
             let t0 = std::time::Instant::now();
-            let o = run_pair(&pp, &pq, &planet, env, 1.0, 1.0, 7);
+            let o = run_pair(&pp, &pq, &planet, env, (1.0, [0.0, 1.0, 0.0]), (1.0, [0.0, 1.0, 0.0]), 7);
             println!(
                 "{:?} {} vs {} parts | eaten {:.0}% fled {:.0}% survived {:.0}% | {:.2} s per pair",
                 env, pp.parts.len(), pq.parts.len(), o.eaten * 100.0, o.fled * 100.0, o.survived * 100.0, t0.elapsed().as_secs_f32()
