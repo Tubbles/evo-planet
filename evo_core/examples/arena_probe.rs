@@ -18,21 +18,21 @@ fn main() {
     }
     println!("day {}: {} animals, {} lineages", w.day, w.animals.len(), w.stats.animal_lineages);
     // Most common body types with a measured water gait.
-    let mut counts: HashMap<String, (usize, usize)> = HashMap::new();
+    let mut counts: HashMap<u64, (usize, usize)> = HashMap::new();
     for (i, a) in w.animals.iter().enumerate() {
-        let e = counts.entry(a.key.clone()).or_insert((0, i));
+        let e = counts.entry(a.key).or_insert((0, i));
         e.0 += 1;
     }
-    let mut top: Vec<(String, usize, usize)> = counts.into_iter().map(|(k, (n, i))| (k, n, i)).collect();
+    let mut top: Vec<(u64, usize, usize)> = counts.into_iter().map(|(k, (n, i))| (k, n, i)).collect();
     top.sort_by(|a, b| b.1.cmp(&a.1));
-    let top: Vec<(String, usize, usize)> = top.into_iter().take(4).collect();
+    let top: Vec<(u64, usize, usize)> = top.into_iter().take(4).collect();
     for (k, n, i) in &top {
         let a = &w.animals[*i];
         let ph = decode(&a.genome);
         let bm = body_metrics(&ph);
         println!(
             "type {}.. n={} mass {:.3} kg parts {} | water {:.2} m/s turn {:.2} sign {:+.0} | land {:.2} m/s | reach {:.2} mouth {:.4} m² claws {:.2}",
-            &k[..12], n, ph.total_mass, ph.parts.len(), a.traits.water_speed, a.traits.turn_water, a.traits.turn_sign_water, a.traits.land_speed, bm.reach, bm.mouth_area, bm.claws
+            k % 100000, n, ph.total_mass, ph.parts.len(), a.traits.water_speed, a.traits.turn_water, a.traits.turn_sign_water, a.traits.land_speed, bm.reach, bm.mouth_area, bm.claws
         );
     }
     for (kp, _, ip) in &top {
@@ -44,7 +44,7 @@ fn main() {
             let o = run_pair(&pp, &pq, &planet, Environment::Water, (sp, w.animals[*ip].traits.heading_water), (sq, w.animals[*iq].traits.heading_water), 1);
             println!(
                 "  {}.. eats {}..: eaten {:.0}% fled {:.0}% survived {:.0}% over {} bouts in {:.1} s",
-                &kp[..8], &kq[..8], o.eaten * 100.0, o.fled * 100.0, o.survived * 100.0, BOUTS, t0.elapsed().as_secs_f32()
+                kp % 100000, kq % 100000, o.eaten * 100.0, o.fled * 100.0, o.survived * 100.0, BOUTS, t0.elapsed().as_secs_f32()
             );
         }
     }

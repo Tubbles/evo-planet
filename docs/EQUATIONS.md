@@ -155,7 +155,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Seed dispersal | dispersal gene, height, air density | hops = dispersal × 10 m / cell width × (1 + 0.3 × height × √(air density / 1.225)), a random walk kept within one medium class of the parent's (water 2, shore 1, dry 0) |
 | Plant death | energy, age | energy < −0.3 × biomass, or age > lifespan = (1 − motility) × lifespan gene + motility × 150 × target mass^0.25 × longevity |
 | Plant to animal | child motility | a seed with motility ≥ 0.5 is born an animal (mass = offspring fraction × adult mass, at least the seed mass); an animal's child with motility < 0.5 settles as a plant |
-| Density cap | cell area | 0.48 plants per m² in water and on land (performance guard) |
+| Density cap | cell area | 48 plants per m² in water and on land (performance guard, for centimetre plants) |
 | Floors at centimetre scale | — | realised height at least 0.2 mm; biomass after shedding at least 1e-9 kg; decoded target mass at least 1e-9 kg; canopy extent at least 0.2 mm; a plant's grazed remainder at least 2e-7 kg; founders' seeds 1e-8 to 1e-7 kg (default 2e-8), the seed mass gene 5e-9 to 2e-5 kg |
 
 ## Animals (per individual, per day)

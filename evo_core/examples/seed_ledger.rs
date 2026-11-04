@@ -3,14 +3,14 @@ use evo_core::eco::EcoWorld;
 use evo_core::planet::PlanetParams;
 fn main() {
     let mut w = EcoWorld::new(PlanetParams::earth(), 600, 4);
-    let mut followed: Vec<(String, u32)> = Vec::new(); // (key, lineage)
+    let mut followed: Vec<(u64, u32)> = Vec::new(); // (key, lineage)
     let mut shown = 0;
     for d in 1..=5000u32 {
         w.measure_pending(8);
         w.tick();
         for a in &w.animals {
             if !followed.iter().any(|(k, _)| *k == a.key) && followed.len() < 3 {
-                followed.push((a.key.clone(), a.lineage));
+                followed.push((a.key, a.lineage));
                 let pt = &w.patches[a.patch];
                 println!("day {d}: NEW motile seed lineage {} | mass {:.4} kg (adult {:.3}) membranes {:.3} m2 reach {:.3} | motility {:.2} heterotrophy {:.2} offspring_frac {:.2} | patch water {} sub {:.1} light_left {:.2} bacteria {:.4} kg dead {:.2} kg plants {}",
                     a.lineage, a.mass, a.traits.mass, a.traits.membrane_area, a.traits.reach, a.genome.motility, a.genome.heterotrophy, a.genome.offspring_frac,

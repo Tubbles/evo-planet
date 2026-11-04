@@ -58,8 +58,8 @@ pub const DEAD0_PER_M2: f32 = 0.01;
 /// Individual-plant density caps (performance guards), per m^2. The same
 /// on land as in water: at eight per hundred square metres the land cells
 /// filled with stunted seedlings and no better-adapted seed could land.
-pub const PLANT_CAP_PER_M2_WATER: f32 = 0.48;
-pub const PLANT_CAP_PER_M2_LAND: f32 = 0.48;
+pub const PLANT_CAP_PER_M2_WATER: f32 = 48.0;
+pub const PLANT_CAP_PER_M2_LAND: f32 = 48.0;
 /// Founding grazers per square metre of sea.
 pub const FOUNDERS_PER_M2: f32 = 1.0 / 1200.0;
 /// Evaporation from a wet body surface in dry air, kg of water per m² per
@@ -263,7 +263,7 @@ pub struct Traits {
 pub struct Animal {
     pub genome: Genome,
     #[serde(default)]
-    pub key: String,
+    pub key: u64,
     /// Adult body measured by physics; `mass` grows toward `traits.mass`.
     pub traits: Traits,
     pub patch: usize,
@@ -290,7 +290,7 @@ pub struct Animal {
 }
 
 impl Animal {
-    fn new(genome: Genome, key: String, traits: Traits, patch: usize, lineage: u32, mass: f32, reserve: f32) -> Self {
+    fn new(genome: Genome, key: u64, traits: Traits, patch: usize, lineage: u32, mass: f32, reserve: f32) -> Self {
         Self {
             genome,
             key,
@@ -606,7 +606,7 @@ pub struct EcoWorld {
     pub patch_area: f32,
     rng: StdRng,
     next_lineage: u32,
-    trait_cache: HashMap<String, Traits>,
+    trait_cache: HashMap<u64, Traits>,
     pending: Vec<(usize, Environment)>,
     /// Fought-out outcomes per (predator lineage, prey lineage, medium): the
     /// shares of eaten, fled and survived over `arena::BOUTS` bouts. The
@@ -642,7 +642,7 @@ pub struct Checkpoint {
     terrain_seed: u32,
     patch_area: f32,
     next_lineage: u32,
-    trait_cache: Vec<(String, Traits)>,
+    trait_cache: Vec<(u64, Traits)>,
     arena_cache: Vec<((u32, u32, Environment), crate::arena::ArenaOutcome)>,
     arena_record: Vec<(u32, (f32, u32))>,
     arena_rate: f32,
@@ -663,7 +663,7 @@ impl EcoWorld {
             terrain_seed: self.terrain_seed,
             patch_area: self.patch_area,
             next_lineage: self.next_lineage,
-            trait_cache: self.trait_cache.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            trait_cache: self.trait_cache.iter().map(|(k, v)| (*k, *v)).collect(),
             arena_cache: self.arena_cache.iter().map(|(k, v)| (*k, *v)).collect(),
             arena_record: self.arena_record.iter().map(|(k, v)| (*k, *v)).collect(),
             arena_rate: self.arena_rate,
@@ -758,8 +758,14 @@ fn co2_factor(co2_frac: f32) -> f32 {
     (ppm / (ppm + 250.0)) / (400.0 / 650.0)
 }
 
-fn hash_genome(g: &Genome) -> String {
-    serde_json::to_string(g).unwrap_or_default()
+/// A body's key: a 64-bit hash of the genome's serialised form (a string
+/// of the whole genome per animal cost ten kilobytes each and ran a
+/// crowded world out of memory).
+fn hash_genome(g: &Genome) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(g).unwrap_or_default().hash(&mut h);
+    h.finish()
 }
 
 /// Measure one body in one environment: the episodes of the battery and the
@@ -1255,17 +1261,17 @@ impl EcoWorld {
             // Measure the bodies that matter most first: one request per
             // (body, environment), ordered by how many living animals share it,
             // so a body that is spreading on inherited speeds is checked soon.
-            let mut copies: HashMap<String, usize> = HashMap::new();
+            let mut copies: HashMap<u64, usize> = HashMap::new();
             for a in &self.animals {
-                *copies.entry(a.key.clone()).or_insert(0) += 1;
+                *copies.entry(a.key).or_insert(0) += 1;
             }
-            let mut seen: HashSet<(String, Environment)> = HashSet::new();
+            let mut seen: HashSet<(u64, Environment)> = HashSet::new();
             let mut keep: Vec<(usize, Environment)> = Vec::with_capacity(self.pending.len());
             for &(idx, env) in self.pending.iter().rev() {
                 if idx >= self.animals.len() {
                     continue;
                 }
-                if seen.insert((self.animals[idx].key.clone(), env)) {
+                if seen.insert((self.animals[idx].key, env)) {
                     keep.push((idx, env));
                 }
             }
@@ -1298,13 +1304,13 @@ impl EcoWorld {
             self.pending = order;
         }
         // Gather the day's batch: one request per unmeasured (body, environment).
-        let mut batch: Vec<(String, Genome, Environment, Traits)> = Vec::new();
+        let mut batch: Vec<(u64, Genome, Environment, Traits)> = Vec::new();
         while batch.len() < budget {
             let Some((idx, env)) = self.pending.pop() else { break };
             if idx >= self.animals.len() {
                 continue;
             }
-            let key = self.animals[idx].key.clone();
+            let key = self.animals[idx].key;
             let traits = self.trait_cache.get(&key).copied().unwrap_or(self.animals[idx].traits);
             let already = match env {
                 Environment::Water => traits.measured_water,
@@ -1346,7 +1352,7 @@ impl EcoWorld {
         for ((key, _, _, _), traits) in batch.into_iter().zip(results) {
             self.stats.trait_evals += 1;
             done += 1;
-            self.trait_cache.insert(key.clone(), traits);
+            self.trait_cache.insert(key, traits);
             for a in self.animals.iter_mut() {
                 if a.key == key {
                     a.traits = traits;
@@ -2541,7 +2547,7 @@ impl EcoWorld {
             // spending physics on it (controller-only mutations are approximated).
             let key = hash_genome(&b.genome);
             if !b.body_changed {
-                self.trait_cache.entry(key.clone()).or_insert(b.parent_traits);
+                self.trait_cache.entry(key).or_insert(b.parent_traits);
             } else {
                 // A changed body is accounted as its parent's body, on both
                 // sides of the ledger (mass and cost as well as speed), until
@@ -2553,7 +2559,7 @@ impl EcoWorld {
                 prior.measured_water = false;
                 prior.measured_air = false;
                 prior.measured_shore = false;
-                self.trait_cache.entry(key.clone()).or_insert(prior);
+                self.trait_cache.entry(key).or_insert(prior);
             }
             let traits = self.lookup_traits(&b.genome);
             // Larval dispersal: young drift one or two patches from the parent,

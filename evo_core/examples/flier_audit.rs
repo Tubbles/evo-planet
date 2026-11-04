@@ -13,11 +13,11 @@ fn main() {
     for _ in 0..days { w.measure_pending(8); w.tick(); }
     println!("day {} animals {} fliers(stat) {}", w.day, w.animals.len(), w.stats.fliers);
     // Fliers: distinct bodies with glide or air speed.
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut seen: HashMap<u64, usize> = HashMap::new();
     let mut fl: Vec<usize> = Vec::new();
     for (i, a) in w.animals.iter().enumerate() {
         if (a.traits.glide_distance > 0.5 || a.traits.air_speed > 0.0) && !seen.contains_key(&a.key) {
-            seen.insert(a.key.clone(), i);
+            seen.insert(a.key, i);
             fl.push(i);
         }
     }

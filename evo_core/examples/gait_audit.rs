@@ -20,7 +20,7 @@ fn main() {
             let sb = if env == Environment::Land { w.animals[b].traits.land_speed } else { w.animals[b].traits.water_speed };
             sb.partial_cmp(&sa).unwrap()
         });
-        idx.dedup_by_key(|i| w.animals[*i].key.clone());
+        idx.dedup_by_key(|i| w.animals[*i].key);
         println!("--- top {label} bodies (measured speed, then re-run with motors on / off) ---");
         for (k, &i) in idx.iter().take(5).enumerate() {
             let a = &w.animals[i];
