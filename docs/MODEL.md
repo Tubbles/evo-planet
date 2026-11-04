@@ -1012,3 +1012,21 @@ seeds already had, becoming carrion on a full cell. The cap is a
 performance guard and is marked as one; it makes the pond a crowded
 place where a slot, not a square metre, is what a body holds, and that
 is a bias worth remembering when reading what the crowd evolves.
+
+## Symmetric attachments in the pond
+
+With attachments drawn as bilateral (45%), radial of three to six
+(30%) or single (25%), and the duplicate-a-section operator gone, the
+guarded pond of seed 4 went from 1.2 parts a body at day 1000 to 2.1 at
+day 2300, and seed 5 (origin at day 2600) sits at 3.1. The bodies
+behind the numbers (`cargo run --release --example lineage_body --
+WORLD.bin`): in seed 4 a 6-fold rosette of membranes (one disc, six
+petals, 7 parts, 1,090 members), a bilateral-plus-single recursion of
+one membrane node that branches into 13 parts (970 members, skin 0.95),
+and a two-part sheet; in seed 5 a trunk with a bilateral pair of hinged
+membranes (3 parts, all four top lineages). All are still flat (flat
+0.98 to 1.00) and all but seed 5's hinges are rigid, so these are
+multi-part sheets, not walkers: income is still the mat's light per
+area, and the symmetric drawing makes a rosette as cheap a mutation as
+a second disc. What the hinge in seed 5 does under muscle is not yet
+measured.
