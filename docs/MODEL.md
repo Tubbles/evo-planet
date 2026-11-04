@@ -972,3 +972,20 @@ Both are in now: clearance per kilogram falls as the square root of mass
 tens, a fish's one), and a sheet that passes the grazer's mouth whole is
 filtered from the water it clears, on top of what a bite takes. Small
 sheets become prey to anything with a mouth wider than they are.
+
+## The sea's attractor, and a world with more land
+
+Run 19 (filter feeding) ended where the sea always ends: 148,586 sheets
+of two grams, one centimetre across, the smallest body the decoder
+allows, at the light-limited equilibrium of a mat. Income is per area
+and area is mass for a sheet, so size is neutral on income and the
+shortest generation wins: phytoplankton, as in any sunlit sea without
+size-structured predators. The filter feeders that would crop them are
+the same two-gram sheets, with millimetre mouths. The sea is not where
+the walkers come from and it is what makes a day cost ten seconds, so
+the experiments now run on an Earth with 40% sea (`--water 0.4`, the
+planet's own dial): twice the land, half the soup. The frontier itself
+is doing its work: in run 19's last day 31,788 bodies dried out and
+14,642 suffocated at the upper shore and inland, and a two-gram sheet
+cannot survive there whatever its genes, since a sheet is all surface.
+What crosses has to be thicker first.
