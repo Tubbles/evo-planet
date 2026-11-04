@@ -46,7 +46,14 @@ use std::collections::{HashMap, HashSet};
 pub const PATCH_AREA: f32 = 100.0;
 /// Everything below is per square metre or per metre; the cell size only
 /// decides how finely the planet is cut (see EcoWorld::patch_area).
-pub const NUTRIENT0_PER_M2: f32 = 0.02;
+/// Mineral nutrient (the limiting element, nitrogen's part) in the soil or
+/// water, kg per m². It is conserved: taken up as tissue is made, returned
+/// as tissue decays or is metabolised. Three grams a square metre is a
+/// productive sea's photic column or a lean soil; it caps standing biomass
+/// at 150 g/m² and makes light's free lunch finite.
+pub const NUTRIENT0_PER_M2: f32 = 0.003;
+/// Kilograms of nutrient in a kilogram of dry tissue.
+pub const NUTRIENT_FRACTION: f32 = 0.02;
 pub const DEAD0_PER_M2: f32 = 0.01;
 /// Individual-plant density caps (performance guards), per m^2. The same
 /// on land as in water: at eight per hundred square metres the land cells
@@ -1262,18 +1269,9 @@ impl EcoWorld {
         // beds beneath them. Their leaf area per patch sets the light left for
         // the plants and each sheet's share of the surface light.
         let mut motile_area: Vec<f32> = vec![0.0; n_patches];
-        // Photosynthesising mass per cell, plant and mat, for the nutrient share
-        // every photosynthesiser in the cell gets (the same rule for both).
-        let mut photo_mass: Vec<f32> = vec![0.0; n_patches];
         for a in &self.animals {
             let lin = (a.mass / a.traits.mass.max(1e-6)).clamp(0.01, 1.0).powf(1.0 / 3.0);
             motile_area[a.patch] += a.traits.membrane_area * lin * lin;
-            if a.traits.membrane_area > 0.0 && a.genome.heterotrophy < 1.0 {
-                photo_mass[a.patch] += a.mass;
-            }
-        }
-        for p in &self.plants {
-            photo_mass[p.patch] += p.biomass;
         }
         let mut seeds: Vec<(Genome, u32, usize, f32, Option<PlantBody>)> = Vec::new();
         let mut dead_plants: Vec<usize> = Vec::new();
@@ -1300,7 +1298,6 @@ impl EcoWorld {
             let patch_plant_mass: f32 = order.iter().map(|&i| self.plants[i].biomass).sum();
             let surface_shade = (-0.5 * motile_area[pi] / a).exp();
             let mut remaining = light * a * (0.3 * sub + (1.0 - sub)) * surface_shade;
-            let mut nutrient_demand = 0.0;
             let mut intercepts = Vec::with_capacity(order.len());
             for &i in &order {
                 let p = &self.plants[i];
@@ -1309,10 +1306,11 @@ impl EcoWorld {
                 let got = remaining * frac;
                 remaining -= got;
                 intercepts.push((i, got, leaf_area));
-                nutrient_demand += p.biomass * 0.002;
             }
             let light_left = if light > 0.0 { (remaining / (light * a * (0.3 * sub + (1.0 - sub)))).clamp(0.0, 1.0) } else { 0.0 };
-            let nutrient_share = if nutrient_demand > 0.0 { (patch.nutrient / nutrient_demand).min(1.0) } else { 1.0 };
+            // Nutrient is drawn as tissue is made, tallest first (the
+            // dominants get theirs); what is left limits the rest.
+            let mut nutrient_left = patch.nutrient;
             let mut nutrient_used = 0.0;
             let mut litter_today = 0.0;
             // Osmotrophy: organisms absorb dead organic matter through their surface
@@ -1360,7 +1358,9 @@ impl EcoWorld {
                 let tough = p.genome.leaf_toughness.clamp(0.0, 1.0);
                 let het = p.genome.heterotrophy.clamp(0.0, 1.0);
                 // Mixotroph's trade-off: absorption machinery displaces chloroplasts.
-                let photo = got * 0.02 * cf * tf * water_frac * habitat_eff * (0.3 + 0.7 * nutrient_share) * (1.0 - 0.35 * tough) * (1.0 - 0.6 * het);
+                let photo = (got * 0.02 * cf * tf * water_frac * habitat_eff * (1.0 - 0.35 * tough) * (1.0 - 0.6 * het)).min(nutrient_left / NUTRIENT_FRACTION);
+                nutrient_left -= photo * NUTRIENT_FRACTION;
+                nutrient_used += photo * NUTRIENT_FRACTION;
                 let absorbed = het * p.leaf_area() * dom_density * OSMOTROPHY_RATE * dom_share * (0.3 + tf);
                 dom_used += absorbed;
                 // Phagocytosis: particles passing the surface, captured in proportion.
@@ -1398,7 +1398,6 @@ impl EcoWorld {
                 p.light_frac = if light > 0.0 { got / (light * a) } else { 0.0 };
                 p.water_frac = water_frac;
                 p.age += 1.0;
-                nutrient_used += p.biomass * 0.002 * nutrient_share * 0.3;
                 // Growth up to the structural cap (water lifts the cap), then seeds.
                 if p.energy > 0.0 {
                     let cap = p.body().target_mass * (sub + (1.0 - sub) * p.body().growth_cap.powi(3));
@@ -1638,18 +1637,17 @@ impl EcoWorld {
                     // its share by area, so a crowded surface is a dim one.
                     let mat = self.patches[patch].motile_area.max(leaf_now);
                     let intercepted = light * a_area * (0.3 * sub + (1.0 - sub)) * (1.0 - (-0.5 * mat / a_area).exp());
-                    // The same nutrient limit a plant has: the cell's nutrient
-                    // against the demand of everything photosynthesising in it.
-                    let demand = photo_mass[patch] * 0.002;
-                    let share = if demand > 0.0 { (self.patches[patch].nutrient / demand).min(1.0) } else { 1.0 };
-                    let photo = (1.0 - 0.6 * het) * intercepted * (leaf_now / mat) * 0.02 * cf * tf * (0.3 + 0.7 * share);
-                    let used = (photo * 0.03).min(self.patches[patch].nutrient);
-                    self.patches[patch].nutrient -= used;
+                    // The same nutrient draw a plant makes: tissue needs its
+                    // nutrient, and the cell's pool is what is left today.
+                    let photo = ((1.0 - 0.6 * het) * intercepted * (leaf_now / mat) * 0.02 * cf * tf).min(self.patches[patch].nutrient / NUTRIENT_FRACTION);
+                    self.patches[patch].nutrient -= photo * NUTRIENT_FRACTION;
                     delta += photo;
                     production_today += photo;
                 }
             }
             cost_today += fmr + upkeep + activity_cost;
+            // What is metabolised is excreted: its nutrient returns to the cell.
+            self.patches[patch].nutrient += (fmr + upkeep + activity_cost) * NUTRIENT_FRACTION;
 
             // --- digestion of yesterday's gut contents -------------------------
             let gut_cap = gut_frac * mass;
@@ -2289,15 +2287,18 @@ impl EcoWorld {
             let dec = pt.dead_matter * rate;
             pt.dead_matter -= dec;
             pt.bacteria += dec * BACTERIAL_YIELD;
-            pt.nutrient += dec * (0.8 - BACTERIAL_YIELD);
+            // The decayed tissue's nutrient is mineralised, except what the
+            // decomposers keep in their own biomass until they turn over.
+            pt.nutrient += dec * (1.0 - BACTERIAL_YIELD) * NUTRIENT_FRACTION;
             let turnover = pt.bacteria * 0.2 * (0.2 + tf);
             pt.bacteria -= turnover;
-            pt.nutrient += turnover * 0.8;
+            pt.nutrient += turnover * NUTRIENT_FRACTION;
             let rot = pt.carrion * (rate * 3.0).min(0.5);
             pt.carrion -= rot;
-            pt.nutrient += rot * 0.8;
-            // Slow weathering input and leaching.
-            pt.nutrient = (pt.nutrient + 0.002 - pt.nutrient * 0.001).max(0.0);
+            pt.nutrient += rot * NUTRIENT_FRACTION;
+            // Slow weathering input and leaching, in balance at the initial pool.
+            let n0 = NUTRIENT0_PER_M2 * self.patch_area;
+            pt.nutrient = (pt.nutrient + n0 * 0.001 - pt.nutrient * 0.001).max(0.0);
         }
 
         // ---------------- Immigration keeps the sea from emptying ------------
