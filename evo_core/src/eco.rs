@@ -96,8 +96,15 @@ pub const SEED_DISPERSAL_UNIT_M: f32 = 10.0;
 /// Share of a water patch's plant mass that is suspended (drift, plankton)
 /// and so reachable by filtering a current rather than by travelling.
 pub const SUSPENDED_FRACTION: f32 = 0.2;
-/// Water cleared by a filter feeder, m^3 per kg of body per day.
-pub const CLEARANCE_M3_PER_KG_DAY: f32 = 1.2;
+/// Water cleared by a filter feeder, m^3 per kg of body per day, at one
+/// kilogram; per kilogram it falls as the square root of mass (a copepod
+/// clears hundreds of cubic metres per kilogram a day, a mussel tens, a
+/// kilogram fish one).
+pub const CLEARANCE_M3_PER_KG_DAY: f32 = 0.5;
+/// Clearance per kilogram for a body of `mass` kg.
+pub fn clearance_per_kg(mass: f32) -> f32 {
+    CLEARANCE_M3_PER_KG_DAY * mass.max(1e-6).powf(-0.5)
+}
 // No population guard: the world's limits (light, particles, food, crowding)
 // are the only limits. Performance is a separate problem (cohorts, planned)
 // and is never solved by discarding births.
@@ -1683,19 +1690,19 @@ impl EcoWorld {
         let mut births: Vec<Birth> = Vec::new();
         // What each body offers a grazer as a sheet, computed once: its
         // accessible leaf mass and its speed in its own cell.
-        let sheet_info: Vec<(f32, f32)> = self
+        let sheet_info: Vec<(f32, f32, f32, f32)> = self
             .animals
             .iter()
             .map(|s| {
                 if s.traits.membrane_mass <= 0.0 || s.mass <= 0.002 {
-                    return (0.0, 0.0);
+                    return (0.0, 0.0, 0.0, 0.0);
                 }
                 let s_lin = (s.mass / s.traits.mass.max(1e-3)).clamp(0.01, 1.0).powf(1.0 / 3.0);
                 let s_sub = self.patches[s.patch].submersion;
                 let s_speed = (s.traits.water_speed * s_sub + s.traits.land_speed * (1.0 - s_sub)) * s.genome.motility.clamp(0.0, 1.0) * s_lin;
                 let leaf = (s.traits.membrane_mass / s.traits.mass.max(1e-3)).min(1.0) * (s.mass - 0.002);
                 let tough = s.genome.leaf_toughness.clamp(0.0, 1.0);
-                (leaf * 0.5 * (1.0 - 0.8 * tough), s_speed)
+                (leaf * 0.5 * (1.0 - 0.8 * tough), s_speed, s.traits.reach * s_lin, s.mass - 0.002)
             })
             .collect();
         let mut killed: Vec<usize> = Vec::new();
@@ -1882,6 +1889,8 @@ impl EcoWorld {
             // Bite rate from the mouth: trunk cross-section (juveniles scaled),
             // about a tenth of body mass per day for a well-proportioned kilogram.
             let bite_rate = (12.0 * mouth_area * lin_f * lin_f * q * resp_eff).max(1e-6);
+            // The mouth's opening, for what can be swallowed whole.
+            let gape = 2.0 * (mouth_area * lin_f * lin_f / PI).sqrt();
             let handling = 1.0 / bite_rate;
             // Browsing reach from the body's actual extent; on land only an
             // upright body gets its full reach.
@@ -1898,7 +1907,7 @@ impl EcoWorld {
             // kilogram per day (mussels and sponges: 1-10 L/h per 100 g), from a
             // patch two metres deep. Proportional to mass, so no scale advantage;
             // a supplement at fish-level metabolism, not a free living.
-            let filtered = (CLEARANCE_M3_PER_KG_DAY * mass * sub / (a * 2.0)).min(1.0);
+            let filtered = (clearance_per_kg(mass) * mass * sub / (a * 2.0)).min(1.0);
             let search = (search + SUSPENDED_FRACTION * filtered).min(1.0);
             // The filter also takes bacteria (eaten at meat-like quality).
             let bacteria_rate = filtered * self.patches[patch].bacteria * 0.5;
@@ -2012,12 +2021,16 @@ impl EcoWorld {
                 if j == ai || killed_flag[j] {
                     continue;
                 }
-                let (base, s_speed) = sheet_info[j];
+                let (base, s_speed, s_reach, s_whole) = sheet_info[j];
                 if base <= 0.0 {
                     continue;
                 }
                 let keep_up = if speed_here > 0.0 { (1.0 - s_speed / speed_here).clamp(0.0, 1.0) } else if s_speed <= 0.0 { 1.0 } else { 0.0 };
-                let acc = base * keep_up;
+                // A sheet small enough to pass the mouth whole is filtered from
+                // the water the body clears (zooplankton on phytoplankton), on
+                // top of what a bite takes.
+                let swallow = if in_water && s_reach <= gape { filtered } else { 0.0 };
+                let acc = base * keep_up + s_whole * swallow;
                 if acc > 0.0 {
                     sheet_targets.push((j, acc));
                     plant_b += acc;
