@@ -851,3 +851,12 @@ from 28,000 to 6,600. The arena's start gap is now three of the
 predator's own reaches, and the encounter rate scales with how large the
 prey looks (its reach against the predator's) instead of its mass, so a
 ribbon is as findable as it is big.
+
+Run 5, with the arena fixed, still made 24 kills in 3,000 days: the
+sheets have no mouth, so nothing in a world of sheets attempts an
+attack, and the sheets were in every consumer's blind spot (not in the
+plant list, so neither grazed nor filtered). A motile sheet is now leaf
+tissue to any grazer that can keep up with it: the same bite, the same
+toughness gene, accessible in proportion to one minus the ratio of the
+sheet's speed to the grazer's. A drifting mat is as grazeable as a
+floating alga; a sheet that swims away from a slower grazer is not.
