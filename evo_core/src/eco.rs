@@ -373,6 +373,11 @@ pub struct EcoStats {
     /// Pairs of body types fought out in the arena, and pairs waiting.
     #[serde(default)]
     pub arena_pairs: usize,
+    /// Mean shares over the pairs fought so far: eaten, fled.
+    #[serde(default)]
+    pub arena_eaten: f32,
+    #[serde(default)]
+    pub arena_fled: f32,
     #[serde(default)]
     pub arena_pending: usize,
     /// Animals with carnivory above 0.15 (counted in whichever class dominates).
@@ -1155,6 +1160,9 @@ impl EcoWorld {
             rec.0 += out.eaten;
             rec.1 += 1;
             self.stats.arena_pairs = self.arena_cache.len();
+            let n = self.arena_cache.len().max(1) as f32;
+            self.stats.arena_eaten = self.arena_cache.values().map(|o| o.eaten).sum::<f32>() / n;
+            self.stats.arena_fled = self.arena_cache.values().map(|o| o.fled).sum::<f32>() / n;
             done += crate::arena::PAIR_COST;
         }
         self.stats.pending_evals = self.pending.len();

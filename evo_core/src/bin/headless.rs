@@ -27,9 +27,9 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
             let s = &w.stats;
             let max_h = w.plants.iter().map(|p| p.height).fold(0.0f32, f32::max);
             println!(
-                "day {:>5} | plants {:>5} ({:>8.1} kg, on land {:>4} = {:>6.1} kg / {:>3} patches green, tallest {:>4.1} m, {:>3} lin) | animals {:>3} (H {:>3} C {:>3} D {:>3}, aquatic {:>3}, on land {:>3} [{:>3} herb, {:>3} inland at {:.3} kg], best land speed {:.2} m/s, fliers {:>3} powered {:>3}, {:>3} lin) | omni {:>3} meat {:.2} carrion {:.2} | gut {:.2} claws {:.2} plating {:.2} | mass {:.2} kg elems {:.1} | P->A {} A->P {} | flows/day: NPP {:.1} graze {:.2} (mats {:.2}) prey {:.2} carrion {:.2} cost {:.2} | starved {} old {} suffocated {} dried {} | PPMR log10 {:.2} ({:.0}% by larger) satiated {:.0}% tough {:.2} | dead {:>7.1} nutr {:>7.1} | births {:>5} deaths {:>5} kills {:>4} | evals {} pending {} | arena {} pairs ({} waiting)",
+                "day {:>5} | plants {:>5} ({:>8.1} kg, on land {:>4} = {:>6.1} kg / {:>3} patches green, tallest {:>4.1} m, {:>3} lin) | animals {:>3} (H {:>3} C {:>3} D {:>3}, aquatic {:>3}, on land {:>3} [{:>3} herb, {:>3} inland at {:.3} kg], best land speed {:.2} m/s, fliers {:>3} powered {:>3}, {:>3} lin) | omni {:>3} meat {:.2} carrion {:.2} | gut {:.2} claws {:.2} plating {:.2} | mass {:.2} kg elems {:.1} | P->A {} A->P {} | flows/day: NPP {:.1} graze {:.2} (mats {:.2}) prey {:.2} carrion {:.2} cost {:.2} | starved {} old {} suffocated {} dried {} | PPMR log10 {:.2} ({:.0}% by larger) satiated {:.0}% tough {:.2} | dead {:>7.1} nutr {:>7.1} | births {:>5} deaths {:>5} kills {:>4} | evals {} pending {} | arena {} pairs ({} waiting; eaten {:.0}% fled {:.0}%)",
                 day, s.plants, s.plant_biomass, s.land_plants, s.land_plant_biomass, s.vegetated_land, max_h, s.plant_lineages, s.animals, s.herbivores, s.carnivores, s.detritivores, s.aquatic, s.land_animals, s.land_herbivores, s.inland_animals, s.inland_mass, s.best_land_speed, s.fliers, s.powered, s.animal_lineages, s.omnivores, s.mean_carn, s.mean_detr, s.mean_gut, s.mean_weapon, s.mean_armour, s.mean_mass, s.mean_parts, s.plant_to_animal, s.animal_to_plant, s.primary_production, s.grazing_intake, s.mat_grazing, s.predation_intake, s.scavenging_intake, s.metabolic_cost, s.deaths_starved, s.deaths_old, s.deaths_suffocated, s.deaths_dried, if s.kills > 0 { s.ppmr_log_sum / s.kills as f32 } else { 0.0 }, if s.kills > 0 { 100.0 * s.kills_by_larger as f32 / s.kills as f32 } else { 0.0 }, s.satiated_frac * 100.0, s.mean_toughness,
-                s.dead_matter, s.nutrient, s.births, s.deaths, s.kills, s.trait_evals, s.pending_evals, s.arena_pairs, s.arena_pending
+                s.dead_matter, s.nutrient, s.births, s.deaths, s.kills, s.trait_evals, s.pending_evals, s.arena_pairs, s.arena_pending, s.arena_eaten * 100.0, s.arena_fled * 100.0
             );
         }
     }
@@ -54,8 +54,30 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
         }
     }
     println!();
+    // Fought pairs, by outcome, for the audit.
+    let outs = w.arena_outcomes();
+    if !outs.is_empty() {
+        let n = outs.len() as f32;
+        println!(
+            "arena: {} pairs | eaten {:.0}% fled {:.0}% survived {:.0}% | pairs with any kill: {}",
+            outs.len(),
+            100.0 * outs.iter().map(|o| o.3.eaten).sum::<f32>() / n,
+            100.0 * outs.iter().map(|o| o.3.fled).sum::<f32>() / n,
+            100.0 * outs.iter().map(|o| o.3.survived).sum::<f32>() / n,
+            outs.iter().filter(|o| o.3.eaten > 0.0).count()
+        );
+    }
     for l in w.lineages(6) {
         if l.kind == "animal" {
+            if let Some(dir) = dump_dir {
+                if let Some((g, _)) = w.representative(l.id) {
+                    let path = format!("{}/top_{}.json", dir, l.id);
+                    if let Ok(s) = serde_json::to_string(&g) {
+                        let _ = std::fs::create_dir_all(dir);
+                        let _ = std::fs::write(&path, s);
+                    }
+                }
+            }
             println!(
                 "  animal lineage {:>4}: n={:>3} mass {:>6.2} kg | ate plant {:.2} meat {:.2} carrion {:.2} | gut {:.2} claws {:.2} plating {:.2} reach {:.2} m upright {:.2} | land {:.2} m/s water {:.2} m/s air {:.2} m/s glide {:.1} m lift {:.2} m limbs {:.1} clear {:.2} m COT {:.1} turn {:.2} rad/s climb {:.2} m/s shore {:.2} m lungs {:.2} | {:.2} BL/s | on shore {:.0}% | parts {:.1} | membranes {:.2} m² | aquatic {:.0}%",
                 l.id, l.count, l.mean_mass, l.herb, l.carn, l.detr, l.gut, l.weapon, l.armour, l.reach, l.upright, l.land_speed, l.water_speed, l.air_speed, l.glide, l.lift, l.limbs, l.clearance, l.cot, l.turn, l.climb, l.shore, l.breathing, l.speed_bl, l.shore_share * 100.0, l.parts, l.membrane_area, l.aquatic_share * 100.0
