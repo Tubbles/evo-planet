@@ -385,9 +385,13 @@ cells are left out, so a coarse world has continents with an interior
 instead of a coast shattered into one-cell islands (at full detail a
 600-cell world's land was 81% shore). Sea level is the elevation quantile
 matching the water-coverage dial; temperature falls with latitude and 6.5 °C per
-kilometre. Shore cells carry a submersion that swings with a spring-neap
-tide and blends breathing, light, water and locomotion between sea and
-land. An inland basin (a land cell lower than every neighbour, none of
+kilometre. Shore cells are the intertidal band, ranked by elevation from the
+low-water mark (under water 90% of the day) to the high-water mark (5%),
+swinging with a spring-neap tide; submersion blends breathing, light,
+water and locomotion between sea and land, and a body drinks its fill
+for the share of the day it is in water. The band is the gradient along
+which lungs, a waterproof skin and a compact body pay a little more at
+each step up, instead of a single wet step beside a dry desert. An inland basin (a land cell lower than every neighbour, none of
 them sea) holds a lake, with shores of its own; smooth 600-cell worlds
 have none, finer ones a few.
 
@@ -473,8 +477,8 @@ other, cutting the loss by up to 95% and costing 30% more maintenance
 when fully expressed. The surface is the compact body's (6 × (mass /
 1000)^(2/3) m²) or both faces of its sheets, whichever is larger. Fresh
 food carries water (4 kg per kg of dry plant, 2.5 per kg of meat); dew
-settles on the body's surface (0.2 kg/m² on a fully humid night); in or
-beside open water the deficit is made up each day. Humid ground is not a
+settles on the body's surface (0.2 kg/m² on a fully humid night); open
+water makes up the deficit for the share of the day the body is in it. Humid ground is not a
 drink: inland, the water is in the food. A deficit beyond 15% of body mass plus the
 water-store gene's share is death by drying out. Nothing here is a
 threshold on size or form: a sheet on dry land dries in a day because it
