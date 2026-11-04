@@ -891,3 +891,19 @@ the same part is 240 kg at flatness 0, 7 kg at 0.9, 0.9 kg at 0.99 and
 0.25 kg at 1. The saved gait genomes (`docs/gaits`) were found under the
 old blend and no longer walk as described; they are kept as the record
 of that search, not as current bodies.
+
+## Light's free lunch
+
+Run 10's seed 4, with the geometric form continuum, grew the same sea:
+two-part sheets of 2.8 m² and 120 g, mats grazing mats, 73 arena pairs
+with no kill. The ledger explains the sheet's victory in one line: 0.02
+kg of tissue per square metre of lit area per day, on 1.6 m², is a
+hundred per cent of a 30 g body a day at full light, shared only with
+the other sheets shading it. No grazer's mouth earns a tenth of that. A
+sea lettuce in a eutrophic bay grows exactly like this, and the sea was
+eutrophic because its nutrient was not an element: dead matter turned
+into "nutrient" kilograms at 40 to 80% and the pool grew to thirty tonnes
+without ever binding. Nutrient is now a conserved element at 2% of
+tissue, 3 g/m² at the start (a productive sea's photic column), drawn as
+tissue is made and returned as it decays or is metabolised. Standing
+biomass is capped near 150 g/m² and light alone no longer feeds a bloom.

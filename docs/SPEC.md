@@ -436,7 +436,7 @@ flowchart LR
   MB["maintenance: tissue rates, bulk tissue as mass to the three quarters (Kleiber) × temperature (Q10) × oxygen × waterproofing upkeep"] --> DL[daily balance]
   AC["activity: measured gait power over the foraging day"] --> DL
   WB["water: evaporation per m² of skin in air, less drink (patch wetness) and the water in food"] --> DT
-  PH["photosynthesis at the surface mat, shared by area"] --> DL
+  PH["photosynthesis at the surface mat, shared by area, drawing the cell's nutrient"] --> DL
   RG["range: π × reach² + 2 × reach × path, over as many cells as it covers"] --> FR["Holling type II intake of plants, motile sheets (as far as the grazer keeps up with them), carrion and bacteria; competition is depletion, no interference term"]
   FR --> GT["stomach and digestion by gut type"]
   GT --> DL
@@ -482,6 +482,7 @@ Every quantity is kilograms of dry biomass equivalent per day.
 | maintenance and activity | reserve | heat |
 | litter and corpses | shed leaves, deaths | dead matter, carrion |
 | decomposition | dead matter | bacteria (yield 0.4) and nutrient |
+| nutrient (a conserved element, 2% of tissue) | the cell's pool, 3 g/m² at the start | drawn as photosynthesis makes tissue, tallest first; returned by decay, bacterial turnover and what animals metabolise |
 
 The audit examples (`seed_ledger`, `gait_audit`, `flier_audit`,
 `origin_probe`, `flap_probe3`) print the per-individual ledgers behind
