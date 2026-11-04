@@ -23,7 +23,7 @@ Each decoded part is a slab whose thickness runs geometrically from a capsule's 
 
 | Quantity | Depends on | Equation or definition |
 |---|---|---|
-| Length, radii | node genes, inherited scale | length = clamp(gene × scale, 0.01, 3) m ; base radius, tip radius = clamp(gene × scale, 0.004, 0.8) m ; mean radius = (base radius + tip radius) / 2 |
+| Length, radii | node genes, inherited scale | animal: length = clamp(gene × scale, 0.01, 0.4) m, base radius and tip radius = clamp(gene × scale, 0.004, 0.08) m (many cheap segments rather than one great one); plant: 0.01 to 3 m and 0.004 to 0.8 m ; mean radius = (base radius + tip radius) / 2 |
 | Sheet thickness | tip radius | sheet thickness = clamp(tip radius × 0.002, 0.0001, 0.002) m |
 | Thickness | mean radius, sheet thickness, flatness | thickness = (2 × mean radius)^(1 − flatness) × sheet thickness^flatness |
 | Width | mean radius, base radius, flatness | width = 2 × ((1 − flatness) × mean radius + flatness × base radius) |
@@ -147,7 +147,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Photosynthesis | light taken, CO₂ factor, temperature factor, water fraction, toughness, heterotrophy, nutrient | photosynthesis = min(light taken × 0.02 × CO₂ factor × temperature factor × water fraction × (1 − 0.35 × toughness) × (1 − 0.6 × heterotrophy), nutrient left / 0.02) kg dry per day; anchored plants attenuated by exp(−0.3 × (depth − height) × (1 − motility)) |
 | Absorption (osmotrophy) | heterotrophy, leaf area, dead matter | absorbed = heterotrophy × leaf area × (dead matter / area) × 0.3 × share × (0.3 + temperature factor), pool limited to half per day |
 | Capture (phagocytosis) | heterotrophy, leaf area, bacteria, motility | captured = heterotrophy × leaf area × (0.05 × submersion + 0.02 × motility) × 86400 × particles per m³ × 0.05 × share |
-| Respiration | leaf mass, biomass, motility, transport, temperature factor, land tolerance | respiration = (leaf mass × 0.004 + (biomass − leaf mass) × (0.0005 + 0.0025 × motility) + transport × 0.002) × (0.3 + temperature factor) × (1 + 0.3 × land tolerance) |
+| Respiration | leaf mass, biomass, motility, transport, temperature factor, land tolerance | respiration = (leaf mass × 0.004 + (biomass − leaf mass) × (0.0001 + 0.0005 × motility) + transport × 0.002) × (0.3 + temperature factor) × (1 + 0.3 × land tolerance) |
 | Energy | above | energy += photosynthesis + 0.6 × (absorbed + captured) − respiration − wilting loss |
 | Leaf shedding | specific leaf area | leaf lifespan = clamp(365 × (leaf mass per area / 0.1)^1.5, 20, 2000) days; shed = leaf mass / leaf lifespan → litter |
 | Growth | energy, growth cap | cap = target mass × (submersion + (1 − submersion) × growth cap³); grow = min(energy, 0.05 × biomass + 0.01, cap − biomass) |
@@ -165,7 +165,7 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Breathing efficiency | submersion, breathing gene | breathing efficiency = submersion × (1 − 0.9 × breathing) + (1 − submersion) × (0.1 + 0.9 × breathing); oxygen debt below 0.2 costs mass × 0.05 × (0.2 − breathing efficiency) / 0.2 per day (a starvation below zero reserve is then counted as suffocation) |
 | Speed here | measured speeds, submersion, motility, plating, linear scale | speed here = (water speed × submersion + land speed × (1 − submersion)) × motility × linear scale × (1 − 0.3 × plating) |
 | Air speed over the ground | measured air speed, motility, plating, flap lift | air speed over the ground = measured air speed × motility × linear scale × (1 − 0.3 × plating) × clamp(flap lift, 0, 1): only the stroke's own lift carries a body anywhere; travel = max(speed here, air speed over the ground) on land |
-| Maintenance | membrane mass, mass, motility, temperature, oxygen, waterproofing | maintenance = (membrane mass × 0.004 + (mass − membrane mass)^0.75 × (0.0005 + 0.0025 × motility)) × (0.3 + temperature factor) × Q10 / clamp(oxygen relative, 0.3, 1) × (1 + 0.3 × land tolerance) kg dry per day |
+| Maintenance | membrane mass, mass, motility, temperature, oxygen, waterproofing | maintenance = (membrane mass × 0.004 + (mass − membrane mass)^0.75 × (0.0001 + 0.0005 × motility)) × (0.3 + temperature factor) × Q10 / clamp(oxygen relative, 0.3, 1) × (1 + 0.3 × land tolerance) kg dry per day (bulk tissue at a fifth of its earlier rate: a segment is cheap to carry) |
 | Activity (fatigue) | fatigue factor, breathing efficiency | activity = fatigue in water × submersion + fatigue on land × (1 − submersion) |
 | Path needed | bite rate, gut space, food found, handling time, reach, day's path | wanted = min(bite rate, gut space at the start of the day); if handling time × wanted < 1: search needed = wanted / (food found × (1 − handling time × wanted)), path needed = clamp((search needed × area − π × reach²) / (2 × reach), 0, day's path); otherwise, or with no food found, the whole day's path |
 | Movement cost | cost of transport, mass, gravity, path needed | movement cost = cost of transport × mass × g × path needed / 0.25 / 18 MJ per kg; unmeasured bodies: 10.7 × mass^0.68 × path needed / 18 MJ per kg; standing still costs nothing beyond maintenance |

@@ -9,7 +9,7 @@
 //! can only reach the fraction of its target size at which no stem exceeds
 //! its strength under the weight above it.
 
-use crate::decode::{decode, Phenotype};
+use crate::decode::{decode_with_caps, Phenotype, PLANT_MAX_LEN, PLANT_MAX_RADIUS};
 use crate::genome::Genome;
 use rapier3d::na::{Isometry3, UnitQuaternion, Vector3};
 use serde::Serialize;
@@ -178,7 +178,7 @@ impl PlantBody {
 }
 
 pub fn decode_plant(g: &Genome, gravity: f32) -> PlantBody {
-    let pheno = decode(g);
+    let pheno = decode_with_caps(g, PLANT_MAX_LEN, PLANT_MAX_RADIUS);
     let isos = placements(&pheno);
     let n = pheno.parts.len();
     let mut parts = Vec::with_capacity(n);

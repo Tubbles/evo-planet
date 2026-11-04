@@ -1606,8 +1606,8 @@ impl EcoWorld {
                 let transport = p.body().transport * (p.biomass / p.body().target_mass).clamp(0.0, 1.0);
                 // The same continuum from the sessile side: a plant with some
                 // motility already pays that share of an animal's field rate.
-                let mot_tissue = 0.0025 * p.genome.motility.clamp(0.0, 1.0);
-                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * (0.0005 + mot_tissue) + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
+                let mot_tissue = 0.0005 * p.genome.motility.clamp(0.0, 1.0);
+                let respiration = (leaf_m * 0.004 + (p.biomass - leaf_m).max(0.0) * (0.0001 + mot_tissue) + transport * 0.002) * (0.3 + tf) * (1.0 + 0.3 * tol);
                 production_today += photo;
                 p.energy += photo + (absorbed + captured) * 0.6 - respiration - p.biomass * 0.02 * wilt * (1.0 - 0.8 * tol);
                 // Leaf economics: thin leaves live weeks, thick ones years
@@ -1852,7 +1852,7 @@ impl EcoWorld {
             // A waterproofed integument (the land tolerance gene) costs upkeep,
             // as a plant's cuticle does.
             let waterproof = self.animals[ai].genome.land_tolerance.clamp(0.0, 1.0);
-            let fmr = (membrane_mass * 0.004 + (mass - membrane_mass).max(0.0).powf(0.75) * (0.0005 + 0.0025 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3) * (1.0 + 0.3 * waterproof);
+            let fmr = (membrane_mass * 0.004 + (mass - membrane_mass).max(0.0).powf(0.75) * (0.0001 + 0.0005 * motility)) * (0.3 + temp_factor(temp)) * q / o2.min(1.0).max(0.3) * (1.0 + 0.3 * waterproof);
             let upkeep = 0.0f32; // claws and plating are real parts and already cost mass
             // Short of oxygen (gills in air, lungs under water) the tissue runs
             // an anaerobic debt that costs it, continuously, up to 5% of the

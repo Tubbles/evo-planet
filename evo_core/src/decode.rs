@@ -102,6 +102,8 @@ struct Ctx<'a> {
     g: &'a Genome,
     parts: Vec<Part>,
     counts: Vec<u8>,
+    max_len: f32,
+    max_radius: f32,
 }
 
 #[allow(dead_code)]
@@ -145,9 +147,12 @@ impl<'a> Ctx<'a> {
 
         // Size floor of a centimetre: the origin of heterotrophy happened far
         // smaller than the old 4 cm floor allowed (a few hundred grams of body).
-        let len = (node.len * scale).clamp(0.01, 3.0);
-        let r0 = (node.r0 * scale).clamp(0.004, 0.8);
-        let r1 = (node.r1 * scale).clamp(0.004, 0.8);
+        // Animal parts are small: at most 40 cm long and 8 cm in radius (a
+        // part of a few kilograms at the largest), so a body is many cheap
+        // segments rather than one great one.
+        let len = (node.len * scale).clamp(0.01, self.max_len);
+        let r0 = (node.r0 * scale).clamp(0.004, self.max_radius);
+        let r1 = (node.r1 * scale).clamp(0.004, self.max_radius);
         let flat = node.flat();
         let grip = node.grip();
         let stiffness = node.stiffness();
@@ -240,8 +245,20 @@ impl<'a> Ctx<'a> {
     }
 }
 
+/// Largest animal part: 40 cm long, 8 cm in radius (a few kilograms), so an
+/// animal is many cheap segments rather than one great one.
+pub const ANIMAL_MAX_LEN: f32 = 0.4;
+pub const ANIMAL_MAX_RADIUS: f32 = 0.08;
+/// Plants keep the old range (a stem can be metres).
+pub const PLANT_MAX_LEN: f32 = 3.0;
+pub const PLANT_MAX_RADIUS: f32 = 0.8;
+
 pub fn decode(g: &Genome) -> Phenotype {
-    let mut ctx = Ctx { g, parts: Vec::new(), counts: vec![0; g.nodes.len()] };
+    decode_with_caps(g, ANIMAL_MAX_LEN, ANIMAL_MAX_RADIUS)
+}
+
+pub fn decode_with_caps(g: &Genome, max_len: f32, max_radius: f32) -> Phenotype {
+    let mut ctx = Ctx { g, parts: Vec::new(), counts: vec![0; g.nodes.len()], max_len, max_radius };
     ctx.expand(
         g.root,
         None,

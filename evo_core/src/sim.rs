@@ -1189,7 +1189,7 @@ mod tests {
         // mean, its share of positive cases and its best case.
         let planet = PlanetParams::earth();
         let t = 4.0;
-        let run = |g: &Genome, amp_scale: f32| CreatureSim::run_episode(decode(g), &planet, Environment::Air, SimConfig { episode_time: t, amp_scale, ..Default::default() });
+        let run = |g: &Genome, amp_scale: f32| CreatureSim::run_episode(crate::decode::decode_with_caps(g, 3.0, 0.8), &planet, Environment::Air, SimConfig { episode_time: t, amp_scale, ..Default::default() });
         let mut gains = Vec::new();
         let mut rod_drop = Vec::new();
         for &mount in &[PI / 2.0, PI / 2.0 + 1e-4, PI / 2.0 - 1e-4] {
@@ -1226,8 +1226,8 @@ mod tests {
         let cfg = SimConfig { episode_time: 2.0, ..Default::default() };
         for seed in 0..6u64 {
             let g = Genome::random(seed);
-            let a = CreatureSim::run_episode(decode(&g), &planet, Environment::Land, cfg);
-            let b = CreatureSim::run_episode(decode(&g), &planet, Environment::Land, cfg);
+            let a = CreatureSim::run_episode(crate::decode::decode_with_caps(&g, 3.0, 0.8), &planet, Environment::Land, cfg);
+            let b = CreatureSim::run_episode(crate::decode::decode_with_caps(&g, 3.0, 0.8), &planet, Environment::Land, cfg);
             assert!(a.distance.is_finite());
             assert_eq!(a.distance.to_bits(), b.distance.to_bits(), "non-deterministic for seed {seed}");
         }
@@ -1252,7 +1252,7 @@ mod tests {
         let mut thin = PlanetParams::earth();
         thin.pressure_atm = 0.001;
         let fall = |planet: &PlanetParams| {
-            let mut sim = CreatureSim::new(decode(&g), planet, Environment::Air, cfg);
+            let mut sim = CreatureSim::new(crate::decode::decode_with_caps(&g, 3.0, 0.8), planet, Environment::Air, cfg);
             // Face the panel upward: root lies along X, so normal (local Z) is world Z.
             // Rotate so that normal points up.
             let h = sim.handles[0];
