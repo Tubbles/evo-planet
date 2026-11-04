@@ -24,6 +24,14 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
         w.measure_pending(evals_per_day);
         w.tick();
         if day % (days / 10).max(1) == 0 || day == 1 {
+            for l in w.lineages(3) {
+                if l.kind == "animal" {
+                    println!(
+                        "    top lineage {:>5}: n={:>6} mass {:.3} kg parts {:.1} | mouth {:.5} m² membranes {:.3} m² | land {:.2} water {:.2} m/s | diet plant {:.2} meat {:.2} carrion {:.2} | intake {:.3} /kg/day | on shore {:.0}% aquatic {:.0}%",
+                        l.id, l.count, l.mean_mass, l.parts, l.mouth, l.membrane_area, l.land_speed, l.water_speed, l.herb, l.carn, l.detr, l.intake, l.shore_share * 100.0, l.aquatic_share * 100.0
+                    );
+                }
+            }
             let s = &w.stats;
             let max_h = w.plants.iter().map(|p| p.height).fold(0.0f32, f32::max);
             println!(
@@ -66,6 +74,13 @@ fn run_eco(planet: PlanetParams, days: u64, patches: usize, seed: u64, evals_per
             100.0 * outs.iter().map(|o| o.3.survived).sum::<f32>() / n,
             outs.iter().filter(|o| o.3.eaten > 0.0).count()
         );
+        // The pairs themselves: who tried to eat whom, and how it went.
+        let all = w.lineages(100000);
+        let by_lineage: std::collections::HashMap<u32, &evo_core::eco::LineageSummary> = all.iter().map(|l| (l.id, l)).collect();
+        for (pred, prey, env, o) in outs.iter().take(12) {
+            let d = |id: &u32| by_lineage.get(id).map(|l| format!("{} ({:.3} kg, {:.1} parts, mouth {:.4} m², land {:.2} water {:.2} m/s)", l.id, l.mean_mass, l.parts, l.mouth, l.land_speed, l.water_speed)).unwrap_or_else(|| format!("{} (gone)", id));
+            println!("  {:?}: {} vs {}: eaten {:.0}% fled {:.0}% survived {:.0}%", env, d(pred), d(prey), o.eaten * 100.0, o.fled * 100.0, o.survived * 100.0);
+        }
     }
     for l in w.lineages(6) {
         if l.kind == "animal" {

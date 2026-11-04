@@ -455,6 +455,11 @@ pub struct LineageSummary {
     pub water_speed: f32,
     pub parts: f32,
     pub membrane_area: f32,
+    /// Mouth cross-section, m², and mean gross intake per kilogram per day.
+    #[serde(default)]
+    pub mouth: f32,
+    #[serde(default)]
+    pub intake: f32,
     pub lung_frac: f32,
     pub height: f32,
     pub sla: f32,
@@ -2432,6 +2437,8 @@ impl EcoWorld {
             water_speed: 0.0,
             parts: 0.0,
             membrane_area: 0.0,
+            mouth: 0.0,
+            intake: 0.0,
             lung_frac: 0.0,
             height: 0.0,
             sla: 0.0,
@@ -2541,6 +2548,8 @@ impl EcoWorld {
                     s.speed_bl += sp / (2.0 * a.traits.reach).max(0.01) / c;
                     s.parts += decode(&a.genome).part_count() as f32 / c;
                     s.membrane_area += a.traits.membrane_area / c;
+                    s.mouth += a.traits.mouth_area / c;
+                    s.intake += a.intake_rate / a.mass.max(1e-3) / c;
                     s.lung_frac += a.genome.lung_frac / c;
                 }
                 s
