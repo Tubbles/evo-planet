@@ -169,9 +169,18 @@ bookkeeping for the table and has no effect on the organism.
 ### 3.1 Animal phenotype (`decode.rs`)
 
 The graph is expanded depth-first into up to 24 parts. Each part is a
-blend, by its flatness, of a capsule of mean radius and a sheet of width
-twice the base radius: mass, tissue volume (for buoyancy) and muscle
-cross-section all blend. Lungs and stored water are added to the trunk.
+slab: its width is the capsule's mean diameter blending to the sheet's
+chord (twice the base radius), and its **thickness runs geometrically**
+from the capsule's diameter at flatness 0 to the sheet's thickness (the
+tip-radius gene, 0.1 to 2 mm) at flatness 1, with the cross-section's
+shape factor running from a circle's to a rectangle's. Mass is tissue
+volume at water density; the cross-section is the muscle section and,
+at the trunk's front, the mouth; the thickness there is the gape. The
+blend is geometric because thickness spans four decades: a linear blend
+of mass made a one-metre part at flatness 0.9 weigh ninety kilograms, a
+wall between sheets and bodies that no mutation could cross (the first
+populated worlds were sheets to the end for that reason among others).
+Lungs lighten and stored water weighs the round share of the trunk.
 Joined parts have their mass ratio clamped to 12:1 for the solver.
 
 The muscle that moves a part sits on the segment it hangs from (a thigh

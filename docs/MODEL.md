@@ -876,3 +876,18 @@ with no physics behind it. It is gone: competition is depletion, what
 one eats the next does not find. Populations are now expected to boom
 until the mats are eaten down and then to starve, which is what a
 scramble is.
+
+## The wall between sheets and bodies
+
+Run 8's per-lineage ledger showed the sea's winners plainly: one-part
+sheets of 1.2 m², 50 g, no mouth, no motion, 3% of their mass a day from
+light and absorbed dead matter. A grazer with a mouth would earn 17% a
+day on those mats, so why did none arise? Because a sheet could not
+become one. Mass blended linearly in flatness: a one-metre sheet at
+flatness 0.9 weighed ninety kilograms, and its child, born at a tenth of
+its parent's size, could never grow to maturity. Every step off the sheet
+was a cliff. The form continuum is now geometric in thickness (`decode.rs`):
+the same part is 240 kg at flatness 0, 7 kg at 0.9, 0.9 kg at 0.99 and
+0.25 kg at 1. The saved gait genomes (`docs/gaits`) were found under the
+old blend and no longer walk as described; they are kept as the record
+of that search, not as current bodies.
