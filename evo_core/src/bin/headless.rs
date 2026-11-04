@@ -2,7 +2,7 @@
 //!
 //! Usage: evo_headless [--planet N|name] [--days N] [--grid PATCHES] [--seed N]
 //!        [--patch-area M2] [--evals-per-day N] [--arena-per-day F] [--list-planets]
-//!        [--dump-gaits DIR] [--save FILE] [--load FILE]
+//!        [--dump-gaits DIR] [--save FILE] [--load FILE] [--water FRACTION]
 //!
 //! `--save` writes a checkpoint at every ledger line; `--load` carries on from
 //! one (to `--days`, counted from the world's own day).
@@ -135,10 +135,15 @@ fn main() {
     let mut seed = 1u64;
     let mut dump_dir: Option<String> = None;
     let mut save: Option<String> = None;
+    let mut water: Option<f32> = None;
     let mut load: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--water" => {
+                water = args[i + 1].parse().ok();
+                i += 1;
+            }
             "--save" => {
                 save = Some(args[i + 1].clone());
                 i += 1;
@@ -196,11 +201,16 @@ fn main() {
     }
 
     let presets = PlanetParams::presets();
-    let planet = presets
+    let mut planet = presets
         .iter()
         .enumerate()
         .find(|(k, p)| k.to_string() == planet_sel || p.name.to_lowercase().contains(&planet_sel.to_lowercase()))
         .map(|(_, p)| p.clone())
         .unwrap_or_else(PlanetParams::earth);
+    if let Some(w) = water {
+        // The planet's water-coverage dial, from the command line: a world
+        // with more land than Earth's has more interior to walk on.
+        planet.water_coverage = w.clamp(0.05, 0.97);
+    }
     run_eco(planet, days, grid, seed, evals_per_day, patch_area, arena_per_day, dump_dir.as_deref(), save.as_deref(), load.as_deref());
 }
