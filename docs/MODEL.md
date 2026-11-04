@@ -860,3 +860,19 @@ tissue to any grazer that can keep up with it: the same bite, the same
 toughness gene, accessible in proportion to one minus the ratio of the
 sheet's speed to the grazer's. A drifting mat is as grazeable as a
 floating alga; a sheet that swims away from a slower grazer is not.
+
+## Scramble without a resource
+
+Run 6 (sheets grazeable) made grazing the mats most of the intake (5 of
+6 kg a day by day 2,400) but changed nothing else: 103,000 herbivores of
+80 g, two parts, all on the shore, 19 kills. Reading the intake formula
+with the ledger's numbers showed why size and predation never pay. The
+Beddington-DeAngelis interference term, 0.15 per competitor per 100 m²,
+divided every intake by fifty at 350 grazers a cell. Nothing was ever
+food-limited (starved 50 against 94,834 dead of old age), the mats were
+never eaten down, and predation on a neighbour could not beat grazing a
+mat that the crowd was not allowed to deplete. The term was a constant
+with no physics behind it. It is gone: competition is depletion, what
+one eats the next does not find. Populations are now expected to boom
+until the mats are eaten down and then to starve, which is what a
+scramble is.
