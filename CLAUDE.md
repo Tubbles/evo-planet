@@ -15,13 +15,11 @@ It is reviewed by the project owner, so it must always match the code.
   every numeric constant in the code whose value does not appear in the
   document. Zero missing is the target; a listed constant means a row to
   add or a stale number to fix.
-- Regenerate the page with `python3 -I scripts/equations_page.py
-  docs/EQUATIONS.md <out>.html` and republish it as the "Evo Planet
-  Equations" artifact (same file path keeps its URL). The page is
-  generated; never edit it by hand.
-- When reporting a batch of model changes to the owner, give an "updated
-  maths report": the rows that changed, old equation to new, in a short
-  table, and the link to the republished page.
+- The page (`python3 -I scripts/equations_page.py docs/EQUATIONS.md
+  <out>.html`, published as the "Evo Planet Equations" artifact) is
+  regenerated and republished only when the owner asks for it, and the
+  owner does not want a changed-rows table with each batch. Keep the
+  Markdown current and the audit at zero; that is the whole duty.
 
 ## Other standing rules
 
