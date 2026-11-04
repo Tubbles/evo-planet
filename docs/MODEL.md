@@ -836,3 +836,18 @@ on both sides until measured.
 Land tolerance in plants rises slowly (0.01 to 0.05 in 1,200 days on the
 shore, where seed rain from the sea swamps it); the inland flora is the
 next thing to watch.
+
+## The sea that was algae
+
+Run 4 (new terrain, neutral prior, 96 bodies a day) ended with 332,722
+animals, 99,819 of them one lineage: a 1.7 m by 1 m sheet a tenth of a
+millimetre thick, 60 g, heterotrophy 0, motility 0.51. A floating alga
+that happens to be on the animal side of the motility line, immune to
+grazing (grazers eat the plant list) and immune to predation because the
+arena started the predator a gap set by the prey's size away: three
+reaches of a two-metre ribbon, which no 5 cm mouth reaches in six
+seconds. Kills over 3,000 days: 21. The sessile plants it shaded fell
+from 28,000 to 6,600. The arena's start gap is now three of the
+predator's own reaches, and the encounter rate scales with how large the
+prey looks (its reach against the predator's) instead of its mass, so a
+ribbon is as findable as it is big.

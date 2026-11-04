@@ -338,7 +338,11 @@ predator first considers a prey of a given body type in a given medium
 (land or water), the pair is queued for the arena (`arena.rs`): both
 bodies in one physics world, the predator steering at the prey and the
 prey steering away through a bearing controller on the turn their own
-tests measured (its sign comes from the turn test). A bout ends when the
+tests measured (its sign comes from the turn test). The two start with a
+gap of three of the predator's reaches between their surfaces, so the
+chase is the same in body lengths at every size (a fixed metre made every
+slow small predator fail by distance alone; a gap set by the prey's size
+put a two-metre ribbon out of any small mouth's reach). A bout ends when the
 predator has held the prey for one second with its mouth (the front of
 the trunk, with a gape of the trunk's diameter, on a prey part that fits
 in it) or with a clawed foot in contact: **eaten**. If time runs out
@@ -428,7 +432,7 @@ flowchart LR
   FR --> GT["stomach and digestion by gut type"]
   GT --> DL
   OS["absorption and capture by surface"] --> DL
-  PR["predation: encounter by range; capture share fought out in the arena per pair of body types (prior: attack against defence); kill return (Fritsch)"] --> GT
+  PR["predation: encounter by range and by how large the prey looks (its reach against the predator's); capture share fought out in the arena per pair of body types (prior: attack against defence); kill return (Fritsch)"] --> GT
   DL --> RV["reserve, capped by fat capacity"]
   RV --> GW["growth (West, Brown and Enquist)"]
   GW --> RP["reproduction at the maturity fraction of full size"]
