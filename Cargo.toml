@@ -16,3 +16,5 @@ opt-level = 3
 
 [profile.release]
 opt-level = 3
+# Line tables, so a running world can be sampled with gdb to see where a day goes.
+debug = 1
