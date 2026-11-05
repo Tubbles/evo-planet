@@ -753,10 +753,11 @@ impl EcoWorld {
             stats: c.stats,
             history: c.history,
             merge_scale: 1.0,
-            genomes_alive: 0,
+            genomes_alive: 0, // set below
         };
         w.arena_seen = w.arena_cache.keys().copied().collect();
         set_shore_levels(&mut w.patches);
+        w.genomes_alive = w.animals.iter().map(|a| a.key).collect::<std::collections::HashSet<u64>>().len();
         for i in 0..w.animals.len() {
             w.request_traits(i);
         }
