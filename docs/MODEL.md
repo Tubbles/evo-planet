@@ -1041,3 +1041,27 @@ that scavenges a third to a half of its income, and nothing has a
 measured land or water speed above zero. The symmetric attachments buy
 parts; they do not by themselves buy joints, muscle or thickness, and
 the pond under a slot cap gives nothing a reason to want them.
+
+## Cohorts
+
+The motile density cap is gone. An animal record now stands for `n`
+identical individuals (one genome, one cell, one state); every rule is
+still applied per individual and a cohort's draw on a shared pool is
+taken n times, limited by the pool. Births are the expectation with the
+remainder drawn; the day's mutant children are sampled into at most
+2,000 new genomes world-wide, a budget that tapers to nothing as the
+number of genomes alive nears 2,000 (a genome's cohorts spread over
+every cell it can reach, so the record count is at least genomes times
+cells, and a taper on records alone came too late: 2.9 million records
+at merge scale 64). Kills are the expectation over the predator cohort,
+capped by the prey cohort; a hungry cohort's movers split off; cohorts
+of one genome in one cell merge when mass and reserve agree to a tenth
+of adult mass, the tolerance doubling while records exceed a million.
+From the day-1000 checkpoint of the seed 4 pond (7,377 individuals,
+5,573 genomes) the mat grew to 824 million individuals by day 1100,
+held in 706,000 records at 470 MB, at about fifteen seconds a day;
+production peaked at 1.44 kg a day on day 1080 and fell to 0.6 kg as
+the cells' nutrient ran short, with carrion at 0.4 kg a day: the sea's
+mat equilibrium at a centimetre, reached without a slot cap. The price
+is resolution: 2,000 genomes alive for a billion bodies, and the
+mutants beyond the budget born unmutated.
