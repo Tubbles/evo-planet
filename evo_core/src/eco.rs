@@ -74,11 +74,15 @@ pub const MUTANT_COHORTS_PER_DAY: usize = 2000;
 /// Cohorts of one genome in one cell merge when their mass and reserve
 /// agree to this fraction of adult mass (their ages average by count).
 pub const COHORT_MERGE_TOLERANCE: f32 = 0.1;
-/// Records the world keeps at most: the day's budget of new mutant genomes
-/// tapers to nothing as the count approaches it (from half of it), and
-/// above it the merge tolerance doubles until the count fits, so a crowd
-/// is kept at a coarser resolution rather than not at all (performance
-/// guard).
+/// Distinct genomes alive the world keeps at most: the day's budget of new
+/// mutant genomes tapers to nothing as the count approaches it (from half
+/// of it). A genome's cohorts spread over every cell it can reach, so the
+/// record count is at least genomes times cells (performance guard: the
+/// resolution of the mutation process).
+pub const MAX_GENOMES: usize = 2000;
+/// Records the world keeps at most: above it the merge tolerance doubles
+/// until the count fits, so a crowd is kept at a coarser resolution of
+/// state rather than not at all (performance guard).
 pub const MAX_COHORTS: usize = 1_000_000;
 /// Evaporation from a wet body surface in dry air, kg of water per m² per
 /// day (a few millimetres a day in still air; a frog's skin, a worm's).
@@ -481,6 +485,9 @@ pub struct EcoStats {
     /// Multiplier on the cohort merge tolerance in force.
     #[serde(skip)]
     pub merge_scale: f32,
+    /// Distinct animal genomes alive.
+    #[serde(skip)]
+    pub genomes: usize,
     /// Plant lineages whose offspring were born motile, and the reverse.
     pub plant_to_animal: u64,
     pub animal_to_plant: u64,
@@ -662,6 +669,8 @@ pub struct EcoWorld {
     pub history: Vec<[f32; 7]>,
     /// Current multiplier on the cohort merge tolerance (1, 2, 4, ...).
     pub merge_scale: f32,
+    /// Distinct animal genomes alive after the last merge.
+    pub genomes_alive: usize,
 }
 
 /// Everything a world needs to carry on from where it was: what the
@@ -744,6 +753,7 @@ impl EcoWorld {
             stats: c.stats,
             history: c.history,
             merge_scale: 1.0,
+            genomes_alive: 0,
         };
         w.arena_seen = w.arena_cache.keys().copied().collect();
         set_shore_levels(&mut w.patches);
@@ -1169,6 +1179,7 @@ impl EcoWorld {
             stats: EcoStats::default(),
             history: Vec::new(),
             merge_scale: 1.0,
+            genomes_alive: 0,
         };
         // Two algae per water patch on average, half grown: a sea worth grazing.
         let water_n = world.patches.iter().filter(|p| p.water).count().max(1);
@@ -1614,6 +1625,8 @@ impl EcoWorld {
             }
             self.merge_scale *= 2.0;
         }
+        let keys: std::collections::HashSet<u64> = self.animals.iter().map(|a| a.key).collect();
+        self.genomes_alive = keys.len();
         // Indices changed: rebuild the measurement queue.
         self.pending.clear();
         for i in 0..self.animals.len() {
@@ -2828,9 +2841,9 @@ impl EcoWorld {
         // parent that had any).
         {
             let total: u64 = mutant_pools.iter().map(|m| m.count as u64).sum();
-            // The budget tapers from full at half the record limit to none at
+            // The budget tapers from full at half the genome limit to none at
             // the limit; what it does not cover is born unmutated.
-            let room = ((MAX_COHORTS as f32 - self.animals.len() as f32) / (MAX_COHORTS as f32 * 0.5)).clamp(0.0, 1.0);
+            let room = ((MAX_GENOMES as f32 - self.genomes_alive as f32) / (MAX_GENOMES as f32 * 0.5)).clamp(0.0, 1.0);
             let budget = (MUTANT_COHORTS_PER_DAY as f32 * room).round() as usize;
             if budget == 0 {
                 for m in &mutant_pools {
@@ -3091,6 +3104,7 @@ impl EcoWorld {
         }
         s.cohorts = self.animals.len();
         s.merge_scale = self.merge_scale;
+        s.genomes = self.genomes_alive;
         let mut pl: Vec<u32> = self.plants.iter().map(|p| p.lineage).collect();
         pl.sort_unstable();
         pl.dedup();
