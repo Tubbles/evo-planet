@@ -1030,3 +1030,14 @@ multi-part sheets, not walkers: income is still the mat's light per
 area, and the symmetric drawing makes a rosette as cheap a mutation as
 a second disc. What the hinge in seed 5 does under muscle is not yet
 measured.
+
+Where it settled: seed 4 held 2.6 parts a body from day 3000 to 3100
+and seed 5 3.3 from day 3900 to 4200, with the same three lineages in
+the same shares, so the rise from the symmetric drawing is a step, not
+a slope. The pond's largest body stayed the 16-part branching sheet
+(2,054 of 9,600 in seed 4, skin 0.97) and the 11-part sheet in seed 5
+held under 300. Every body is still flat (0.98 to 1.00), still a mat
+that scavenges a third to a half of its income, and nothing has a
+measured land or water speed above zero. The symmetric attachments buy
+parts; they do not by themselves buy joints, muscle or thickness, and
+the pond under a slot cap gives nothing a reason to want them.
