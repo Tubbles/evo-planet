@@ -155,8 +155,24 @@ An episode is one body in one environment (land, water, air, shore) for a settli
 | Seed dispersal | dispersal gene, height, air density | hops = dispersal × 10 m / cell width × (1 + 0.3 × height × √(air density / 1.225)), a random walk kept within one medium class of the parent's (water 2, shore 1, dry 0) |
 | Plant death | energy, age | energy < −0.3 × biomass, or age > lifespan = (1 − motility) × lifespan gene + motility × 150 × target mass^0.25 × longevity |
 | Plant to animal | child motility | a seed with motility ≥ 0.5 is born an animal (mass = offspring fraction × adult mass, at least the seed mass); an animal's child with motility < 0.5 settles as a plant |
-| Density cap | cell area | 48 plants per m² in water and on land, and the same 48 motile organisms per m²: a larva drifting onto a full cell does not settle and becomes carrion there (performance guard, for centimetre bodies) |
+| Density cap | cell area | 48 plants per m² in water and on land (performance guard, for centimetre plants); animals have no cap and are kept as cohorts instead (next section) |
 | Floors at centimetre scale | — | realised height at least 0.2 mm; biomass after shedding at least 1e-9 kg; decoded target mass at least 1e-9 kg; canopy extent at least 0.2 mm; a plant's grazed remainder at least 2e-7 kg; founders' seeds 1e-8 to 1e-7 kg (default 2e-8), the seed mass gene 5e-9 to 2e-5 kg |
+
+## Cohorts (how animals are stored)
+
+| Quantity | Depends on | Equation or definition |
+|---|---|---|
+| Cohort | genome, cell, state | an animal record stands for `count` identical individuals (one genome, one cell, the same mass, reserve, gut, age and water deficit); every rule in the next section is applied per individual, and a draw on a shared pool (a cell's nutrient, dead matter, bacteria, carrion, plants, prey, light) is taken count times, limited by the pool |
+| Stochastic rounding | expected count | an expected count x becomes floor(x), plus one with probability x − floor(x), so cohort expectations are unbiased |
+| Births per cohort | count, surplus | children = round(0.8 × count) when surplus ≥ cost (the 80% chance per individual); the parent's reserve pays cost × children / count; mutants = round(0.75 × children); the unmutated children are one cohort |
+| Mutant cohorts | mutant children, records alive | the day's mutant children world-wide are sampled into at most budget new genomes, budget = 2000 × clamp((1,000,000 − records) / 500,000, 0, 1); with fewer parent cohorts than the budget each parent gets its share (at least one genome) and its mutants are split evenly over them; with more, the budget's genomes are drawn from parents in proportion to their mutant counts, each carrying an equal share of the children; at zero budget the mutant children are born unmutated (performance guard: the resolution of the mutation process) |
+| Kills per cohort | predator count, capture probability, prey count | kills = min(round(predator count × encounter × capture probability), prey count); each successful predator eats to its own gut space and the cohort's meat is shared per individual; the prey cohort loses the kills and is gone at zero |
+| Grazing per cohort | count, intake rate, gut space | the cohort takes min(rate × count, gut space × count) from the targets; what it finds is shared per individual; a grazed sheet cohort loses the bite per individual |
+| Relocation per cohort | count, hunger | movers = round(0.6 × count) of a hungry cohort; they split off as a cohort of their own in the target cell with the day's state and the move paid; a mover cohort whose reserve is then below zero is carrion on arrival |
+| Death per cohort | state | starvation, drying, old age and grazing below a tenth of adult mass take the whole cohort (its individuals are identical) |
+| Merge | genome, cell, mass, reserve | after births, cohorts of one genome in one cell whose mass and reserve round to the same bin of tolerance × adult mass merge, their state (age included) averaged by count; tolerance = 0.1 × merge scale |
+| Merge scale | records alive | merge scale starts at 1; while records > 1,000,000 the pass repeats at double the scale (to 64); below 500,000 records the scale halves (performance guard: the resolution of state) |
+| Checkpoints | — | a checkpoint written before cohorts loads with every record a cohort of one |
 
 ## Animals (per individual, per day)
 

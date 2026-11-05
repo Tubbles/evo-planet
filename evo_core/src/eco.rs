@@ -62,6 +62,24 @@ pub const PLANT_CAP_PER_M2_WATER: f32 = 48.0;
 pub const PLANT_CAP_PER_M2_LAND: f32 = 48.0;
 /// Founding grazers per square metre of sea.
 pub const FOUNDERS_PER_M2: f32 = 1.0 / 1200.0;
+/// Cohorts: an animal record stands for `n` identical individuals (same
+/// genome, mass, reserve, gut, age, water deficit, in the same cell). Every
+/// rule is applied per individual and its draw on a shared pool (a cell's
+/// nutrient, carrion, bacteria, plants, prey) is taken `n` times. The
+/// mutant children born in a day are sampled into at most this many new
+/// cohorts world-wide, shared out in proportion to each parent cohort's
+/// mutant births (a performance guard: the resolution of the mutation
+/// process, not its rate).
+pub const MUTANT_COHORTS_PER_DAY: usize = 2000;
+/// Cohorts of one genome in one cell merge when their mass and reserve
+/// agree to this fraction of adult mass (their ages average by count).
+pub const COHORT_MERGE_TOLERANCE: f32 = 0.1;
+/// Records the world keeps at most: the day's budget of new mutant genomes
+/// tapers to nothing as the count approaches it (from half of it), and
+/// above it the merge tolerance doubles until the count fits, so a crowd
+/// is kept at a coarser resolution rather than not at all (performance
+/// guard).
+pub const MAX_COHORTS: usize = 1_000_000;
 /// Evaporation from a wet body surface in dry air, kg of water per m² per
 /// day (a few millimetres a day in still air; a frog's skin, a worm's).
 /// Scaled by the air's dryness, by warmth and by the integument's
@@ -287,6 +305,14 @@ pub struct Animal {
     /// Water deficit, kg (zero when hydrated, negative when drying out).
     #[serde(default)]
     pub water: f32,
+    /// Individuals this record stands for (a cohort); every field above is
+    /// per individual.
+    #[serde(default = "one")]
+    pub n: u32,
+}
+
+fn one() -> u32 {
+    1
 }
 
 impl Animal {
@@ -309,6 +335,7 @@ impl Animal {
             ate_carrion: 0.0,
             intake_rate: 0.0,
             water: 0.0,
+            n: 1,
         }
     }
 
@@ -448,6 +475,12 @@ pub struct EcoStats {
     pub immigrants: u64,
     pub trait_evals: u64,
     pub pending_evals: usize,
+    /// Animal records (cohorts) alive; recomputed daily, not stored.
+    #[serde(skip)]
+    pub cohorts: usize,
+    /// Multiplier on the cohort merge tolerance in force.
+    #[serde(skip)]
+    pub merge_scale: f32,
     /// Plant lineages whose offspring were born motile, and the reverse.
     pub plant_to_animal: u64,
     pub animal_to_plant: u64,
@@ -627,6 +660,8 @@ pub struct EcoWorld {
     arena_record: HashMap<u32, (f32, u32)>,
     pub stats: EcoStats,
     pub history: Vec<[f32; 7]>,
+    /// Current multiplier on the cohort merge tolerance (1, 2, 4, ...).
+    pub merge_scale: f32,
 }
 
 /// Everything a world needs to carry on from where it was: what the
@@ -708,6 +743,7 @@ impl EcoWorld {
             arena_record: c.arena_record.into_iter().collect(),
             stats: c.stats,
             history: c.history,
+            merge_scale: 1.0,
         };
         w.arena_seen = w.arena_cache.keys().copied().collect();
         set_shore_levels(&mut w.patches);
@@ -726,8 +762,104 @@ impl EcoWorld {
 
     pub fn load(path: &str) -> std::io::Result<Self> {
         let bytes = std::fs::read(path)?;
-        let c: Checkpoint = bincode::deserialize(&bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let c: Checkpoint = match bincode::deserialize(&bytes) {
+            Ok(c) => c,
+            // A checkpoint written before cohorts: every animal record is one
+            // individual.
+            Err(e) => match bincode::deserialize::<CheckpointV0>(&bytes) {
+                Ok(old) => old.into(),
+                Err(_) => return Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+            },
+        };
         Ok(Self::restore(c))
+    }
+}
+
+/// The animal record before cohorts (no count), for old checkpoints.
+#[derive(Deserialize)]
+struct AnimalV0 {
+    genome: Genome,
+    key: u64,
+    traits: Traits,
+    patch: usize,
+    lineage: u32,
+    mass: f32,
+    reserve: f32,
+    gut_plant: f32,
+    gut_meat: f32,
+    age: f32,
+    kills: u32,
+    offspring: u32,
+    ate_plant: f32,
+    ate_meat: f32,
+    ate_carrion: f32,
+    intake_rate: f32,
+    water: f32,
+}
+
+#[derive(Deserialize)]
+struct CheckpointV0 {
+    planet: PlanetParams,
+    patches: Vec<Patch>,
+    neighbours: Vec<Vec<usize>>,
+    plants: Vec<Plant>,
+    animals: Vec<AnimalV0>,
+    day: u64,
+    terrain_seed: u32,
+    patch_area: f32,
+    next_lineage: u32,
+    trait_cache: Vec<(u64, Traits)>,
+    arena_cache: Vec<((u32, u32, Environment), crate::arena::ArenaOutcome)>,
+    arena_record: Vec<(u32, (f32, u32))>,
+    arena_rate: f32,
+    arena_credit: f32,
+    stats: EcoStats,
+    history: Vec<[f32; 7]>,
+}
+
+impl From<CheckpointV0> for Checkpoint {
+    fn from(o: CheckpointV0) -> Self {
+        Checkpoint {
+            planet: o.planet,
+            patches: o.patches,
+            neighbours: o.neighbours,
+            plants: o.plants,
+            animals: o
+                .animals
+                .into_iter()
+                .map(|a| Animal {
+                    genome: a.genome,
+                    key: a.key,
+                    traits: a.traits,
+                    patch: a.patch,
+                    lineage: a.lineage,
+                    mass: a.mass,
+                    reserve: a.reserve,
+                    gut_plant: a.gut_plant,
+                    gut_meat: a.gut_meat,
+                    age: a.age,
+                    kills: a.kills,
+                    offspring: a.offspring,
+                    ate_plant: a.ate_plant,
+                    ate_meat: a.ate_meat,
+                    ate_carrion: a.ate_carrion,
+                    intake_rate: a.intake_rate,
+                    water: a.water,
+                    n: 1,
+                })
+                .collect(),
+            day: o.day,
+            terrain_seed: o.terrain_seed,
+            patch_area: o.patch_area,
+            next_lineage: o.next_lineage,
+            trait_cache: o.trait_cache,
+            arena_cache: o.arena_cache,
+            arena_record: o.arena_record,
+            arena_rate: o.arena_rate,
+            arena_credit: o.arena_credit,
+            stats: o.stats,
+            history: o.history,
+        }
     }
 }
 
@@ -762,6 +894,15 @@ fn co2_factor(co2_frac: f32) -> f32 {
 /// A body's key: a 64-bit hash of the genome's serialised form (a string
 /// of the whole genome per animal cost ten kilobytes each and ran a
 /// crowded world out of memory).
+/// Round a count to an integer with the remainder drawn, so that cohort
+/// expectations are unbiased (3.4 is 3 six times in ten, 4 the rest).
+fn stochastic_round(rng: &mut StdRng, x: f32) -> u32 {
+    let x = x.max(0.0);
+    let whole = x.floor();
+    let frac = x - whole;
+    whole as u32 + if frac > 0.0 && rng.gen_bool(frac.min(1.0) as f64) { 1 } else { 0 }
+}
+
 fn hash_genome(g: &Genome) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1027,6 +1168,7 @@ impl EcoWorld {
             arena_record: HashMap::new(),
             stats: EcoStats::default(),
             history: Vec::new(),
+            merge_scale: 1.0,
         };
         // Two algae per water patch on average, half grown: a sea worth grazing.
         let water_n = world.patches.iter().filter(|p| p.water).count().max(1);
@@ -1455,6 +1597,68 @@ impl EcoWorld {
     /// land young stay on land and the shore, the shore's go either way).
     /// A walk that kept the shore's young to wet cells meant nothing born
     /// on the shore could ever be born inland.
+    /// Cohorts of one genome in one cell with the same mass and reserve (to
+    /// `COHORT_MERGE_TOLERANCE` of adult mass) are one cohort: their state,
+    /// age included, is averaged by count. Siblings born on one day in one
+    /// cell merge exactly; drifted-apart cohorts stay apart.
+    fn merge_cohorts(&mut self) {
+        // Below half the budget the resolution recovers a step; above it
+        // the merge repeats at double the tolerance until the count fits.
+        if self.merge_scale > 1.0 && self.animals.len() < MAX_COHORTS / 2 {
+            self.merge_scale /= 2.0;
+        }
+        loop {
+            self.merge_pass(self.merge_scale);
+            if self.animals.len() <= MAX_COHORTS || self.merge_scale >= 64.0 {
+                break;
+            }
+            self.merge_scale *= 2.0;
+        }
+        // Indices changed: rebuild the measurement queue.
+        self.pending.clear();
+        for i in 0..self.animals.len() {
+            self.request_traits(i);
+        }
+    }
+
+    fn merge_pass(&mut self, scale: f32) {
+        let mut index: HashMap<(u64, usize, i32, i32), usize> = HashMap::new();
+        let mut keep: Vec<Animal> = Vec::with_capacity(self.animals.len());
+        for a in self.animals.drain(..) {
+            if a.n == 0 {
+                continue;
+            }
+            let adult = a.traits.mass.max(1e-7);
+            let tol = COHORT_MERGE_TOLERANCE * scale * adult;
+            let key = (a.key, a.patch, (a.mass / tol).round() as i32, (a.reserve / tol).round() as i32);
+            match index.get(&key) {
+                Some(&i) => {
+                    let k = &mut keep[i];
+                    let (wa, wb) = (k.n as f32, a.n as f32);
+                    let w = wa + wb;
+                    k.mass = (k.mass * wa + a.mass * wb) / w;
+                    k.reserve = (k.reserve * wa + a.reserve * wb) / w;
+                    k.gut_plant = (k.gut_plant * wa + a.gut_plant * wb) / w;
+                    k.gut_meat = (k.gut_meat * wa + a.gut_meat * wb) / w;
+                    k.water = (k.water * wa + a.water * wb) / w;
+                    k.ate_plant = (k.ate_plant * wa + a.ate_plant * wb) / w;
+                    k.ate_meat = (k.ate_meat * wa + a.ate_meat * wb) / w;
+                    k.ate_carrion = (k.ate_carrion * wa + a.ate_carrion * wb) / w;
+                    k.intake_rate = (k.intake_rate * wa + a.intake_rate * wb) / w;
+                    k.age = (k.age * wa + a.age * wb) / w;
+                    k.kills += a.kills;
+                    k.offspring += a.offspring;
+                    k.n += a.n;
+                }
+                None => {
+                    index.insert(key, keep.len());
+                    keep.push(a);
+                }
+            }
+        }
+        self.animals = keep;
+    }
+
     fn disperse_same_habitat(&mut self, from: usize, reach: f32) -> usize {
         self.disperse(from, reach)
     }
@@ -1512,7 +1716,7 @@ impl EcoWorld {
         let mut motile_area: Vec<f32> = vec![0.0; n_patches];
         for a in &self.animals {
             let lin = (a.mass / a.traits.mass.max(1e-6)).clamp(0.01, 1.0).powf(1.0 / 3.0);
-            motile_area[a.patch] += a.traits.membrane_area * lin * lin;
+            motile_area[a.patch] += a.traits.membrane_area * lin * lin * a.n as f32;
         }
         let mut seeds: Vec<(Genome, u32, usize, f32, Option<PlantBody>)> = Vec::new();
         let mut dead_plants: Vec<usize> = Vec::new();
@@ -1736,8 +1940,21 @@ impl EcoWorld {
             parent_traits: Traits,
             mass0: f32,
             reserve0: f32,
+            /// Children in this cohort (unmutated siblings share one).
+            count: u32,
         }
         let mut births: Vec<Birth> = Vec::new();
+        // Mutant children per parent cohort, sampled into cohorts after the
+        // day's loop under the world-wide budget.
+        struct MutantPool {
+            parent: usize,
+            count: u32,
+            mass0: f32,
+            reserve0: f32,
+        }
+        let mut mutant_pools: Vec<MutantPool> = Vec::new();
+        // Cohorts that split off to another cell today (movers).
+        let mut movers: Vec<Animal> = Vec::new();
         // What each body offers a grazer as a sheet, computed once: its
         // accessible leaf mass and its speed in its own cell.
         let sheet_info: Vec<(f32, f32, f32, f32)> = self
@@ -1752,7 +1969,8 @@ impl EcoWorld {
                 let s_speed = (s.traits.water_speed * s_sub + s.traits.land_speed * (1.0 - s_sub)) * s.genome.motility.clamp(0.0, 1.0) * s_lin;
                 let leaf = (s.traits.membrane_mass / s.traits.mass.max(1e-7)).min(1.0) * (s.mass - 2e-7);
                 let tough = s.genome.leaf_toughness.clamp(0.0, 1.0);
-                (leaf * 0.5 * (1.0 - 0.8 * tough), s_speed, s.traits.reach * s_lin, s.mass - 2e-7)
+                let sn = s.n as f32;
+                (leaf * 0.5 * (1.0 - 0.8 * tough) * sn, s_speed, s.traits.reach * s_lin, (s.mass - 2e-7) * sn)
             })
             .collect();
         let mut killed: Vec<usize> = Vec::new();
@@ -1820,6 +2038,7 @@ impl EcoWorld {
                     a.intake_rate,
                 )
             };
+            let n = self.animals[ai].n as f32;
             let (reach_adult, mouth_area, claws, plating, upright, air_speed_raw, measured_air, glide_ratio) = {
                 let t = &self.animals[ai].traits;
                 let sb = self.patches[patch].submersion;
@@ -1916,15 +2135,15 @@ impl EcoWorld {
                     let intercepted = light * a_area * (0.3 * sub + (1.0 - sub)) * (1.0 - (-0.5 * mat / a_area).exp());
                     // The same nutrient draw a plant makes: tissue needs its
                     // nutrient, and the cell's pool is what is left today.
-                    let photo = ((1.0 - 0.6 * het) * intercepted * (leaf_now / mat) * 0.02 * cf * tf).min(self.patches[patch].nutrient / NUTRIENT_FRACTION);
-                    self.patches[patch].nutrient -= photo * NUTRIENT_FRACTION;
+                    let photo = ((1.0 - 0.6 * het) * intercepted * (leaf_now / mat) * 0.02 * cf * tf).min(self.patches[patch].nutrient / NUTRIENT_FRACTION / n);
+                    self.patches[patch].nutrient -= photo * NUTRIENT_FRACTION * n;
                     delta += photo;
-                    production_today += photo;
+                    production_today += photo * n;
                 }
             }
-            cost_today += fmr + upkeep;
+            cost_today += (fmr + upkeep) * n;
             // What is metabolised is excreted: its nutrient returns to the cell.
-            self.patches[patch].nutrient += (fmr + upkeep) * NUTRIENT_FRACTION;
+            self.patches[patch].nutrient += (fmr + upkeep) * NUTRIENT_FRACTION * n;
 
             // --- digestion of yesterday's gut contents -------------------------
             let gut_cap = gut_frac * mass;
@@ -1940,7 +2159,7 @@ impl EcoWorld {
                     a.gut_meat -= dm;
                     delta += dp * eff_plant + dm * eff_meat;
                     // Undigested remainder returns to the patch as dung.
-                    self.patches[patch].dead_matter += dp * (1.0 - eff_plant) + dm * (1.0 - eff_meat);
+                    self.patches[patch].dead_matter += (dp * (1.0 - eff_plant) + dm * (1.0 - eff_meat)) * n;
                 }
             }
             let mut space = (gut_cap - (self.animals[ai].gut_plant + self.animals[ai].gut_meat)).max(0.0);
@@ -2083,6 +2302,9 @@ impl EcoWorld {
             // number of animals, not quadratic: a cell of a hundred thousand
             // milligram sheets froze the world otherwise.
             const SHEET_SAMPLE: usize = 64;
+            // (Each record is a cohort and offers its whole cohort's leaf, so
+            // sampling records uniformly and weighting by the record count is
+            // unbiased in expectation.)
             let crowd = animals_in[patch].len();
             let (picks, weight): (Vec<usize>, f32) = if crowd > SHEET_SAMPLE {
                 ((0..SHEET_SAMPLE).map(|_| animals_in[patch][self.rng.gen_range(0..crowd)]).collect(), crowd as f32 / SHEET_SAMPLE as f32)
@@ -2123,8 +2345,8 @@ impl EcoWorld {
             let carrion_rate = carrion_search * carrion_here / (1.0 + carrion_search * handling * carrion_here);
             {
                 // Bacteria through the filter: cheap, meat-like food for anything that strains water.
-                let take = bacteria_rate.min(self.patches[patch].bacteria * 0.3);
-                self.patches[patch].bacteria -= take;
+                let take = (bacteria_rate * n).min(self.patches[patch].bacteria * 0.3) / n;
+                self.patches[patch].bacteria -= take * n;
                 delta += take * eff_meat;
                 self.animals[ai].ate_carrion += take * eff_meat;
             }
@@ -2141,17 +2363,34 @@ impl EcoWorld {
             if space > 0.0 && motility > 0.0 && speed_here > 0.0 {
                 // Prey in this cell, plus prey in the ring cells the day's range covers
                 // (each kept with probability equal to that cell's coverage).
-                let mut candidates: Vec<usize> = animals_in[patch].iter().copied().filter(|&j| j != ai && !killed_flag[j]).collect();
+                // Each prey record is a cohort: the chance of meeting it goes
+                // with its count, so candidates are drawn by count.
+                let mut candidates: Vec<(usize, f32)> = animals_in[patch].iter().copied().filter(|&j| j != ai && !killed_flag[j]).map(|j| (j, self.animals[j].n as f32)).collect();
                 for &(j, cover) in &ring_cells {
                     for &k in &animals_in[j] {
-                        if k != ai && !killed_flag[k] && self.rng.gen_bool(cover as f64) {
-                            candidates.push(k);
+                        if k != ai && !killed_flag[k] {
+                            candidates.push((k, self.animals[k].n as f32 * cover));
                         }
                     }
                 }
+                let weight_total: f32 = candidates.iter().map(|c| c.1).sum();
                 let mut best: Option<(usize, f32, f32)> = None; // (idx, p_success, profitability)
                 for _ in 0..candidates.len().min(3) {
-                    let j = candidates[self.rng.gen_range(0..candidates.len())];
+                    if weight_total <= 0.0 {
+                        break;
+                    }
+                    let mut pick = self.rng.gen_range(0.0..weight_total);
+                    let mut j = candidates[candidates.len() - 1].0;
+                    for &(c, w) in &candidates {
+                        if pick < w {
+                            j = c;
+                            break;
+                        }
+                        pick -= w;
+                    }
+                    if killed_flag[j] {
+                        continue;
+                    }
                     let prey = &self.animals[j];
                     let pm = prey.mass.max(1e-7);
                     let p_in_water = self.patches[prey.patch].water;
@@ -2232,25 +2471,35 @@ impl EcoWorld {
                         // to the arena; later attacks use what it found.
                         let medium = if sub >= 0.5 || self.patches[self.animals[j].patch].water { Environment::Water } else { Environment::Land };
                         self.arena_request(ai, j, medium);
-                        if self.rng.gen_bool(p_success.clamp(0.0, 1.0) as f64) {
+                        // Each of the n predators attempts once: the kills are
+                        // the expectation over the cohort (the remainder drawn),
+                        // no more than the prey cohort holds.
+                        let kills = stochastic_round(&mut self.rng, n * p_success.clamp(0.0, 1.0)).min(self.animals[j].n);
+                        if kills > 0 {
+                            let k = kills as f32;
                             let prey_mass = self.animals[j].mass;
                             let prey_reserve = self.animals[j].reserve.max(0.0);
                             let z = (mass / prey_mass.max(1e-7)).log10();
                             let xi = (0.4 + 0.4 * z).clamp(0.0, 1.0);
                             let body = prey_mass * 0.8 + prey_reserve;
                             let edible = body * xi;
+                            // Each successful predator eats to its own gut; the
+                            // cohort's meat is shared per individual.
                             let meal = edible.min(space);
-                            space -= meal;
-                            food_meat += meal;
-                            self.patches[patch].carrion += body - meal + prey_mass * 0.2;
-                            self.stats.ppmr_log_sum += z;
+                            space -= meal * k / n;
+                            food_meat += meal * k / n;
+                            self.patches[patch].carrion += (body - meal + prey_mass * 0.2) * k;
+                            self.stats.ppmr_log_sum += z * k;
                             if z > 0.0 {
-                                self.stats.kills_by_larger += 1;
+                                self.stats.kills_by_larger += kills as u64;
                             }
-                            killed.push(j);
-                            killed_flag[j] = true;
-                            self.animals[ai].kills += 1;
-                            self.stats.kills += 1;
+                            self.animals[j].n -= kills;
+                            if self.animals[j].n == 0 {
+                                killed.push(j);
+                                killed_flag[j] = true;
+                            }
+                            self.animals[ai].kills += kills;
+                            self.stats.kills += kills as u64;
                         }
                     }
                 }
@@ -2266,28 +2515,30 @@ impl EcoWorld {
                     if space <= 0.0 {
                         break;
                     }
+                    // The cohort takes n mouthfuls from the cell's pools; what
+                    // it finds is shared per individual.
                     if kind == 0 && carrion_rate > 0.0 {
-                        let take = carrion_rate.min(space).min(carrion_here);
+                        let take = (carrion_rate * n).min(space * n).min(self.patches[patch].carrion.max(0.0));
                         self.patches[patch].carrion -= take;
-                        space -= take;
-                        food_carrion += take;
+                        space -= take / n;
+                        food_carrion += take / n;
                     } else if kind == 1 && plant_rate > 0.0 && plant_b > 0.0 {
-                        let mut take = plant_rate.min(space);
+                        let take = (plant_rate * n).min(space * n);
                         let scale_take = take / plant_b;
+                        let mut got = 0.0f32;
                         for (pi, acc) in &plant_targets {
                             let bite = acc * scale_take;
                             let p = &mut self.plants[*pi];
                             let bite = bite.min(p.biomass * 0.9);
                             p.biomass -= bite;
-                            take -= bite;
-                            food_plant += bite;
+                            got += bite;
                         }
                         for (j, acc) in &sheet_targets {
                             let s = &mut self.animals[*j];
-                            let bite = (acc * scale_take).min(s.mass * 0.9);
-                            s.mass -= bite;
-                            take -= bite;
-                            food_plant += bite;
+                            let sn = s.n.max(1) as f32;
+                            let bite = (acc * scale_take).min(s.mass * 0.9 * sn);
+                            s.mass -= bite / sn;
+                            got += bite;
                             mats_today += bite;
                             // Grazed below a tenth of its size, a sheet is gone.
                             if s.mass < 0.1 * s.traits.mass {
@@ -2295,15 +2546,16 @@ impl EcoWorld {
                                 killed_flag[*j] = true;
                             }
                         }
-                        space -= food_plant;
+                        food_plant += got / n;
+                        space -= got / n;
                     }
                 }
             }
             {
                 let a = &mut self.animals[ai];
-                graze_today += food_plant;
-                prey_today += food_meat;
-                carrion_today += food_carrion;
+                graze_today += food_plant * n;
+                prey_today += food_meat * n;
+                carrion_today += food_carrion * n;
                 a.gut_plant += food_plant;
                 a.gut_meat += food_carrion + food_meat;
                 a.ate_plant += food_plant;
@@ -2337,8 +2589,8 @@ impl EcoWorld {
                 let joules = if cot > 0.0 { cot * mass * g * path_needed / MUSCLE_EFFICIENCY } else { 10.7 * mass.powf(0.68) * path_needed };
                 activity_cost = joules / J_PER_KG_DRY;
                 delta -= activity_cost;
-                cost_today += activity_cost;
-                self.patches[patch].nutrient += activity_cost * NUTRIENT_FRACTION;
+                cost_today += activity_cost * n;
+                self.patches[patch].nutrient += activity_cost * NUTRIENT_FRACTION * n;
             }
 
             // --- water: loss through the skin in air, against drink and food ----
@@ -2366,7 +2618,11 @@ impl EcoWorld {
 
             // --- movement: when hungry, toward the best reachable neighbour --------
             let hungry = delta < 0.0 && self.animals[ai].reserve < 0.5 * (0.05 * mass + fat_frac * mass.powf(1.19));
-            if hungry && self.rng.gen_bool(0.6) {
+            // Six in ten hungry individuals move; a cohort's movers split off
+            // as a cohort of their own (the stayers keep this record).
+            let moving = if hungry { stochastic_round(&mut self.rng, n * 0.6) } else { 0 };
+            let mut move_out: Option<(usize, f32)> = None; // (target cell, cost per mover)
+            if moving > 0 {
                 let directed = self.rng.gen_bool(0.5);
                 let mut best: Option<(usize, f32)> = None;
                 // A glider reaches the next patch when a launch carries it ten metres;
@@ -2442,12 +2698,17 @@ impl EcoWorld {
                     let t = &self.animals[ai].traits;
                     let cot = if target_water { t.cot_water } else { t.cot_land };
                     let dist = best_hops as f32 * patch_w;
-                    delta -= if cot > 0.0 {
+                    let move_cost = if cot > 0.0 {
                         cot * mass * g * dist / MUSCLE_EFFICIENCY / J_PER_KG_DRY
                     } else {
                         10.7 * mass.powf(0.68) * dist / J_PER_KG_DRY
                     };
-                    self.animals[ai].patch = target;
+                    if moving >= self.animals[ai].n {
+                        delta -= move_cost;
+                        self.animals[ai].patch = target;
+                    } else {
+                        move_out = Some((target, move_cost));
+                    }
                 }
             }
 
@@ -2462,12 +2723,12 @@ impl EcoWorld {
                 // Dissolved matter is taken up through a wet surface: in water,
                 // or on land in proportion to how wet the ground is.
                 let wet = sub + (1.0 - sub) * self.patches[a.patch].moisture;
-                let absorbed = (het * surface * wet * (pool / a_area) * OSMOTROPHY_RATE * q).min(pool * 0.2);
-                self.patches[a.patch].dead_matter -= absorbed;
+                let absorbed = (het * surface * wet * (pool / a_area) * OSMOTROPHY_RATE * q * n).min(pool * 0.2) / n;
+                self.patches[a.patch].dead_matter -= absorbed * n;
                 // Phagocytosis: particles swept past the surface by water and by moving.
                 let particles = self.patches[a.patch].bacteria / (a_area * 2.0);
-                let captured = (het * surface * (CURRENT_M_S * sub + speed_here) * 86400.0 * particles * CAPTURE_EFF).min(self.patches[a.patch].bacteria * 0.3);
-                self.patches[a.patch].bacteria -= captured;
+                let captured = (het * surface * (CURRENT_M_S * sub + speed_here) * 86400.0 * particles * CAPTURE_EFF * n).min(self.patches[a.patch].bacteria * 0.3) / n;
+                self.patches[a.patch].bacteria -= captured * n;
                 delta += (absorbed + captured) * 0.6;
                 a.ate_plant += (absorbed + captured) * 0.6;
             }
@@ -2495,11 +2756,22 @@ impl EcoWorld {
                 if mature {
                     let mass0 = (a.genome.offspring_frac.clamp(0.01, 0.5) * adult_mass).max(1e-8);
                     let cost = mass0 * 1.3; // body plus a starter reserve
-                    if surplus >= cost && self.rng.gen_bool(0.8) {
-                        a.reserve -= cost;
-                        a.offspring += 1;
-                        let (child, body_changed) = if self.rng.gen_bool(0.75) { a.genome.mutate_scaled(&mut self.rng, BODY_MUTATION_SCALE) } else { (a.genome.clone(), false) };
-                        births.push(Birth { genome: child, patch: a.patch, lineage: a.lineage, body_changed, parent_traits: a.traits, mass0, reserve0: mass0 * 0.3 });
+                    if surplus >= cost {
+                        // Eight in ten mature individuals with the surplus bear one
+                        // child; three in four children carry a mutation.
+                        let children = stochastic_round(&mut self.rng, n * 0.8);
+                        if children > 0 {
+                            a.reserve -= cost * children as f32 / n;
+                            a.offspring += children;
+                            let mutants = stochastic_round(&mut self.rng, children as f32 * 0.75).min(children);
+                            let same = children - mutants;
+                            if same > 0 {
+                                births.push(Birth { genome: a.genome.clone(), patch: a.patch, lineage: a.lineage, body_changed: false, parent_traits: a.traits, mass0, reserve0: mass0 * 0.3, count: same });
+                            }
+                            if mutants > 0 {
+                                mutant_pools.push(MutantPool { parent: ai, count: mutants, mass0, reserve0: mass0 * 0.3 });
+                            }
+                        }
                     }
                     // Beyond two offspring's worth of store, surplus is wasted as heat.
                     let max_store = cap + 2.0 * cost;
@@ -2508,21 +2780,109 @@ impl EcoWorld {
                     }
                 }
             }
+            // The movers leave now, with the day's state and their move paid.
+            if let Some((target, move_cost)) = move_out {
+                let mut m = a.clone();
+                m.n = moving.min(a.n);
+                a.n -= m.n;
+                m.patch = target;
+                m.reserve -= move_cost;
+                m.kills = 0;
+                m.offspring = 0;
+                movers.push(m);
+            }
+            let a = &mut self.animals[ai];
+            let an = a.n as u64;
             if a.reserve < 0.0 {
                 // Starved; counted as suffocated when it was the oxygen debt
                 // (a gill-breather on dry land, a lung-breather under water).
                 if resp_eff < 0.2 {
-                    self.stats.deaths_suffocated += 1;
+                    self.stats.deaths_suffocated += an;
                 } else {
-                    self.stats.deaths_starved += 1;
+                    self.stats.deaths_starved += an;
                 }
                 deaths.push(ai);
             } else if a.water < -(LETHAL_WATER_LOSS + a.genome.water_store.clamp(0.0, 0.5)) * a.mass {
-                self.stats.deaths_dried += 1;
+                self.stats.deaths_dried += an;
                 deaths.push(ai);
             } else if a.age > a.lifespan() {
-                self.stats.deaths_old += 1;
+                self.stats.deaths_old += an;
                 deaths.push(ai);
+            }
+        }
+        // Movers that starved on the way are carrion where they arrived.
+        for m in movers {
+            if m.n == 0 {
+                continue;
+            }
+            if m.reserve < 0.0 {
+                self.patches[m.patch].carrion += (m.mass * 0.8) * m.n as f32;
+                self.stats.deaths_starved += m.n as u64;
+                self.stats.deaths += m.n as u64;
+            } else {
+                self.animals.push(m);
+            }
+        }
+        // Mutant children: each parent cohort's mutants are sampled into
+        // cohorts, the world's budget shared out by count (at least one per
+        // parent that had any).
+        {
+            let total: u64 = mutant_pools.iter().map(|m| m.count as u64).sum();
+            // The budget tapers from full at half the record limit to none at
+            // the limit; what it does not cover is born unmutated.
+            let room = ((MAX_COHORTS as f32 - self.animals.len() as f32) / (MAX_COHORTS as f32 * 0.5)).clamp(0.0, 1.0);
+            let budget = (MUTANT_COHORTS_PER_DAY as f32 * room).round() as usize;
+            if budget == 0 {
+                for m in &mutant_pools {
+                    let parent = &self.animals[m.parent];
+                    births.push(Birth { genome: parent.genome.clone(), patch: parent.patch, lineage: parent.lineage, body_changed: false, parent_traits: parent.traits, mass0: m.mass0, reserve0: m.reserve0, count: m.count });
+                }
+            } else if mutant_pools.len() <= budget {
+                // Every parent cohort gets its share of the budget, at least
+                // one genome; its mutants are split evenly over them.
+                for m in &mutant_pools {
+                    let share = if total > 0 { (budget as f64 * m.count as f64 / total as f64).round() as u32 } else { 1 };
+                    let k = share.max(1).min(m.count);
+                    let parent = &self.animals[m.parent];
+                    let (genome, lineage, traits, patch) = (parent.genome.clone(), parent.lineage, parent.traits, parent.patch);
+                    let base = m.count / k;
+                    let extra = m.count % k;
+                    for i in 0..k {
+                        let count = base + if i < extra { 1 } else { 0 };
+                        if count == 0 {
+                            continue;
+                        }
+                        let (child, body_changed) = genome.mutate_scaled(&mut self.rng, BODY_MUTATION_SCALE);
+                        births.push(Birth { genome: child, patch, lineage, body_changed, parent_traits: traits, mass0: m.mass0, reserve0: m.reserve0, count });
+                    }
+                }
+            } else if total > 0 {
+                // More parents than the budget: the budget's genomes are drawn
+                // from parents by their mutant counts, each carrying an equal
+                // share of the day's mutant children (their number is kept,
+                // their genomes sampled).
+                let mut cumulative: Vec<f64> = Vec::with_capacity(mutant_pools.len());
+                let mut acc = 0.0f64;
+                for m in &mutant_pools {
+                    acc += m.count as f64;
+                    cumulative.push(acc);
+                }
+                let per = total as f64 / budget as f64;
+                let mut carried = 0.0f64;
+                for _ in 0..budget {
+                    let draw = self.rng.gen_range(0.0..acc);
+                    let i = cumulative.partition_point(|&c| c <= draw).min(mutant_pools.len() - 1);
+                    let m = &mutant_pools[i];
+                    carried += per;
+                    let count = carried.floor() as u32;
+                    carried -= count as f64;
+                    if count == 0 {
+                        continue;
+                    }
+                    let parent = &self.animals[m.parent];
+                    let (child, body_changed) = parent.genome.mutate_scaled(&mut self.rng, BODY_MUTATION_SCALE);
+                    births.push(Birth { genome: child, patch: parent.patch, lineage: parent.lineage, body_changed, parent_traits: parent.traits, mass0: m.mass0, reserve0: m.reserve0, count });
+                }
             }
         }
         // Resolve deaths and kills.
@@ -2531,8 +2891,8 @@ impl EcoWorld {
         gone.dedup();
         for &i in gone.iter().rev() {
             let a = self.animals.swap_remove(i);
-            self.patches[a.patch].carrion += a.mass * 0.8 + a.reserve.max(0.0);
-            self.stats.deaths += 1;
+            self.patches[a.patch].carrion += (a.mass * 0.8 + a.reserve.max(0.0)) * a.n as f32;
+            self.stats.deaths += a.n as u64;
         }
         // Indices changed: rebuild pending list.
         self.pending.clear();
@@ -2544,29 +2904,24 @@ impl EcoWorld {
         for p in &self.plants {
             plant_counts[p.patch] += 1;
         }
-        // The same density guard for motile organisms: a pond of photosynthetic
-        // sheets a tenth of a milligram each grew by twelve percent a day with
-        // light and nutrient for a hundred million of them (see MODEL.md), far
-        // past what fits in memory as individuals.
-        let mut animal_counts: Vec<usize> = vec![0; n_patches];
-        for a in &self.animals {
-            animal_counts[a.patch] += 1;
-        }
         for b in births {
             let lineage = if b.body_changed && self.rng.gen_bool(0.2) { self.new_lineage() } else { b.lineage };
             if b.genome.motility < 0.5 {
-                // A sessile child: settles where it was born and lives as a plant.
+                // Sessile children: each settles where it was born and lives as
+                // a plant, under the cell's plant cap.
                 let cap = self.plant_cap(b.patch);
-                if plant_counts[b.patch] < cap {
-                    plant_counts[b.patch] += 1;
-                    let mut plant = Plant::new(b.genome, lineage, b.patch, 0.0, 0.0, self.planet.gravity);
-                    plant.biomass = b.mass0.min(plant.body().target_mass).max(2e-7);
-                    plant.energy = b.reserve0;
-                    self.plants.push(plant);
-                    self.stats.animal_to_plant += 1;
-                    self.stats.births += 1;
-                } else {
-                    self.patches[b.patch].carrion += b.mass0;
+                for _ in 0..b.count {
+                    if plant_counts[b.patch] < cap {
+                        plant_counts[b.patch] += 1;
+                        let mut plant = Plant::new(b.genome.clone(), lineage, b.patch, 0.0, 0.0, self.planet.gravity);
+                        plant.biomass = b.mass0.min(plant.body().target_mass).max(2e-7);
+                        plant.energy = b.reserve0;
+                        self.plants.push(plant);
+                        self.stats.animal_to_plant += 1;
+                        self.stats.births += 1;
+                    } else {
+                        self.patches[b.patch].carrion += b.mass0;
+                    }
                 }
                 continue;
             }
@@ -2591,19 +2946,16 @@ impl EcoWorld {
             let traits = self.lookup_traits(&b.genome);
             // Larval dispersal: young drift one or two patches from the parent,
             // which is what keeps them off the parents' menu in the sea.
+            // (The whole cohort of siblings drifts together.)
             let born_at = self.disperse_same_habitat(b.patch, LARVAL_DRIFT_M / patch_w);
-            // A larva drifting onto a full cell does not settle (the cap that
-            // already limits seeds), and its body is carrion there.
-            if animal_counts[born_at] >= self.plant_cap(born_at) {
-                self.patches[born_at].carrion += b.mass0 + b.reserve0.max(0.0);
-                continue;
-            }
-            animal_counts[born_at] += 1;
-            self.animals.push(Animal::new(b.genome, key, traits, born_at, lineage, b.mass0, b.reserve0));
+            let mut child = Animal::new(b.genome, key, traits, born_at, lineage, b.mass0, b.reserve0);
+            child.n = b.count;
+            self.animals.push(child);
             let idx = self.animals.len() - 1;
             self.request_traits(idx);
-            self.stats.births += 1;
+            self.stats.births += b.count as u64;
         }
+        self.merge_cohorts();
 
         self.stats.primary_production = production_today;
         self.stats.grazing_intake = graze_today;
@@ -2648,7 +3000,7 @@ impl EcoWorld {
         let mut s = EcoStats { day: self.day, ..self.stats.clone() };
         s.plants = self.plants.len();
         s.plant_biomass = self.plants.iter().map(|p| p.biomass).sum();
-        s.animals = self.animals.len();
+        s.animals = self.animals.iter().map(|a| a.n as usize).sum();
         s.herbivores = 0;
         s.carnivores = 0;
         s.detritivores = 0;
@@ -2662,15 +3014,15 @@ impl EcoWorld {
         s.mean_detr = 0.0;
         s.mean_mass = 0.0;
         s.mean_parts = 0.0;
-        let na = self.animals.len().max(1) as f32;
+        let na = (self.animals.iter().map(|a| a.n as f32).sum::<f32>()).max(1.0);
         s.land_plants = self.plants.iter().filter(|p| !self.patches[p.patch].water).count();
         s.land_plant_biomass = self.plants.iter().filter(|p| !self.patches[p.patch].water).map(|p| p.biomass).sum();
         s.inland_animals = 0;
         s.inland_mass = 0.0;
         for a in &self.animals {
             if self.patches[a.patch].submersion <= 0.0 {
-                s.inland_animals += 1;
-                s.inland_mass += a.mass;
+                s.inland_animals += a.n as usize;
+                s.inland_mass += a.mass * a.n as f32;
             }
         }
         s.inland_mass /= s.inland_animals.max(1) as f32;
@@ -2690,51 +3042,55 @@ impl EcoWorld {
         s.mean_armour = 0.0;
         s.satiated_frac = 0.0;
         for a in &self.animals {
+            let an = a.n as usize;
+            let w = a.n as f32 / na;
             if a.gut_plant + a.gut_meat >= 0.8 * a.genome.gut_frac.clamp(0.02, 0.4) * a.mass {
-                s.satiated_frac += 1.0 / na;
+                s.satiated_frac += w;
             }
             let (h, c, d) = a.diet();
-            s.mean_gut += a.genome.gut_type / na;
-            s.mean_weapon += a.traits.claws / na;
-            s.mean_armour += a.traits.plating / na;
+            s.mean_gut += a.genome.gut_type * w;
+            s.mean_weapon += a.traits.claws * w;
+            s.mean_armour += a.traits.plating * w;
             let on_land = !self.patches[a.patch].water;
             if c >= h && c >= d {
-                s.carnivores += 1;
+                s.carnivores += an;
             } else if d >= h {
-                s.detritivores += 1;
+                s.detritivores += an;
             } else {
-                s.herbivores += 1;
+                s.herbivores += an;
                 if on_land {
-                    s.land_herbivores += 1;
+                    s.land_herbivores += an;
                 }
             }
             if on_land {
-                s.land_animals += 1;
+                s.land_animals += an;
             } else {
-                s.aquatic += 1;
+                s.aquatic += an;
             }
             s.best_land_speed = s.best_land_speed.max(a.traits.land_speed);
             // Gliding means a glide angle under 45 degrees (ratio >= 1: ten metres
             // beyond the stone from ten metres up). Below that it is parachuting:
             // a tumbling plate drifts a metre or two and is not a glider.
             if a.traits.flap_lift >= 0.5 || a.traits.glide_distance >= crate::sim::AIR_DROP_HEIGHT {
-                s.fliers += 1;
+                s.fliers += an;
             }
             if a.traits.flap_lift >= 0.5 {
-                s.powered += 1;
+                s.powered += an;
             }
             {
                 let mut v = [h, c, d];
                 v.sort_by(|x, y| y.partial_cmp(x).unwrap());
                 if v[1] >= 0.25 {
-                    s.omnivores += 1;
+                    s.omnivores += an;
                 }
             }
-            s.mean_carn += c / na;
-            s.mean_detr += d / na;
-            s.mean_mass += a.mass / na;
-            s.mean_parts += a.genome.structural_size() as f32 / na;
+            s.mean_carn += c * w;
+            s.mean_detr += d * w;
+            s.mean_mass += a.mass * w;
+            s.mean_parts += a.genome.structural_size() as f32 * w;
         }
+        s.cohorts = self.animals.len();
+        s.merge_scale = self.merge_scale;
         let mut pl: Vec<u32> = self.plants.iter().map(|p| p.lineage).collect();
         pl.sort_unstable();
         pl.dedup();
@@ -2858,10 +3214,12 @@ impl EcoWorld {
         let out: Vec<LineageSummary> = map
             .into_iter()
             .map(|(id, idx)| {
-                let c = idx.len() as f32;
-                let mut s = Self::empty_summary(id, "animal", idx.len());
+                let total: usize = idx.iter().map(|&i| self.animals[i].n as usize).sum();
+                let mut s = Self::empty_summary(id, "animal", total);
                 for &i in &idx {
                     let a = &self.animals[i];
+                    // Each record weighs its cohort's count.
+                    let c = total.max(1) as f32 / a.n.max(1) as f32;
                     let (h, ca, d) = a.diet();
                     s.mean_mass += a.mass / c;
                     s.gut += a.genome.gut_type / c;
